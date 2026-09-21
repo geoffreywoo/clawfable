@@ -88,6 +88,7 @@ vi.mock('@/lib/analysis', () => ({
 
 import { captureFollowerSnapshotIfDue, checkPerformance, maybeReanalyze } from '@/lib/performance';
 import { TwitterActionError } from '@/lib/twitter-debug';
+import { getOperatorComparison } from '@/lib/antihunter-measurement';
 
 describe('performance tracking X API failures', () => {
   const agent = {
@@ -280,6 +281,87 @@ describe('performance tracking X API failures', () => {
         reason: expect.stringContaining('X credentials rejected by X during auto re-analysis. Agent disconnected, reconnect in Settings.'),
       }),
     );
+  });
+});
+
+describe('account-5 comparison checkpoint capture', () => {
+  const postedAt = '2026-09-21T12:00:00.000Z';
+  const atHour = (hours: number) => new Date(Date.parse(postedAt) + hours * 60 * 60_000);
+  const agent = { id: '5', handle: 'antihunterai', xUserId: '2019634783962226688',
+    apiKey: 'encoded', apiSecret: 'encoded', accessToken: 'encoded', accessSecret: 'encoded' } as any;
+  const timelineTweet = { id: 'campaign-x', text: 'The invoice parser rejected six backticks.', createdAt: postedAt,
+    likes: 7, retweets: 3, quotes: 2, replies: 1, bookmarks: 1, impressions: 400,
+    publicMetricAvailability: { retweets: true, quotes: true, impressions: true } };
+  let history: any[];
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(atHour(25));
+    vi.stubEnv('AUTOMATION_EXEMPT_AGENT_IDS', '5,13');
+    history = [{ tweetId: 'campaign-draft', xTweetId: timelineTweet.id, content: timelineTweet.text,
+      format: 'observation', topic: 'engineering', postedAt, checkedAt: atHour(18).toISOString(),
+      likes: 1, retweets: 0, quotes: 0, replies: 0, bookmarks: 0, impressions: 100,
+      engagementRate: 1, wasViral: false, source: 'manual', performanceCheckpoint: 'full_24h' }];
+    mocks.getAgentOwnerId.mockResolvedValue('owner');
+    mocks.decodeKeys.mockReturnValue({ appKey: 'key', appSecret: 'secret', accessToken: 'token', accessSecret: 'secret' });
+    mocks.getPerformanceHistory.mockImplementation(async () => [...history]);
+    mocks.addPerformanceEntry.mockImplementation(async (_id, entry) => { history.unshift(structuredClone(entry)); });
+    mocks.getTweets.mockResolvedValue([{ id: 'campaign-draft', agentId: '5', xTweetId: timelineTweet.id,
+      type: 'original', status: 'posted', content: timelineTweet.text, format: 'observation', topic: 'engineering', postedAt }]);
+    mocks.getPostLog.mockResolvedValue([]);
+    mocks.getLearningSignals.mockResolvedValue([]);
+    mocks.getProtocolSettings.mockResolvedValue({ earlyVelocityFollowups: false });
+    mocks.getAnalysis.mockResolvedValue(null);
+    mocks.getFollowerSnapshots.mockImplementation(async () => [{ capturedAt: new Date().toISOString(), followersCount: 100 }]);
+    mocks.getUserTimeline.mockResolvedValue([timelineTweet]);
+  });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
+
+  it('captures a 25h reading after an 18h full_24h checkpoint, once, using only the existing timeline read', async () => {
+    const original = structuredClone(history[0]);
+    expect(await checkPerformance(agent, { timelineLimit: 20, classificationBacklogLimit: 1, captureComparisonWindow: true })).toBe(1);
+    expect(mocks.addPerformanceEntry).toHaveBeenCalledWith('5', expect.objectContaining({
+      xTweetId: timelineTweet.id, postedAt, checkedAt: atHour(25).toISOString(), performanceCheckpoint: 'full_24h',
+      retweets: 3, quotes: 2, impressions: 400,
+    }));
+    expect(history[1]).toEqual(original);
+    vi.setSystemTime(atHour(26));
+    expect(await checkPerformance(agent, { timelineLimit: 20, classificationBacklogLimit: 1, captureComparisonWindow: true })).toBe(0);
+    expect(mocks.addPerformanceEntry).toHaveBeenCalledTimes(1);
+    expect(mocks.getUserTimeline).toHaveBeenCalledTimes(2);
+    expect(mocks.getUserTimeline).toHaveBeenLastCalledWith(expect.any(Object), agent.xUserId, 20, { includePrivateMetrics: true });
+    for (const extra of [mocks.getDeepTimeline, mocks.getAccountPublicMetrics, mocks.lookupTweetAvailability, mocks.createTweet]) expect(extra).not.toHaveBeenCalled();
+    expect(getOperatorComparison(history, timelineTweet.id)).toMatchObject({ eligible: true, repostQuoteRate: 0.0125 });
+  });
+  it('retains unavailable raw counts through storage and never turns a default zero into an observed rate', async () => {
+    mocks.getUserTimeline.mockResolvedValue([{ ...timelineTweet, quotes: 0,
+      publicMetricAvailability: { retweets: true, quotes: false, impressions: true } }]);
+    expect(await checkPerformance(agent, { captureComparisonWindow: true })).toBe(1);
+    expect(history[0].publicMetricAvailability.quotes).toBe(false);
+    expect(getOperatorComparison(history, timelineTweet.id)).toMatchObject({ eligible: false, repostQuoteRate: null });
+  });
+  it.each([
+    { id: '5', enabled: undefined }, { id: '5', enabled: false }, { id: '13', enabled: true },
+  ])('preserves shared checkpoint defaults for account $id with opt-in $enabled', async ({ id, enabled }) => {
+    expect(await checkPerformance({ ...agent, id }, { captureComparisonWindow: enabled })).toBe(0);
+    expect(mocks.addPerformanceEntry).not.toHaveBeenCalled();
+    expect(mocks.getUserTimeline).toHaveBeenCalledTimes(1);
+  });
+  it.each([24, 30])('captures the inclusive %ih boundary even when the prior checkpoint rank is equal', async hours => {
+    vi.setSystemTime(atHour(hours));
+    expect(await checkPerformance(agent, { captureComparisonWindow: true })).toBe(1);
+    expect(mocks.addPerformanceEntry).toHaveBeenCalledWith('5', expect.objectContaining({ checkedAt: atHour(hours).toISOString() }));
+  });
+  it('does not move an observation into the window while later local processing advances time', async () => {
+    vi.setSystemTime(atHour(23.99));
+    mocks.getAnalysis.mockImplementation(async () => { vi.setSystemTime(atHour(25)); return null; });
+    expect(await checkPerformance(agent, { captureComparisonWindow: true })).toBe(0);
+    expect(mocks.addPerformanceEntry).not.toHaveBeenCalled();
+  });
+  it('records the observation time rather than later processing time', async () => {
+    mocks.getAnalysis.mockImplementation(async () => { vi.setSystemTime(atHour(31)); return null; });
+    expect(await checkPerformance(agent, { captureComparisonWindow: true })).toBe(1);
+    expect(mocks.addPerformanceEntry).toHaveBeenCalledWith('5', expect.objectContaining({ checkedAt: atHour(25).toISOString(), performanceCheckpoint: 'full_24h' }));
   });
 });
 

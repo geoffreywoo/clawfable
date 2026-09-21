@@ -15,7 +15,7 @@ import { ANTIHUNTER_AGENT_ID as AGENT_ID, ANTIHUNTER_X_USER_ID as X_USER_ID, ANT
   parseOperatorBrief, validateCampaign, claimBoundedRun, recordContribution, type OperatorSourceBrief } from '../lib/antihunter-operator-state';
 import { withOperatorXBudget, reserveVerification, releaseVerification, recordMediaPricing } from '../lib/antihunter-x-budget';
 import { describeOperatorImage, uploadOperatorImage, verifyOperatorPost, mediaForOperatorTweet } from '../lib/antihunter-media';
-import { isMaturePerformance } from '../lib/performance-signals';
+import { getOperatorComparison, observedAgeHours } from '../lib/antihunter-measurement';
 import type { Tweet } from '../lib/types';
 import { assertOperatorCadence, getOperatorCadence, getOperatorOutbox } from '../lib/antihunter-publication';
 export { assertOperatorCadence } from '../lib/antihunter-publication';
@@ -51,7 +51,7 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
     if (command === 'budget') return summary;
     const [settings, signals, log, performance, tweets, followers] = await Promise.all([
       getProtocolSettings(AGENT_ID), getLearningSignals(AGENT_ID, 30), getPostLog(AGENT_ID, 20),
-      getPerformanceHistory(AGENT_ID, 500), getTweets(AGENT_ID), getFollowerSnapshots(AGENT_ID, 40),
+      getPerformanceHistory(AGENT_ID, 5000), getTweets(AGENT_ID), getFollowerSnapshots(AGENT_ID, 40),
     ]);
     const latest = new Map<string, typeof performance[number]>();
     for (const entry of performance) if (!latest.has(entry.xTweetId) || entry.checkedAt > latest.get(entry.xTweetId)!.checkedAt) latest.set(entry.xTweetId, entry);
@@ -68,8 +68,10 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
         analytics: policy.analytics?.campaigns?.find(c => c.campaignId === campaign.campaignId && c.episodeId === campaign.episodeId) || null,
         posts: tweets.filter(tweet => { const c = parseOperatorBrief(tweet.sourceBrief)?.campaign; return c?.campaignId === campaign.campaignId && c.episodeId === campaign.episodeId; }).map(tweet => {
           const measured = tweet.xTweetId ? latest.get(tweet.xTweetId) : null;
+          const comparison = getOperatorComparison(performance, tweet.xTweetId || '');
           return { id: tweet.id, content: tweet.content, status: tweet.status, xTweetId: tweet.xTweetId, postedAt: tweet.postedAt,
-            performance: measured || null, mature: measured ? isMaturePerformance(measured) : false };
+            performance: measured || null, observedAgeHours: measured ? observedAgeHours(measured) : null,
+            comparison, mature: comparison.snapshot !== null };
         }),
       }; }), performance: [...latest.values()].slice(0, 20) };
   }
@@ -114,7 +116,7 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
     }
     if (command === 'metrics') {
       const { checkPerformance } = await import('../lib/performance');
-      return { tracked: await checkPerformance(agent, { timelineLimit: 20, classificationBacklogLimit: 1 }) };
+      return { tracked: await checkPerformance(agent, { timelineLimit: 20, classificationBacklogLimit: 1, captureComparisonWindow: true }) };
     }
     if (command === 'research') {
       const query = arg('--query');

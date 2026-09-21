@@ -55,6 +55,7 @@ import {
 } from './performance-signals';
 import { canonicalizeLearningTopic, isEligibleForAccountPolicyLearning } from './learning-topic';
 import { isGeoffreyAccount } from './account-taste';
+import { needsComparisonSnapshot } from './antihunter-measurement';
 import { applyVoiceCorpusMetadata, buildVoiceCorpusSnapshot } from './voice-corpus';
 import { classifyAudienceVoiceComplaint } from './audience-feedback';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
@@ -714,6 +715,8 @@ async function createVelocityFollowupDraft(
 export interface CheckPerformanceOptions {
   timelineLimit?: number;
   classificationBacklogLimit?: number;
+  /** Account 5 only: retain one raw 24–30h observation from the existing read. */
+  captureComparisonWindow?: boolean;
 }
 
 const FOLLOWER_SNAPSHOT_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -745,6 +748,7 @@ export async function checkPerformance(
   agent: Agent,
   options: CheckPerformanceOptions = {},
 ): Promise<number> {
+  const captureComparisonWindow = agent.id === '5' && options.captureComparisonWindow === true;
   await assertAgentAutomationEntitlement(agent.id, { agent });
   if (!agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret || !agent.xUserId) {
     return 0;
@@ -830,6 +834,7 @@ export async function checkPerformance(
     return 0;
   }
 
+  const timelineObservedAt = new Date().toISOString();
   // Build a map of our Clawfable-posted tweets for source detection
   const allTweets = await getTweets(agent.id);
   const ourXIds = new Set(allTweets.filter((t) => t.xTweetId).map((t) => String(t.xTweetId)));
@@ -855,7 +860,7 @@ export async function checkPerformance(
   // Collect new checkpoints plus bounded classification and metric-migration
   // backlogs. Fresh snapshots let later runs move through old rows without
   // reprocessing already migrated posts.
-  const checkedAtForRun = new Date().toISOString();
+  const checkedAtForRun = captureComparisonWindow ? timelineObservedAt : new Date().toISOString();
   const classificationBacklog = selectTweetClassificationBacklog(
     timeline,
     latestByXId,
@@ -871,6 +876,7 @@ export async function checkPerformance(
   const newTweets = timeline.filter((tweet) => (
     classificationBacklogIds.has(String(tweet.id))
     || directMetricBackfillIds.has(String(tweet.id))
+    || (captureComparisonWindow && needsComparisonSnapshot(existing, String(tweet.id), tweet.createdAt, checkedAtForRun))
     || shouldTrackPerformanceCheckpoint(latestByXId.get(String(tweet.id)), tweet.createdAt, checkedAtForRun)
   ));
 
@@ -914,7 +920,7 @@ export async function checkPerformance(
       featureTags: inferredFeatures,
       content: timelineTweet.text,
     });
-    const checkedAt = new Date().toISOString();
+    const checkedAt = captureComparisonWindow ? checkedAtForRun : new Date().toISOString();
     const performanceCheckpoint = inferPerformanceCheckpoint(timelineTweet.createdAt, checkedAt);
 
     const entry: TweetPerformance = {
@@ -937,6 +943,7 @@ export async function checkPerformance(
       bookmarks: timelineTweet.bookmarks ?? 0,
       profileClicks: timelineTweet.profileClicks ?? null,
       impressions: timelineTweet.impressions ?? 0,
+      ...(captureComparisonWindow ? { publicMetricAvailability: timelineTweet.publicMetricAvailability ?? null } : {}),
       engagementRate,
       wasViral: timelineTweet.likes >= viralThreshold,
       source: isOurs

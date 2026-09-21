@@ -1359,6 +1359,8 @@ export interface TweetPerformance {
   bookmarks?: number;
   profileClicks?: number | null;  // non_public_metrics.user_profile_clicks; null when the API tier does not serve it
   impressions: number;
+  /** Raw API availability for operator comparisons; absent legacy data is unknown. */
+  publicMetricAvailability?: { retweets: boolean; quotes: boolean; impressions: boolean } | null;
   engagementRate: number;  // (likes+RTs+replies+quotes+bookmarks) / impressions when available
   wasViral: boolean;       // exceeded the viral threshold
   source: 'autopilot' | 'manual' | 'timeline';  // timeline = tracked from full X timeline

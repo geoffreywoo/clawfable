@@ -471,6 +471,20 @@ function completeTweetText(tweet: any): string {
   return noteText || String(tweet?.text || '');
 }
 
+export interface PublicMetricAvailability {
+  retweets: boolean;
+  quotes: boolean;
+  impressions: boolean;
+}
+
+/** Preserve original provider-field coverage before legacy zero normalization. */
+function publicMetricAvailability(metrics: unknown): PublicMetricAvailability {
+  const values = metrics && typeof metrics === 'object' && !Array.isArray(metrics) ? metrics as Record<string, unknown> : {};
+  const suppliedCount = (key: string) => Object.hasOwn(values, key)
+    && typeof values[key] === 'number' && Number.isSafeInteger(values[key]) && values[key] >= 0;
+  return { retweets: suppliedCount('retweet_count'), quotes: suppliedCount('quote_count'), impressions: suppliedCount('impression_count') };
+}
+
 /**
  * Fetch user's recent tweets with engagement metrics.
  */
@@ -490,6 +504,7 @@ export async function getUserTimeline(
     impressions: number;
     quotes: number;
     bookmarks: number;
+    publicMetricAvailability?: PublicMetricAvailability;
     profileClicks?: number | null;
     referenceType?: TimelineSourceMetadata['referenceType'];
     referencedTweetId?: string | null;
@@ -536,6 +551,7 @@ export async function getUserTimeline(
       impressions: tweet.public_metrics?.impression_count ?? 0,
       quotes: tweet.public_metrics?.quote_count ?? 0,
       bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+      publicMetricAvailability: publicMetricAvailability(tweet.public_metrics),
       profileClicks: typeof tweet.non_public_metrics?.user_profile_clicks === 'number'
         ? tweet.non_public_metrics.user_profile_clicks
         : null,
@@ -705,6 +721,7 @@ type TimelineTweet = {
   impressions: number;
   quotes: number;
   bookmarks: number;
+  publicMetricAvailability?: PublicMetricAvailability;
 } & TimelineSourceMetadata;
 
 /**
@@ -748,6 +765,7 @@ export async function getDeepTimeline(
           impressions: tweet.public_metrics?.impression_count ?? 0,
           quotes: tweet.public_metrics?.quote_count ?? 0,
           bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
+          publicMetricAvailability: publicMetricAvailability(tweet.public_metrics),
           ...timelineSourceMetadata(tweet),
         });
       }

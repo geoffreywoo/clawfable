@@ -194,6 +194,45 @@ describe('getLatestTwitterTweetIdCursor', () => {
 });
 
 describe('timeline source metadata', () => {
+  describe.each([
+    ['recent', getUserTimeline], ['deep', getDeepTimeline],
+  ] as const)('%s timeline public metric availability', (_label, readTimeline) => {
+    it('distinguishes an omitted quote count from an observed zero without changing normalized counts', async () => {
+      mocks.userTimeline.mockResolvedValue({ data: { data: [
+        { id: 'missing-quote', text: 'A quote field is absent.', public_metrics: { retweet_count: 3, impression_count: 100 } },
+        { id: 'observed-zero', text: 'Zero is observed.', public_metrics: { retweet_count: 0, quote_count: 0, impression_count: 0 } },
+      ], meta: {} }, done: true });
+      const rows = await readTimeline(keys, 'user-1', 20);
+      expect(rows[0]).toMatchObject({ retweets: 3, quotes: 0, impressions: 100,
+        publicMetricAvailability: { retweets: true, quotes: false, impressions: true } });
+      expect(rows[1]).toMatchObject({ retweets: 0, quotes: 0, impressions: 0,
+        publicMetricAvailability: { retweets: true, quotes: true, impressions: true } });
+      expect(mocks.userTimeline).toHaveBeenCalledTimes(1);
+    });
+    it('marks all counts unavailable when public_metrics is missing or empty', async () => {
+      mocks.userTimeline.mockResolvedValue({ data: { data: [
+        { id: 'missing-metrics', text: 'The whole field is absent.' },
+        { id: 'empty-metrics', text: 'The field is empty.', public_metrics: {} },
+      ], meta: {} }, done: true });
+      const rows = await readTimeline(keys, 'user-1', 20);
+      for (const row of rows) expect(row).toMatchObject({ retweets: 0, quotes: 0, impressions: 0,
+        publicMetricAvailability: { retweets: false, quotes: false, impressions: false } });
+      expect(mocks.userTimeline).toHaveBeenCalledTimes(1);
+    });
+    it('accepts only original nonnegative safe integer fields as available', async () => {
+      const invalid = [null, '0', -1, 0.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity];
+      mocks.userTimeline.mockResolvedValue({ data: { data: invalid.map((value, index) => ({
+        id: String(index), text: 'Malformed metric.', public_metrics: { retweet_count: value, quote_count: value, impression_count: value },
+      })), meta: {} }, done: true });
+      const rows = await readTimeline(keys, 'user-1', 20);
+      for (const row of rows) expect(row.publicMetricAvailability).toEqual({ retweets: false, quotes: false, impressions: false });
+      // Existing callers still receive the same normalized value; availability
+      // lets the account-5 comparison reject it without changing shared behavior.
+      expect(rows[0].quotes).toBe(0);
+      expect(rows[2].retweets).toBe(-1);
+      expect(mocks.userTimeline).toHaveBeenCalledTimes(1);
+    });
+  });
   it('paginates the operator timeline up to the requested 300-post bound', async () => {
     const tweets = [{
       id: 'page-1',
@@ -481,6 +520,7 @@ describe('getDeepTimeline', () => {
         impressions: 1000,
         quotes: 1,
         bookmarks: 8,
+        publicMetricAvailability: { retweets: true, quotes: true, impressions: true },
         referenceType: null,
         referencedTweetId: null,
         hasMedia: false,
