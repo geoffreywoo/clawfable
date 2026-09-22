@@ -58,7 +58,17 @@ attachment verification first. Background metrics and research each claim a
 six-hour interval atomically, including failed runs; stored reports are free of
 X requests. Thirty-minute wakes do not increase publishing or read limits.
 
-The `budget` and `report` commands are read-only. Additional JSON-file commands:
+The `budget` and `report` commands are read-only. `report.operatorOriginals`
+includes campaign-free and later-deleted originals, with latest performance
+separate from the earliest raw 24–30-hour comparison. `editorialSeries` is read
+only from a leading draft-thesis declaration, `Editorial series: NAME.` or
+`Editorial series assigned before publication: NAME.`. Supported names are
+`The $30 Machine`, `Expensive Humans`, and `Receipts Court`; provenance is
+`sourceBrief.thesis`. Missing or unrecognized declarations remain null. Generic
+format, topic, post text and measured outcomes never supply a series. No source
+records are rewritten or private thesis text exported.
+
+Additional JSON-file commands:
 
 ```sh
 node --env-file=/absolute/path/to/clawfable.production.env node_modules/tsx/dist/cli.mjs scripts/operator-antihunter.ts campaign --file campaign.json

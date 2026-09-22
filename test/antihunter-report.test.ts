@@ -32,7 +32,7 @@ describe('Anti Hunter report originals projection', () => {
       comparison: { snapshot: satireEarly, observedAgeHours: 25, repostQuoteRate: 0.03, eligible: true } });
     expect(rows[1]).toMatchObject({ id: '2', format: 'data_point', campaign, performance: artifactLatest, observedAgeHours: 49,
       comparison: { snapshot: artifactEarly, observedAgeHours: 24, repostQuoteRate: 0.05, eligible: true } });
-    expect(rows[0]).not.toHaveProperty('editorialSeries');
+    expect(rows[0]).toMatchObject({ editorialSeries: null, editorialSeriesSource: null });
     expect(JSON.stringify({ tweets: [satire, artifact], history })).toBe(before);
   });
   it('retains posts later deleted or quarantined when a published X ID exists', () => {
@@ -66,5 +66,36 @@ describe('Anti Hunter report originals projection', () => {
     expect(getOperatorOriginals([post], [])[0].campaign).not.toHaveProperty('privateField');
     const invalid = { ...post, sourceBrief: { operator: 'codex', sources: [], campaign: { ...campaign, landingPath: '//elsewhere.test' } } as any };
     expect(getOperatorOriginals([invalid], [])[0].campaign).toBeNull();
+  });
+  it('projects only explicit allowlisted series declarations and their provenance', () => {
+    const declarations = [
+      ['Editorial series: The $30 Machine. Hypothesis: a useful result.', 'The $30 Machine'],
+      ['Editorial series: Expensive Humans. Hypothesis: an original joke.', 'Expensive Humans'],
+      ['Editorial series assigned before publication: Receipts Court. Hypothesis: a tested claim.', 'Receipts Court'],
+      ['  Editorial series: Receipts Court  ', 'Receipts Court'],
+    ];
+    for (const [thesis, editorialSeries] of declarations) {
+      for (const encoded of [true, false]) {
+        const brief = { operator: 'codex', sources: ['VOICE.md'], thesis, privateField: 'private note' };
+        const post = tweet('1', { sourceBrief: (encoded ? JSON.stringify(brief) : brief) as any });
+        const before = JSON.stringify(post);
+        const row = getOperatorOriginals([post], [sample(post, 25)])[0];
+        expect(row).toMatchObject({ editorialSeries, editorialSeriesSource: 'sourceBrief.thesis' });
+        expect(row).not.toHaveProperty('thesis');
+        expect(row).not.toHaveProperty('privateField');
+        expect(JSON.stringify(post)).toBe(before);
+      }
+    }
+  });
+  it('keeps unrecorded or ambiguous series unknown even when copy, campaign or performance names one', () => {
+    const theses = [null, 7, {}, 'Expensive Humans', 'A discussion of Editorial series: Receipts Court.',
+      'Editorial series: Unknown.', 'Editorial series: Receipts Courtroom.',
+      'Editorial series: Expensive Humans or Receipts Court.', 'Editorial series: Expensive HumansExtra'];
+    for (const thesis of theses) {
+      const post = tweet('1', { content: 'The $30 Machine', format: 'data_point', topic: 'Receipts Court',
+        sourceBrief: JSON.stringify({ operator: 'codex', sources: ['VOICE.md'], thesis, campaign }) });
+      expect(getOperatorOriginals([post], [sample(post, 25, { thesis: 'Editorial series: Expensive Humans.' })])[0])
+        .toMatchObject({ editorialSeries: null, editorialSeriesSource: null });
+    }
   });
 });
