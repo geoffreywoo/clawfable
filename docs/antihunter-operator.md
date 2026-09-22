@@ -28,12 +28,16 @@ Externally composed drafts are marked `operator_written` with an explicit Codex
 operator rationale, never represented as human-authored examples or fabricated
 V2 generations. Exact duplicate drafts reuse the existing record.
 
-Publishing is limited to four originals per rolling day and at least six hours
-between originals. It persists a dispatch marker before calling the shared
-posting service. A pending/uncertain/failed dispatch cannot be blindly retried;
-reconcile the X account and Clawfable receipts first. The verify command reopens
-the exact X post via the official API and checks its author, content, and stored
-learning signal. Existing reply emergency protections remain in effect.
+Publishing follows readiness and budget: no fixed original-post target, daily
+count cap, minimum spacing, posting window or per-cycle cap. It persists a
+dispatch marker before calling the shared posting service. A pending or uncertain
+dispatch cannot be blindly retried; reconcile the X account and Clawfable receipts
+first. The verify command reopens the exact X post via the official API and checks
+its author, content, attachments and stored learning signal. Account 5 has a scoped
+reply path that replaces the old emergency hold; owner authorization and recorded
+written X approval are separate requirements. Verified parent context, one response
+per incoming interaction, opt-outs and duplicate protection remain mandatory.
+Other accounts retain their existing policy.
 
 The authorized normal allocation is **$30/Pacific day**: AI $24, X $4, analytics
 $1 soft target, contingency $1. A same-day recorded exception permits **$50**:
@@ -56,7 +60,8 @@ counts; failed/uncertain requests retain the full reservation. No discount for
 owned reads or deduplication is assumed. Publication reserves its author/text/
 attachment verification first. Background metrics and research each claim a
 six-hour interval atomically, including failed runs; stored reports are free of
-X requests. Thirty-minute wakes do not increase publishing or read limits.
+X requests. Thirty-minute wakes do not increase the spending allowance or the
+six-hour research and metrics cadence.
 
 The `budget` and `report` commands are read-only. `report.operatorOriginals`
 includes campaign-free and later-deleted originals, with latest performance
@@ -67,6 +72,17 @@ only from a leading draft-thesis declaration, `Editorial series: NAME.` or
 `sourceBrief.thesis`. Missing or unrecognized declarations remain null. Generic
 format, topic, post text and measured outcomes never supply a series. No source
 records are rewritten or private thesis text exported.
+
+The account-5 metrics opt-in normally reads the latest 20 originals. During that
+same six-hour refresh, it may make one additional official batch lookup of at
+most 20 known operator originals missing from that timeline and due for their
+first raw 24–30-hour observation. Oldest windows are selected first. The existing
+X budget reserves this lookup; no read happens when nothing is due. Returned IDs,
+author, original-post type and provider timestamps are checked before use. Each
+recovered row keeps its own post-response observation time, so a late response
+cannot be backdated into the window. Missing, erroneous or unreturned posts stay
+unknown; the recovery lookup does not retry or infer deletion. Existing raw
+snapshots and other accounts' collection paths remain unchanged.
 
 Additional JSON-file commands:
 

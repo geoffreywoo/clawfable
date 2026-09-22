@@ -56,6 +56,7 @@ import {
 import { canonicalizeLearningTopic, isEligibleForAccountPolicyLearning } from './learning-topic';
 import { isGeoffreyAccount } from './account-taste';
 import { needsComparisonSnapshot } from './antihunter-measurement';
+import { recoverOperatorComparisonMetrics, type ComparisonRecovery } from './antihunter-metric-recovery';
 import { applyVoiceCorpusMetadata, buildVoiceCorpusSnapshot } from './voice-corpus';
 import { classifyAudienceVoiceComplaint } from './audience-feedback';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
@@ -715,7 +716,7 @@ async function createVelocityFollowupDraft(
 export interface CheckPerformanceOptions {
   timelineLimit?: number;
   classificationBacklogLimit?: number;
-  /** Account 5 only: retain one raw 24–30h observation from the existing read. */
+  /** Account 5 only: retain raw 24–30h observations, with one bounded missing-ID batch. */
   captureComparisonWindow?: boolean;
 }
 
@@ -837,6 +838,19 @@ export async function checkPerformance(
   const timelineObservedAt = new Date().toISOString();
   // Build a map of our Clawfable-posted tweets for source detection
   const allTweets = await getTweets(agent.id);
+  const recovery: ComparisonRecovery = captureComparisonWindow
+    ? await recoverOperatorComparisonMetrics(agent, keys, allTweets, existing, new Set(timeline.map(tweet => String(tweet.id))))
+    : { requestedIds: [], deferredIds: [], observations: [], unknownIds: [], error: null };
+  const recoveryIds = new Set([...recovery.requestedIds, ...recovery.deferredIds]);
+  const observationTimes = new Map(recovery.observations.map(row => [row.tweet.id, row.checkedAt] as const));
+  if (recovery.unknownIds.length || recovery.deferredIds.length) {
+    await addPostLogEntry(agent.id, {
+      agentId: agent.id, tweetId: '', xTweetId: '', content: '',
+      format: 'operator_comparison_recovery_unknown', topic: 'measurement', postedAt: new Date().toISOString(), source: 'manual',
+      action: recovery.error ? 'error' : 'skipped',
+      reason: `Comparison recovery: ${recovery.error || 'bounded_lookup'}; ${recovery.unknownIds.length}/${recovery.requestedIds.length} requested IDs remain unknown: ${recovery.unknownIds.join(',') || 'none'}. Deferred by the 20-ID limit: ${recovery.deferredIds.join(',') || 'none'}. No retry or removal inference.`,
+    }).catch(() => null);
+  }
   const ourXIds = new Set(allTweets.filter((t) => t.xTweetId).map((t) => String(t.xTweetId)));
   const ourTweetMap = new Map(allTweets.filter((t) => t.xTweetId).map((t) => [String(t.xTweetId), t]));
   const followupTargets = new Set(
@@ -873,11 +887,12 @@ export async function checkPerformance(
     latestByXId,
     classificationBacklogLimit,
   ).map((tweet) => String(tweet.id)));
-  const newTweets = timeline.filter((tweet) => (
+  const observationTime = (tweet: { id: string }) => observationTimes.get(String(tweet.id)) || checkedAtForRun;
+  const newTweets = [...timeline, ...recovery.observations.map(row => row.tweet)].filter((tweet) => (
     classificationBacklogIds.has(String(tweet.id))
     || directMetricBackfillIds.has(String(tweet.id))
-    || (captureComparisonWindow && needsComparisonSnapshot(existing, String(tweet.id), tweet.createdAt, checkedAtForRun))
-    || shouldTrackPerformanceCheckpoint(latestByXId.get(String(tweet.id)), tweet.createdAt, checkedAtForRun)
+    || (captureComparisonWindow && needsComparisonSnapshot(existing, String(tweet.id), tweet.createdAt, observationTime(tweet)))
+    || shouldTrackPerformanceCheckpoint(latestByXId.get(String(tweet.id)), tweet.createdAt, observationTime(tweet))
   ));
 
   const classificationChunks = Array.from(
@@ -920,7 +935,7 @@ export async function checkPerformance(
       featureTags: inferredFeatures,
       content: timelineTweet.text,
     });
-    const checkedAt = captureComparisonWindow ? checkedAtForRun : new Date().toISOString();
+    const checkedAt = captureComparisonWindow ? observationTime(timelineTweet) : new Date().toISOString();
     const performanceCheckpoint = inferPerformanceCheckpoint(timelineTweet.createdAt, checkedAt);
 
     const entry: TweetPerformance = {
@@ -988,7 +1003,7 @@ export async function checkPerformance(
     entry.earlyVelocityScore = computeEarlyVelocityScore(entry);
 
     await addPerformanceEntry(agent.id, entry);
-    if (settings.earlyVelocityFollowups !== false && !followupTargets.has(String(entry.xTweetId)) && shouldCreateVelocityFollowup(entry)) {
+    if (!recoveryIds.has(String(entry.xTweetId)) && settings.earlyVelocityFollowups !== false && !followupTargets.has(String(entry.xTweetId)) && shouldCreateVelocityFollowup(entry)) {
       await createVelocityFollowupDraft(agent, entry, allTweets);
       followupTargets.add(String(entry.xTweetId));
     }
@@ -997,7 +1012,10 @@ export async function checkPerformance(
 
   // Reconciliation runs even when no new metric checkpoint is due. Timeline
   // absence never produces negative learning without independent verification.
-  await reconcileXRemovals(agent, keys, allTweets, new Set(timeline.map((tweet) => String(tweet.id))), signals);
+  // A missing/failed recovery row is unknown, never a removal signal or an
+  // invitation to retry the same ID through the independent deletion checker.
+  await reconcileXRemovals(agent, keys, allTweets.filter(tweet => !recoveryIds.has(String(tweet.xTweetId))),
+    new Set(timeline.map((tweet) => String(tweet.id))), signals);
 
   return tracked;
 }

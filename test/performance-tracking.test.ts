@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   getFollowerSnapshots: vi.fn(),
   addFollowerSnapshot: vi.fn(),
   getUserTimeline: vi.fn(),
+  batchTweets: vi.fn(),
   getDeepTimeline: vi.fn(),
   decodeKeys: vi.fn(),
   getFollowing: vi.fn(),
@@ -74,6 +75,7 @@ vi.mock('@/lib/kv-storage', () => ({
 }));
 
 vi.mock('@/lib/twitter-client', () => ({
+  createClient: () => ({ v2: { tweets: mocks.batchTweets } }),
   getUserTimeline: mocks.getUserTimeline,
   getDeepTimeline: mocks.getDeepTimeline,
   decodeKeys: mocks.decodeKeys,
@@ -121,6 +123,7 @@ describe('performance tracking X API failures', () => {
     mocks.getPerformanceHistory.mockResolvedValue([]);
     mocks.getTweets.mockResolvedValue([]);
     mocks.getPostLog.mockResolvedValue([]);
+    mocks.addPostLogEntry.mockResolvedValue(undefined);
     mocks.getLearningSignals.mockResolvedValue([]);
     mocks.getProtocolSettings.mockResolvedValue({});
     mocks.getAnalysis.mockResolvedValue(null);
@@ -330,7 +333,7 @@ describe('account-5 comparison checkpoint capture', () => {
     expect(mocks.addPerformanceEntry).toHaveBeenCalledTimes(1);
     expect(mocks.getUserTimeline).toHaveBeenCalledTimes(2);
     expect(mocks.getUserTimeline).toHaveBeenLastCalledWith(expect.any(Object), agent.xUserId, 20, { includePrivateMetrics: true });
-    for (const extra of [mocks.getDeepTimeline, mocks.getAccountPublicMetrics, mocks.lookupTweetAvailability, mocks.createTweet]) expect(extra).not.toHaveBeenCalled();
+    for (const extra of [mocks.getDeepTimeline, mocks.getAccountPublicMetrics, mocks.lookupTweetAvailability, mocks.createTweet, mocks.batchTweets]) expect(extra).not.toHaveBeenCalled();
     expect(getOperatorComparison(history, timelineTweet.id)).toMatchObject({ eligible: true, repostQuoteRate: 0.0125 });
   });
   it('retains unavailable raw counts through storage and never turns a default zero into an observed rate', async () => {
@@ -362,6 +365,93 @@ describe('account-5 comparison checkpoint capture', () => {
     mocks.getAnalysis.mockImplementation(async () => { vi.setSystemTime(atHour(31)); return null; });
     expect(await checkPerformance(agent, { captureComparisonWindow: true })).toBe(1);
     expect(mocks.addPerformanceEntry).toHaveBeenCalledWith('5', expect.objectContaining({ checkedAt: atHour(25).toISOString(), performanceCheckpoint: 'full_24h' }));
+  });
+
+  function recoveryFixture(timelineCount = 1) {
+    const dueId = '2102062413180997866';
+    const recentAt = atHour(24).toISOString();
+    const recent = Array.from({ length: timelineCount }, (_, n) => ({ ...timelineTweet,
+      id: String(BigInt('2102400000000000000') + BigInt(n)), createdAt: recentAt }));
+    const known = (xTweetId: string, date: string, index: number) => ({ id: `known-${index}`, agentId: '5', xTweetId,
+      type: 'original', status: 'posted', content: 'An original', contentProvenance: 'operator_written',
+      sourceBrief: JSON.stringify({ operator: 'codex', sources: ['VOICE.md'] }), format: 'observation', topic: 'engineering', postedAt: date });
+    const tweets = [...recent.map((row, index) => known(row.id, row.createdAt, index)), known(dueId, postedAt, 21)];
+    history[0] = { ...history[0], tweetId: 'known-21', xTweetId: dueId };
+    mocks.getTweets.mockResolvedValue(tweets);
+    mocks.getUserTimeline.mockResolvedValue(recent);
+    mocks.addPostLogEntry.mockResolvedValue(undefined);
+    mocks.batchTweets.mockResolvedValue({ data: [{ id: dueId, author_id: agent.xUserId, created_at: postedAt,
+      text: 'The original outside the latest20.', public_metrics: { like_count: 2, retweet_count: 1, quote_count: 0, impression_count: 100 } }] });
+    return { dueId, recent, tweets };
+  }
+
+  it('recovers the due21st original with one batch without broadening timeline20 or modifying the old snapshot', async () => {
+    const { dueId, recent } = recoveryFixture(20);
+    const oldSnapshot = structuredClone(history[0]);
+    expect(await checkPerformance(agent, { timelineLimit: 20, classificationBacklogLimit: 1, captureComparisonWindow: true })).toBe(21);
+    expect(mocks.getUserTimeline).toHaveBeenCalledWith(expect.anything(), agent.xUserId, 20, { includePrivateMetrics: true });
+    expect(mocks.batchTweets).toHaveBeenCalledOnce();
+    expect(mocks.batchTweets.mock.calls[0][0]).toEqual([dueId]);
+    expect(history.find(row => row.checkedAt === oldSnapshot.checkedAt && row.xTweetId === dueId)).toEqual(oldSnapshot);
+    expect(getOperatorComparison(history, dueId)).toMatchObject({ observedAgeHours: 25, eligible: true, repostQuoteRate: 0.01 });
+    for (const row of recent) expect(history.some(entry => entry.xTweetId === row.id)).toBe(true);
+    expect(mocks.lookupTweetAvailability).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).not.toHaveBeenCalled();
+    expect(mocks.createTweet).not.toHaveBeenCalled();
+  });
+  it.each(['missing', 'failure'])('keeps successful timeline observations and unknown recovery on %s without removal retries', async outcome => {
+    const { dueId, recent } = recoveryFixture();
+    if (outcome === 'failure') mocks.batchTweets.mockRejectedValue(new Error('private provider error'));
+    else mocks.batchTweets.mockResolvedValue({ errors: [{ value: dueId }] });
+    expect(await checkPerformance(agent, { timelineLimit: 20, classificationBacklogLimit: 1, captureComparisonWindow: true })).toBe(1);
+    expect(history.some(row => row.xTweetId === recent[0].id)).toBe(true);
+    expect(getOperatorComparison(history, dueId).snapshot).toBeNull();
+    expect(mocks.batchTweets).toHaveBeenCalledOnce();
+    expect(mocks.lookupTweetAvailability).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).not.toHaveBeenCalled();
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith('5', expect.objectContaining({
+      format: 'operator_comparison_recovery_unknown', reason: expect.stringContaining(dueId),
+    }));
+    expect(JSON.stringify(mocks.addPostLogEntry.mock.calls)).not.toContain('private provider error');
+  });
+  it('does not backdate recovered rows across30h while retaining the original timeline observation time', async () => {
+    const { dueId, recent } = recoveryFixture();
+    vi.setSystemTime(atHour(29.999));
+    mocks.batchTweets.mockImplementation(async () => {
+      vi.setSystemTime(atHour(30.001));
+      return { data: [{ id: dueId, author_id: agent.xUserId, created_at: postedAt, text: 'Recovered later.',
+        public_metrics: { retweet_count: 0, quote_count: 0, impression_count: 100 } }] };
+    });
+    expect(await checkPerformance(agent, { timelineLimit: 20, classificationBacklogLimit: 1, captureComparisonWindow: true })).toBe(2);
+    expect(history.find(row => row.xTweetId === dueId && row.checkedAt !== atHour(18).toISOString()))
+      .toMatchObject({ checkedAt: atHour(30.001).toISOString(), performanceCheckpoint: 'late' });
+    expect(history.find(row => row.xTweetId === recent[0].id).checkedAt).toBe(atHour(29.999).toISOString());
+    expect(getOperatorComparison(history, dueId).snapshot).toBeNull();
+  });
+  it('stores missing recovered raw metric coverage as unknown rather than a zero rate', async () => {
+    const { dueId } = recoveryFixture();
+    mocks.batchTweets.mockResolvedValue({ data: [{ id: dueId, author_id: agent.xUserId, created_at: postedAt,
+      text: 'Public metrics omitted quotes.', public_metrics: { retweet_count: 0, impression_count: 100 } }] });
+    await checkPerformance(agent, { captureComparisonWindow: true });
+    expect(history[0]).toMatchObject({ xTweetId: dueId, quotes: 0,
+      publicMetricAvailability: { retweets: true, quotes: false, impressions: true } });
+    expect(getOperatorComparison(history, dueId)).toMatchObject({ snapshot: expect.any(Object), eligible: false, repostQuoteRate: null });
+  });
+  it('logs due overflow and excludes both requested and deferred IDs from removal reconciliation', async () => {
+    const { tweets } = recoveryFixture();
+    const due = Array.from({ length: 23 }, (_, index) => ({ ...tweets[1], id: `due-${index}`,
+      xTweetId: String(BigInt('2102000000000000000') + BigInt(index)), status: index === 0 ? 'deleted_from_x' : 'posted' }));
+    mocks.getTweets.mockResolvedValue(due);
+    mocks.getUserTimeline.mockResolvedValue([]);
+    mocks.batchTweets.mockResolvedValue({ data: [] });
+    expect(await checkPerformance(agent, { timelineLimit: 20, classificationBacklogLimit: 1, captureComparisonWindow: true })).toBe(0);
+    expect(mocks.batchTweets).toHaveBeenCalledOnce();
+    expect(mocks.batchTweets.mock.calls[0][0]).toHaveLength(20);
+    expect(mocks.lookupTweetAvailability).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).not.toHaveBeenCalled();
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith('5', expect.objectContaining({
+      reason: expect.stringContaining(`Deferred by the 20-ID limit: ${due.slice(20).map(row => row.xTweetId).join(',')}`),
+    }));
   });
 });
 
