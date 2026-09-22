@@ -254,6 +254,43 @@ describe('timeline source metadata', () => {
     expect(timeline.map((tweet) => tweet.id)).toEqual(['page-1', 'page-2', 'page-3']);
   });
 
+  it.each(['tweets', 'data'] as const)('singlePage retains an underfilled %s page without fetching older posts', async shape => {
+    const tweets = [{ id: 'only-row', text: 'A current observation.', created_at: '2026-09-22T12:00:00.000Z', public_metrics: {} }];
+    const fetchLast = vi.fn();
+    mocks.userTimeline.mockResolvedValue({ ...(shape === 'tweets' ? { tweets } : {}),
+      data: { data: tweets, meta: { next_token: 'older-page' } }, done: false, fetchLast });
+    const rows = await getUserTimeline(keys, 'user-1', 20, { singlePage: true });
+    expect(rows.map(row => row.id)).toEqual(['only-row']);
+    expect(fetchLast).not.toHaveBeenCalled();
+    expect(mocks.userTimeline).toHaveBeenCalledOnce();
+    expect(mocks.userTimeline).toHaveBeenCalledWith('user-1', expect.objectContaining({ max_results: 20 }));
+  });
+
+  it('singlePage bounds returned rows and preserves the private-field fallback without pagination', async () => {
+    const tweets = Array.from({ length: 25 }, (_, n) => ({ id: String(n), text: 'A bounded row.', public_metrics: {} }));
+    const fetchLast = vi.fn();
+    mocks.userTimeline.mockRejectedValueOnce({ code: 403, data: { title: 'Forbidden' } })
+      .mockResolvedValueOnce({ tweets, data: { data: tweets }, done: false, fetchLast });
+    const rows = await getUserTimeline(keys, 'user-1', 20, { includePrivateMetrics: true, singlePage: true });
+    expect(rows).toHaveLength(20);
+    expect(rows.map(row => row.id)).toEqual(tweets.slice(0, 20).map(row => row.id));
+    expect(mocks.userTimeline).toHaveBeenCalledTimes(2);
+    expect(mocks.userTimeline.mock.calls.every(([, query]) => query.max_results === 20)).toBe(true);
+    expect(mocks.userTimeline.mock.calls[0][1]['tweet.fields']).toContain('non_public_metrics');
+    expect(mocks.userTimeline.mock.calls[1][1]['tweet.fields']).not.toContain('non_public_metrics');
+    expect(fetchLast).not.toHaveBeenCalled();
+  });
+
+  it('singlePage does not fill a partial public fallback page', async () => {
+    const tweets = [{ id: 'fallback-row', text: 'Public metrics only.', public_metrics: { quote_count: 0 } }];
+    const fetchLast = vi.fn();
+    mocks.userTimeline.mockRejectedValueOnce({ code: 403, data: { title: 'Forbidden' } })
+      .mockResolvedValueOnce({ tweets, data: { data: tweets }, done: false, fetchLast });
+    expect(await getUserTimeline(keys, 'user-1', 20, { includePrivateMetrics: true, singlePage: true })).toHaveLength(1);
+    expect(mocks.userTimeline).toHaveBeenCalledTimes(2);
+    expect(fetchLast).not.toHaveBeenCalled();
+  });
+
   it('uses complete note-tweet text and preserves reference/media provenance', async () => {
     mocks.userTimeline.mockResolvedValue({
       data: {

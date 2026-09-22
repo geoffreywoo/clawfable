@@ -492,7 +492,7 @@ export async function getUserTimeline(
   keys: TwitterKeys,
   userId: string,
   maxResults = 100,
-  options: { includePrivateMetrics?: boolean } = {},
+  options: { includePrivateMetrics?: boolean; singlePage?: boolean } = {},
 ): Promise<
   Array<{
     id: string;
@@ -533,7 +533,7 @@ export async function getUserTimeline(
     const initialTweets = Array.isArray((result as any).tweets)
       ? (result as any).tweets
       : (result.data.data || []);
-    if (initialTweets.length < totalLimit && !(result as any).done && typeof (result as any).fetchLast === 'function') {
+    if (!options.singlePage && initialTweets.length < totalLimit && !(result as any).done && typeof (result as any).fetchLast === 'function') {
       // Pagination reuses the first page's params; a mid-pagination failure
       // must degrade to the tweets already accumulated, not fail the read.
       await (result as any).fetchLast(totalLimit - initialTweets.length).catch(() => null);

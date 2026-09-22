@@ -332,7 +332,7 @@ describe('account-5 comparison checkpoint capture', () => {
     expect(await checkPerformance(agent, { timelineLimit: 20, classificationBacklogLimit: 1, captureComparisonWindow: true })).toBe(0);
     expect(mocks.addPerformanceEntry).toHaveBeenCalledTimes(1);
     expect(mocks.getUserTimeline).toHaveBeenCalledTimes(2);
-    expect(mocks.getUserTimeline).toHaveBeenLastCalledWith(expect.any(Object), agent.xUserId, 20, { includePrivateMetrics: true });
+    expect(mocks.getUserTimeline).toHaveBeenLastCalledWith(expect.any(Object), agent.xUserId, 20, { includePrivateMetrics: true, singlePage: true });
     for (const extra of [mocks.getDeepTimeline, mocks.getAccountPublicMetrics, mocks.lookupTweetAvailability, mocks.createTweet, mocks.batchTweets]) expect(extra).not.toHaveBeenCalled();
     expect(getOperatorComparison(history, timelineTweet.id)).toMatchObject({ eligible: true, repostQuoteRate: 0.0125 });
   });
@@ -349,6 +349,16 @@ describe('account-5 comparison checkpoint capture', () => {
     expect(await checkPerformance({ ...agent, id }, { captureComparisonWindow: enabled })).toBe(0);
     expect(mocks.addPerformanceEntry).not.toHaveBeenCalled();
     expect(mocks.getUserTimeline).toHaveBeenCalledTimes(1);
+    expect(mocks.getUserTimeline).toHaveBeenCalledWith(expect.anything(), agent.xUserId, 300, { includePrivateMetrics: true });
+  });
+  it('caps the exact account-5 comparison path at one20-row page even when a deeper read is requested', async () => {
+    await checkPerformance(agent, { timelineLimit: 600, captureComparisonWindow: true });
+    expect(mocks.getUserTimeline).toHaveBeenCalledWith(expect.anything(), agent.xUserId, 20, { includePrivateMetrics: true, singlePage: true });
+    expect(mocks.getDeepTimeline).not.toHaveBeenCalled();
+  });
+  it.each([{ handle: 'other' }, { xUserId: 'other' }])('does not apply operator pagination policy to mismatched identity %j', async mismatch => {
+    await checkPerformance({ ...agent, ...mismatch }, { timelineLimit: 30, captureComparisonWindow: true });
+    expect(mocks.getUserTimeline).toHaveBeenCalledWith(expect.anything(), mismatch.xUserId || agent.xUserId, 30, { includePrivateMetrics: true });
   });
   it.each([24, 30])('captures the inclusive %ih boundary even when the prior checkpoint rank is equal', async hours => {
     vi.setSystemTime(atHour(hours));
@@ -389,7 +399,7 @@ describe('account-5 comparison checkpoint capture', () => {
     const { dueId, recent } = recoveryFixture(20);
     const oldSnapshot = structuredClone(history[0]);
     expect(await checkPerformance(agent, { timelineLimit: 20, classificationBacklogLimit: 1, captureComparisonWindow: true })).toBe(21);
-    expect(mocks.getUserTimeline).toHaveBeenCalledWith(expect.anything(), agent.xUserId, 20, { includePrivateMetrics: true });
+    expect(mocks.getUserTimeline).toHaveBeenCalledWith(expect.anything(), agent.xUserId, 20, { includePrivateMetrics: true, singlePage: true });
     expect(mocks.batchTweets).toHaveBeenCalledOnce();
     expect(mocks.batchTweets.mock.calls[0][0]).toEqual([dueId]);
     expect(history.find(row => row.checkedAt === oldSnapshot.checkedAt && row.xTweetId === dueId)).toEqual(oldSnapshot);

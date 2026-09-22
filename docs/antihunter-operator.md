@@ -73,8 +73,11 @@ only from a leading draft-thesis declaration, `Editorial series: NAME.` or
 format, topic, post text and measured outcomes never supply a series. No source
 records are rewritten or private thesis text exported.
 
-The account-5 metrics opt-in normally reads the latest 20 originals. During that
-same six-hour refresh, it may make one additional official batch lookup of at
+The account-5 metrics opt-in reads at most 20 originals from one timeline page.
+A short page stays short; it does not trigger the SDK's fill-to-limit pagination.
+The existing public-fields fallback may make one second request if the private-
+metrics attempt fails. During that same six-hour refresh, it may make one
+additional official batch lookup of at
 most 20 known operator originals missing from that timeline and due for their
 first raw 24–30-hour observation. Oldest windows are selected first. The existing
 X budget reserves this lookup; no read happens when nothing is due. Returned IDs,

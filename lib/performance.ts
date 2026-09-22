@@ -57,6 +57,7 @@ import { canonicalizeLearningTopic, isEligibleForAccountPolicyLearning } from '.
 import { isGeoffreyAccount } from './account-taste';
 import { needsComparisonSnapshot } from './antihunter-measurement';
 import { recoverOperatorComparisonMetrics, type ComparisonRecovery } from './antihunter-metric-recovery';
+import { ANTIHUNTER_HANDLE, ANTIHUNTER_X_USER_ID } from './antihunter-operator-state';
 import { applyVoiceCorpusMetadata, buildVoiceCorpusSnapshot } from './voice-corpus';
 import { classifyAudienceVoiceComplaint } from './audience-feedback';
 import { formatActionError, getTwitterRateLimitResetAt, isInvalidTwitterCredentialError, isRateLimitTwitterError, isTransientTwitterError } from './twitter-debug';
@@ -750,6 +751,8 @@ export async function checkPerformance(
   options: CheckPerformanceOptions = {},
 ): Promise<number> {
   const captureComparisonWindow = agent.id === '5' && options.captureComparisonWindow === true;
+  const singlePageOperatorTimeline = captureComparisonWindow && agent.handle.toLowerCase() === ANTIHUNTER_HANDLE
+    && agent.xUserId === ANTIHUNTER_X_USER_ID;
   await assertAgentAutomationEntitlement(agent.id, { agent });
   if (!agent.apiKey || !agent.apiSecret || !agent.accessToken || !agent.accessSecret || !agent.xUserId) {
     return 0;
@@ -781,19 +784,22 @@ export async function checkPerformance(
   // silent — a missed snapshot must never block performance checks.
   await captureFollowerSnapshotIfDue(agent.id, keys).catch(() => null);
 
-  const timelineLimit = Math.max(1, Math.min(1000, Math.floor(options.timelineLimit || 300)));
+  const timelineLimit = Math.max(1, Math.min(singlePageOperatorTimeline ? 20 : 1000, Math.floor(options.timelineLimit || 300)));
   const classificationBacklogLimit = Math.max(
     1,
     Math.min(300, Math.floor(options.classificationBacklogLimit || 60)),
   );
 
   // Fetch full recent timeline (all tweets, not just ours). Protected quality
-  // refreshes can page deeper without increasing every cron read.
+  // refreshes can page deeper without increasing every cron read. The trusted
+  // operator uses one bounded page; due missing IDs have separate recovery.
   let timeline;
   try {
     timeline = timelineLimit > 300
       ? await getDeepTimeline(keys, String(agent.xUserId), timelineLimit)
-      : await getUserTimeline(keys, String(agent.xUserId), timelineLimit, { includePrivateMetrics: true });
+      : await getUserTimeline(keys, String(agent.xUserId), timelineLimit, {
+        includePrivateMetrics: true, ...(singlePageOperatorTimeline ? { singlePage: true } : {}),
+      });
   } catch (err) {
     const invalidCredentials = isInvalidTwitterCredentialError(err);
     if (invalidCredentials) {
