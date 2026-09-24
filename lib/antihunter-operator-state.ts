@@ -147,6 +147,17 @@ export function validateExperiment(value: unknown): ExperimentMetadata {
   return { id: input.id, variant: input.variant, hypothesis: requiredString(input.hypothesis, 'experiment hypothesis'),
     primaryMetric: requiredString(input.primaryMetric, 'experiment primaryMetric', 100) };
 }
+/** Reusing copy must not silently enroll a legacy post or change an experiment. */
+export function reusableOperatorExperiment(sourceBrief: unknown, requested?: ExperimentMetadata): OperatorSourceBrief['experiment'] {
+  const stored = parseOperatorBrief(sourceBrief)?.experiment;
+  const storedDefinition = stored ? validateExperiment(stored) : undefined;
+  const requestedDefinition = requested ? validateExperiment(requested) : undefined;
+  if (JSON.stringify(storedDefinition) !== JSON.stringify(requestedDefinition)) {
+    throw new Error('Existing draft has different experiment metadata; review that draft instead of relabeling or duplicating it');
+  }
+  if (stored && !Number.isFinite(Date.parse(stored.declaredAt))) throw new Error('Existing experiment declaration timestamp is invalid');
+  return stored ? { ...storedDefinition!, declaredAt: stored.declaredAt } : undefined;
+}
 export async function registerCampaign(value: unknown) {
   const campaign = validateCampaign(value);
   return mutateOperatorGrowth(state => {
@@ -215,10 +226,14 @@ export function validateAnalytics(value: unknown, now = new Date()): AnalyticsOb
   let range: AnalyticsObservation['range'];
   if (input.range) {
     const since = Date.parse(input.range.since), until = Date.parse(input.range.until);
-    if (!Number.isFinite(since) || !Number.isFinite(until) || until <= since || pacificDay(new Date(since)) !== input.day
-      || pacificDay(new Date(until - 1)) !== input.day) throw new Error('Invalid analytics range');
+    const bounds = analyticsDayBounds(input.day);
+    const historical = input.day !== pacificDay(now);
+    if (!Number.isFinite(since) || !Number.isFinite(until) || since !== bounds.since || until <= since
+      || until > bounds.until || until > checked || until > now.getTime()
+      || (historical && until !== bounds.until)) throw new Error('Invalid analytics range');
     range = { since: new Date(since).toISOString(), until: new Date(until).toISOString() };
   }
+  if (input.day !== pacificDay(now) && !range) throw new Error('Historical analytics require the full Pacific day range');
   let coverage: AnalyticsObservation['coverage'];
   if (input.coverage) {
     if (!['available', 'unavailable'].includes(input.coverage.aggregateRead)
@@ -247,6 +262,21 @@ export function validateAnalytics(value: unknown, now = new Date()): AnalyticsOb
   }
   return { day: input.day, observedAt: new Date(checked).toISOString(), spendUsd: input.spendUsd, events: input.events, source,
     ...(campaigns ? { campaigns } : {}), ...(range ? { range } : {}), ...(coverage ? { coverage } : {}), ...(traffic ? { traffic } : {}) };
+}
+function analyticsDayBounds(day: string) {
+  const midnight = (date: string) => {
+    const target = Date.parse(`${date}T00:00:00Z`);
+    let instant = target;
+    const format = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+    for (let i = 0; i < 3; i++) {
+      const p = Object.fromEntries(format.formatToParts(new Date(instant)).filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+      instant += target - Date.parse(`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}Z`);
+    }
+    return instant;
+  };
+  const nextDay = new Date(Date.parse(`${day}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  return { since: midnight(day), until: midnight(nextDay) };
 }
 export function recentAnalyticsDays(now = new Date()): string[] {
   const day = pacificDay(now);

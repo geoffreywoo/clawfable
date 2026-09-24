@@ -46,6 +46,14 @@ describe('Anti Hunter report originals projection', () => {
     expect(report.incomplete).toMatchObject([{ id: '6', state: 'captured_incomplete' }]);
     expect(JSON.stringify(history)).toBe(before);
   });
+  it('uses known official creation time at a deadline instead of later local persistence time', () => {
+    const post = tweet('1', { postedAt: '2026-09-21T12:00:01.362Z' });
+    const early = sample(post, 18);
+    const report = getOperatorComparisonWindows([post], [early], new Date('2026-09-22T18:00:00.001Z'));
+    expect(report.expired).toMatchObject([{ id: '1', closesAt: '2026-09-22T18:00:00.000Z' }]);
+    expect(getOperatorComparisonWindows([post], [], new Date('2026-09-22T18:00:00.001Z')).due).toHaveLength(1);
+    expect(getOperatorComparisonWindows([post], [early], new Date('2026-09-22T12:00:00Z')).due).toHaveLength(1);
+  });
   it('includes campaign-free satire and campaign posts, keeping eligible observations separate from later totals', () => {
     const satire = tweet('1');
     const artifact = tweet('2', { format: 'data_point', sourceBrief: JSON.stringify({ operator: 'codex', sources: ['https://antihunter.com/machine'], thesis: null, campaign }) });

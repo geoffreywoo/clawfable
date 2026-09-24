@@ -1,6 +1,7 @@
 import { ANTIHUNTER_AGENT_ID, ANTIHUNTER_HANDLE, ANTIHUNTER_X_USER_ID, parseOperatorBrief } from './antihunter-operator-state';
-import { needsComparisonSnapshot } from './antihunter-measurement';
+import { comparisonPostedAt, needsComparisonSnapshot } from './antihunter-measurement';
 import { createClient, type getUserTimeline, type TwitterKeys } from './twitter-client';
+import { privateClickMetrics } from './twitter-private-metrics';
 import type { Agent, Tweet, TweetPerformance } from './types';
 
 type TimelineTweet = Awaited<ReturnType<typeof getUserTimeline>>[number];
@@ -18,13 +19,14 @@ const validId = (value: unknown): value is string => typeof value === 'string'
 
 /** Earliest deadline first, using only known operator originals and raw history. */
 export function selectOperatorComparisonRecovery(tweets: Tweet[], history: TweetPerformance[], timelineIds: Set<string>, checkedAt: string) {
-  const eligible = tweets.filter(tweet => String(tweet.agentId) === ANTIHUNTER_AGENT_ID
+  const eligible = tweets.map(tweet => ({ tweet, postedAt: comparisonPostedAt(history, tweet.xTweetId || '', tweet.postedAt) }))
+    .filter(({ tweet, postedAt }) => String(tweet.agentId) === ANTIHUNTER_AGENT_ID
     && tweet.type === 'original' && tweet.contentProvenance === 'operator_written'
     && ['posted', 'deleted_from_x'].includes(tweet.status) && parseOperatorBrief(tweet.sourceBrief)
     && validId(tweet.xTweetId) && !timelineIds.has(tweet.xTweetId)
-    && typeof tweet.postedAt === 'string' && needsComparisonSnapshot(history, tweet.xTweetId, tweet.postedAt, checkedAt))
-    .sort((a, b) => Date.parse(a.postedAt!) - Date.parse(b.postedAt!) || a.xTweetId!.localeCompare(b.xTweetId!));
-  const ids = [...new Set(eligible.map(tweet => tweet.xTweetId!))];
+    && postedAt !== null && needsComparisonSnapshot(history, tweet.xTweetId, postedAt, checkedAt))
+    .sort((a, b) => Date.parse(a.postedAt!) - Date.parse(b.postedAt!) || a.tweet.xTweetId!.localeCompare(b.tweet.xTweetId!));
+  const ids = [...new Set(eligible.map(({ tweet }) => tweet.xTweetId!))];
   return { requestedIds: ids.slice(0, 20), deferredIds: ids.slice(20) };
 }
 
@@ -51,7 +53,7 @@ function recoveredTweet(raw: any, requested: Set<string>, checkedAt: string): Ti
     likes: count('like_count'), retweets: count('retweet_count'), replies: count('reply_count'),
     quotes: count('quote_count'), bookmarks: count('bookmark_count'), impressions: count('impression_count'),
     publicMetricAvailability: { retweets: supplied('retweet_count'), quotes: supplied('quote_count'), impressions: supplied('impression_count') },
-    profileClicks: null, referenceType: raw.referenced_tweets?.length ? 'quoted' : null,
+    ...privateClickMetrics(raw.non_public_metrics), referenceType: raw.referenced_tweets?.length ? 'quoted' : null,
     referencedTweetId: raw.referenced_tweets?.[0]?.id || null,
     hasMedia: Array.isArray(raw.attachments?.media_keys) && raw.attachments.media_keys.length > 0,
     isTextComplete: Boolean(noteText.trim() || !/(?:\.\.\.|\u2026)$/.test(text.trim())),

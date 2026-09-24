@@ -12,7 +12,7 @@ import { assertAgentAutomationEntitlement } from '../lib/automation-entitlement'
 import { getAiBudgetSummary } from '../lib/ai-budget';
 import { ANTIHUNTER_AGENT_ID as AGENT_ID, ANTIHUNTER_X_USER_ID as X_USER_ID, ANTIHUNTER_HANDLE as HANDLE,
   getOperatorGrowth, mutateOperatorGrowth, budgetPolicy, summarizeXSpend, registerCampaign, recordSurge, recordAnalytics,
-  parseOperatorBrief, validateCampaign, validateExperiment, claimBoundedRun, recordContribution, getAnalyticsState,
+  parseOperatorBrief, validateCampaign, validateExperiment, reusableOperatorExperiment, claimBoundedRun, recordContribution, getAnalyticsState,
   OPERATOR_READ_INTERVAL_HOURS, type OperatorSourceBrief } from '../lib/antihunter-operator-state';
 import { withOperatorXBudget, reserveVerification, releaseVerification, recordMediaPricing } from '../lib/antihunter-x-budget';
 import { describeOperatorImage, uploadOperatorImage, verifyOperatorPost, mediaForOperatorTweet } from '../lib/antihunter-media';
@@ -140,7 +140,8 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
       const sourceBrief = JSON.stringify(brief);
       const drafts = await getTweets(AGENT_ID);
       const existing = drafts.find(t => dispatchFingerprint(t) === dispatchFingerprint({ content, sourceBrief }) && ['draft', 'queued', 'posted'].includes(t.status));
-      if (existing) return { reused: true, id: existing.id, status: existing.status, xTweetId: existing.xTweetId };
+      if (existing) return { reused: true, id: existing.id, status: existing.status, xTweetId: existing.xTweetId,
+        experiment: reusableOperatorExperiment(existing.sourceBrief, experiment) };
       if (reply) assertNoDuplicateOperatorReply(drafts, await getOperatorGrowth(), { id: '', agentId: AGENT_ID,
         content, sourceBrief, type: 'reply', status: 'draft', contentProvenance: 'operator_written',
         followupForTweetId: reply.targetTweetId, replyConversationId: reply.conversationId } as Tweet);

@@ -3,6 +3,17 @@ import type { TweetPerformance } from './types';
 const HOUR_MS = 3_600_000;
 export const COMPARISON_WINDOW_HOURS = [24, 30] as const;
 
+/** Provider-created timestamps precede local publish persistence by milliseconds. */
+export function comparisonPostedAt(history: TweetPerformance[], xTweetId: string, localPostedAt?: string | null): string | null {
+  let earliest: TweetPerformance | null = null;
+  for (const row of history) {
+    if (row.xTweetId !== xTweetId || observedAgeHours(row) === null) continue;
+    if (!earliest || Date.parse(row.checkedAt) < Date.parse(earliest.checkedAt)) earliest = row;
+  }
+  if (earliest) return earliest.postedAt;
+  return typeof localPostedAt === 'string' && Number.isFinite(Date.parse(localPostedAt)) ? localPostedAt : null;
+}
+
 /** Use elapsed observation time, never a checkpoint label or current post age. */
 export function observedAgeHours(entry: Pick<TweetPerformance, 'postedAt' | 'checkedAt'>): number | null {
   const posted = Date.parse(entry.postedAt);

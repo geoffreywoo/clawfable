@@ -24,6 +24,21 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('bounded operator comparison recovery', () => {
+  it('uses an existing official creation timestamp at the inclusive window edges', () => {
+    const official = atAge(30);
+    const post = known(1, 30, { postedAt: new Date(Date.parse(official) + 1362).toISOString() });
+    const history = [{ xTweetId: id(), postedAt: official, checkedAt: new Date(Date.parse(official) + 18 * 3_600_000).toISOString() } as any];
+    expect(selectOperatorComparisonRecovery([post], history, new Set(), now).requestedIds).toEqual([id()]);
+    expect(selectOperatorComparisonRecovery([post], history, new Set(), new Date(Date.parse(now) + 1).toISOString()).requestedIds).toEqual([]);
+  });
+  it('preserves private clicks if returned without adding a private-field request or inventing public-only values', async () => {
+    mocks.tweets.mockResolvedValue({ data: [raw(1, { non_public_metrics: { url_link_clicks: 0, user_profile_clicks: 3 } }), raw(2)] });
+    const result = await recoverOperatorComparisonMetrics(agent, keys, [known(1), known(2)], [], new Set());
+    expect(result.observations[0].tweet).toMatchObject({ urlClicks: 0, profileClicks: 3, privateMetricAvailability: { urlClicks: true, profileClicks: true } });
+    expect(result.observations[1].tweet).toMatchObject({ urlClicks: null, profileClicks: null, privateMetricAvailability: { urlClicks: false, profileClicks: false } });
+    expect(mocks.tweets).toHaveBeenCalledOnce();
+    expect(mocks.tweets.mock.calls[0][1]['tweet.fields']).not.toContain('non_public_metrics');
+  });
   it('selects missing originals oldest first, deduplicates and leaves overflow explicit after 20', () => {
     const tweets = Array.from({ length: 23 }, (_, n) => known(n, 24 + n / 10));
     const before = JSON.stringify(tweets);

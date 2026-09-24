@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mutateAiOperationalState, getAiOperationalState } from '@/lib/kv-storage';
 import { analyticsControl, budgetPolicy, claimBoundedRun, emptyGrowthState, getOperatorGrowth, mutateOperatorGrowth,
   OPERATOR_GROWTH_NAMESPACE, pacificDay, parseOperatorBrief, recordAnalytics, recordContribution, recordSurge, registerCampaign, summarizeXSpend,
-  validateCampaign, validateExperiment, getAnalyticsState, recentAnalyticsDays } from '@/lib/antihunter-operator-state';
+  validateCampaign, validateExperiment, reusableOperatorExperiment, getAnalyticsState, recentAnalyticsDays } from '@/lib/antihunter-operator-state';
 import { normalizeSourceBrief } from '@/lib/source-brief';
 import { operatorXBudgetPlugin, priceOperatorXRequest, reserveVerification, reserveXInState, settledRequestEstimate, withOperatorXBudget } from '@/lib/antihunter-x-budget';
 import { assertAssetMatches, describeOperatorImage, uploadOperatorImage, usableMediaReceipt, verifyOperatorPost } from '@/lib/antihunter-media';
@@ -141,6 +141,17 @@ describe('Anti Hunter growth and allocation', () => {
       expect(() => validateExperiment({ ...experiment, ...patch })).toThrow();
     }
   });
+  it('refuses silent experiment changes during duplicate reuse and returns the original declaration', () => {
+    const experiment = { id: 'field-notes-v1', variant: 'first-person', hypothesis: 'Real stakes invite useful responses.', primaryMetric: 'repost_quote_rate', declaredAt: now.toISOString() };
+    const brief = { operator: 'codex', sources: ['VOICE.md'], experiment };
+    expect(reusableOperatorExperiment(brief, { ...experiment, declaredAt: '2026-09-22T00:00:00Z' } as any)).toEqual(experiment);
+    expect(() => reusableOperatorExperiment({ ...brief, experiment: undefined }, experiment)).toThrow('different experiment');
+    expect(() => reusableOperatorExperiment(brief, undefined)).toThrow('different experiment');
+    for (const patch of [{ variant: 'changed' }, { hypothesis: 'changed' }, { primaryMetric: 'likes' }, { id: 'changed' }]) {
+      expect(() => reusableOperatorExperiment(brief, { ...experiment, ...patch })).toThrow('different experiment');
+    }
+    expect(reusableOperatorExperiment({ ...brief, experiment: undefined })).toBeUndefined();
+  });
   it('uses known analytics overage to reduce discretionary AI after contingency', async () => {
     await recordAnalytics({ ...observation, spendUsd: 3 });
     expect(await getAccountDailyAiLimit('5')).toBe(23);
@@ -177,8 +188,8 @@ describe('analytics observation and public control', () => {
   it('reconciles the prior two days without refreshing current collection authorization', async () => {
     await recordAnalytics(observation);
     const before = await getOperatorGrowth();
-    await recordAnalytics({ ...observation, day: '2026-09-20', spendUsd: 0.7 });
-    await recordAnalytics({ ...observation, day: '2026-09-19', spendUsd: 0.1 });
+    await recordAnalytics({ ...observation, day: '2026-09-20', spendUsd: 0.7, range: { since: '2026-09-20T07:00:00Z', until: '2026-09-21T07:00:00Z' } });
+    await recordAnalytics({ ...observation, day: '2026-09-19', spendUsd: 0.1, range: { since: '2026-09-19T07:00:00Z', until: '2026-09-20T07:00:00Z' } });
     const after = await getOperatorGrowth();
     expect(after.analytics[observation.day]).toEqual(before.analytics[observation.day]);
     expect(after.analyticsControlHistory).toEqual(before.analyticsControlHistory);
@@ -187,6 +198,22 @@ describe('analytics observation and public control', () => {
     expect(after.analytics['2026-09-20'].observedAt).toBe(now.toISOString());
     expect(recentAnalyticsDays(new Date('2026-11-02T08:00:00Z'))).toEqual(['2026-11-02', '2026-11-01', '2026-10-31']);
     expect(recentAnalyticsDays(new Date('2026-03-09T07:00:00Z'))).toEqual(['2026-03-09', '2026-03-08', '2026-03-07']);
+  });
+  it('requires midnight-starting observed ranges and complete historical days across DST', async () => {
+    for (const range of [
+      { since: '2026-09-21T08:00:00Z', until: now.toISOString() },
+      { since: '2026-09-21T07:00:00Z', until: '2026-09-21T17:00:00Z' },
+    ]) await expect(recordAnalytics({ ...observation, range })).rejects.toThrow('range');
+    await expect(recordAnalytics({ ...observation, day: '2026-09-20' })).rejects.toThrow('full Pacific');
+    await expect(recordAnalytics({ ...observation, day: '2026-09-20', range: { since: '2026-09-20T07:00:00Z', until: '2026-09-21T06:00:00Z' } })).rejects.toThrow('range');
+    for (const [readAt, day, since, until] of [
+      ['2026-03-09T12:00:00Z', '2026-03-08', '2026-03-08T08:00:00Z', '2026-03-09T07:00:00Z'],
+      ['2026-11-02T12:00:00Z', '2026-11-01', '2026-11-01T07:00:00Z', '2026-11-02T08:00:00Z'],
+    ]) {
+      const read = new Date(readAt);
+      expect(await recordAnalytics({ ...observation, day, observedAt: read.toISOString(), range: { since, until } }, read))
+        .toMatchObject({ range: { since: new Date(since).toISOString(), until: new Date(until).toISOString() } });
+    }
   });
   it('preserves maximum cost even for out-of-order observations without backdating current aggregate data', async () => {
     await recordAnalytics(observation);

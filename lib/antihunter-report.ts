@@ -1,4 +1,4 @@
-import { getOperatorComparison, observedAgeHours } from './antihunter-measurement';
+import { comparisonPostedAt, getOperatorComparison, observedAgeHours } from './antihunter-measurement';
 import { ANTIHUNTER_AGENT_ID, parseOperatorBrief, validateCampaign, validateExperiment } from './antihunter-operator-state';
 import type { Tweet, TweetPerformance } from './types';
 
@@ -47,7 +47,7 @@ export function getOperatorOriginals(tweets: Tweet[], history: TweetPerformance[
 /** Read-only deadlines for the original fixed cohort; partial snapshots stay fixed. */
 export function getOperatorComparisonWindows(tweets: Tweet[], history: TweetPerformance[], now = new Date()) {
   const rows = getOperatorOriginals(tweets, history).map(post => {
-    const posted = Date.parse(post.postedAt || '');
+    const posted = Date.parse(comparisonPostedAt(history, post.xTweetId, post.postedAt) || '');
     const opens = posted + 24 * 3_600_000, closes = posted + 30 * 3_600_000;
     const state = post.comparison.snapshot ? (post.comparison.eligible ? 'captured' : 'captured_incomplete')
       : !Number.isFinite(posted) ? 'unknown' : now.getTime() < opens ? 'upcoming' : now.getTime() > closes ? 'expired' : 'due';
