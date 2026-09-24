@@ -343,6 +343,15 @@ describe('account-5 comparison checkpoint capture', () => {
     expect(history[0].publicMetricAvailability.quotes).toBe(false);
     expect(getOperatorComparison(history, timelineTweet.id)).toMatchObject({ eligible: false, repostQuoteRate: null });
   });
+  it('carries private URL clicks through the existing paid reading into fixed comparisons without extra reads', async () => {
+    mocks.getUserTimeline.mockResolvedValue([{ ...timelineTweet, urlClicks: 0, profileClicks: 2,
+      privateMetricAvailability: { urlClicks: true, profileClicks: true } }]);
+    expect(await checkPerformance(agent, { captureComparisonWindow: true })).toBe(1);
+    expect(history[0]).toMatchObject({ urlClicks: 0, privateMetricAvailability: { urlClicks: true, profileClicks: true } });
+    expect(getOperatorComparison(history, timelineTweet.id)).toMatchObject({ urlClicks: 0, urlClicksAvailable: true, urlClickRate: 0 });
+    expect(mocks.getUserTimeline).toHaveBeenCalledOnce();
+    expect(history[1]).not.toHaveProperty('urlClicks');
+  });
   it.each([
     { id: '5', enabled: undefined }, { id: '5', enabled: false }, { id: '13', enabled: true },
   ])('preserves shared checkpoint defaults for account $id with opt-in $enabled', async ({ id, enabled }) => {

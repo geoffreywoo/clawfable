@@ -43,12 +43,18 @@ export function getOperatorComparison(history: TweetPerformance[], xTweetId: str
     && availability?.impressions === true && isCount(snapshot.retweets) && isCount(snapshot.quotes) && isCount(snapshot.impressions);
   const rate = complete && snapshot.impressions > 0
     ? (snapshot.retweets + snapshot.quotes!) / snapshot.impressions : null;
+  const urlClicksAvailable = snapshot?.privateMetricAvailability?.urlClicks === true && isCount(snapshot.urlClicks);
+  const urlClickRate = urlClicksAvailable && availability?.impressions === true && isCount(snapshot!.impressions) && snapshot!.impressions > 0
+    ? snapshot!.urlClicks! / snapshot!.impressions : null;
   return {
     windowHours: COMPARISON_WINDOW_HOURS,
     selection: 'Earliest raw observation in the 24–30 hour window; no interpolation or blended counts.',
     snapshot,
     observedAgeHours: snapshot ? observedAgeHours(snapshot) : null,
     repostQuoteRate: rate,
+    urlClicks: urlClicksAvailable ? snapshot!.urlClicks! : null,
+    urlClicksAvailable,
+    urlClickRate,
     rateUnit: 'fraction of impressions',
     eligible: rate !== null,
     coverage: !snapshot ? 'No observation in the comparison window.'

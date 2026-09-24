@@ -1,5 +1,5 @@
 import { getOperatorComparison, observedAgeHours } from './antihunter-measurement';
-import { ANTIHUNTER_AGENT_ID, parseOperatorBrief, validateCampaign } from './antihunter-operator-state';
+import { ANTIHUNTER_AGENT_ID, parseOperatorBrief, validateCampaign, validateExperiment } from './antihunter-operator-state';
 import type { Tweet, TweetPerformance } from './types';
 
 /** Read an explicit draft declaration; never infer a series from copy or results. */
@@ -25,12 +25,38 @@ export function getOperatorOriginals(tweets: Tweet[], history: TweetPerformance[
     if (!brief) return [];
     let campaign: ReturnType<typeof validateCampaign> | null = null;
     try { if (brief.campaign) campaign = validateCampaign(brief.campaign); } catch { /* Unknown metadata stays unknown. */ }
+    let experiment: (ReturnType<typeof validateExperiment> & { declaredAt: string }) | null = null;
+    try {
+      if (brief.experiment) {
+        const declared = Date.parse(brief.experiment.declaredAt), posted = Date.parse(tweet.postedAt || '');
+        if (Number.isFinite(declared) && Number.isFinite(posted) && declared <= posted) {
+          experiment = { ...validateExperiment(brief.experiment), declaredAt: new Date(declared).toISOString() };
+        }
+      }
+    } catch { /* Do not infer or retrofit an experiment from later results. */ }
     const performance = latest.get(tweet.xTweetId) || null;
     const editorialSeries = declaredEditorialSeries(brief.thesis);
     return [{ id: tweet.id, xTweetId: tweet.xTweetId, status: tweet.status, content: tweet.content,
-      postedAt: tweet.postedAt || null, format: tweet.format || null, topic: tweet.topic || null, campaign,
+      postedAt: tweet.postedAt || null, format: tweet.format || null, topic: tweet.topic || null, campaign, experiment,
       editorialSeries, editorialSeriesSource: editorialSeries ? 'sourceBrief.thesis' : null,
       performance, observedAgeHours: performance ? observedAgeHours(performance) : null,
       comparison: getOperatorComparison(history, tweet.xTweetId) }];
   });
+}
+
+/** Read-only deadlines for the original fixed cohort; partial snapshots stay fixed. */
+export function getOperatorComparisonWindows(tweets: Tweet[], history: TweetPerformance[], now = new Date()) {
+  const rows = getOperatorOriginals(tweets, history).map(post => {
+    const posted = Date.parse(post.postedAt || '');
+    const opens = posted + 24 * 3_600_000, closes = posted + 30 * 3_600_000;
+    const state = post.comparison.snapshot ? (post.comparison.eligible ? 'captured' : 'captured_incomplete')
+      : !Number.isFinite(posted) ? 'unknown' : now.getTime() < opens ? 'upcoming' : now.getTime() > closes ? 'expired' : 'due';
+    return { id: post.id, xTweetId: post.xTweetId, state,
+      opensAt: Number.isFinite(opens) ? new Date(opens).toISOString() : null,
+      closesAt: Number.isFinite(closes) ? new Date(closes).toISOString() : null };
+  });
+  return { checkedAt: now.toISOString(), due: rows.filter(row => row.state === 'due'),
+    expired: rows.filter(row => row.state === 'expired'), upcoming: rows.filter(row => row.state === 'upcoming'),
+    captured: rows.filter(row => row.state === 'captured').length,
+    incomplete: rows.filter(row => row.state === 'captured_incomplete' || row.state === 'unknown') };
 }

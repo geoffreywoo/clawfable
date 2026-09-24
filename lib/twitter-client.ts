@@ -506,6 +506,8 @@ export async function getUserTimeline(
     bookmarks: number;
     publicMetricAvailability?: PublicMetricAvailability;
     profileClicks?: number | null;
+    urlClicks?: number | null;
+    privateMetricAvailability?: { profileClicks: boolean; urlClicks: boolean };
     referenceType?: TimelineSourceMetadata['referenceType'];
     referencedTweetId?: string | null;
     hasMedia?: boolean;
@@ -552,9 +554,7 @@ export async function getUserTimeline(
       quotes: tweet.public_metrics?.quote_count ?? 0,
       bookmarks: tweet.public_metrics?.bookmark_count ?? 0,
       publicMetricAvailability: publicMetricAvailability(tweet.public_metrics),
-      profileClicks: typeof tweet.non_public_metrics?.user_profile_clicks === 'number'
-        ? tweet.non_public_metrics.user_profile_clicks
-        : null,
+      ...privateClickMetrics(tweet.non_public_metrics),
       ...timelineSourceMetadata(tweet),
     }));
   } catch (error) {
@@ -563,6 +563,15 @@ export async function getUserTimeline(
       targetUserId: userId,
     });
   }
+}
+
+/** Only provider-supplied, valid private counts distinguish zero from unknown. */
+function privateClickMetrics(metrics: unknown) {
+  const values = metrics && typeof metrics === 'object' && !Array.isArray(metrics) ? metrics as Record<string, unknown> : {};
+  const count = (key: string) => Object.hasOwn(values, key) && typeof values[key] === 'number'
+    && Number.isSafeInteger(values[key]) && values[key] >= 0 ? values[key] as number : null;
+  const profileClicks = count('user_profile_clicks'), urlClicks = count('url_link_clicks');
+  return { profileClicks, urlClicks, privateMetricAvailability: { profileClicks: profileClicks !== null, urlClicks: urlClicks !== null } };
 }
 
 /**

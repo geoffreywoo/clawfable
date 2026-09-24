@@ -10,6 +10,13 @@ const sample = (hours: number, overrides: Partial<TweetPerformance> = {}) => ({
 } as TweetPerformance);
 
 describe('Anti Hunter comparable-age observations', () => {
+  it('keeps missing private URL metrics unknown and distinguishes reported zero', () => {
+    for (const overrides of [{}, { urlClicks: 0 }, { urlClicks: 2, privateMetricAvailability: { urlClicks: false, profileClicks: false } }]) {
+      expect(getOperatorComparison([sample(25, overrides)], 'post')).toMatchObject({ urlClicks: null, urlClicksAvailable: false, urlClickRate: null });
+    }
+    expect(getOperatorComparison([sample(25, { urlClicks: 2, privateMetricAvailability: { urlClicks: true, profileClicks: true } })], 'post'))
+      .toMatchObject({ urlClicks: 2, urlClicksAvailable: true, urlClickRate: 0.02 });
+  });
   it('uses the raw 24–30 hour window rather than the shared maturity label', () => {
     for (const age of [18, 23.999, 30.001, 48]) expect(selectComparisonSnapshot([sample(age)], 'post')).toBeNull();
     for (const age of [24, 25, 30]) expect(selectComparisonSnapshot([sample(age)], 'post')).toEqual(sample(age));

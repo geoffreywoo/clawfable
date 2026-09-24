@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getOperatorOriginals } from '@/lib/antihunter-report';
+import { getOperatorOriginals, getOperatorComparisonWindows } from '@/lib/antihunter-report';
 import type { Tweet, TweetPerformance } from '@/lib/types';
 
 const postedAt = '2026-09-21T12:00:00.000Z';
@@ -18,6 +18,34 @@ function sample(post: Tweet, age: number, overrides: Partial<TweetPerformance> =
 }
 
 describe('Anti Hunter report originals projection', () => {
+  it('reports only prospective declared experiments and never assigns labels to legacy posts', () => {
+    const experiment = { id: 'field-notes-v1', variant: 'first-person', hypothesis: 'A public assignment creates interest.',
+      primaryMetric: 'repost_quote_rate', declaredAt: '2026-09-21T11:00:00.000Z' };
+    const post = tweet('1', { sourceBrief: JSON.stringify({ operator: 'codex', sources: ['VOICE.md'], experiment: { ...experiment, secret: 'omit' } }) });
+    const before = JSON.stringify(post);
+    expect(getOperatorOriginals([post, tweet('2')], [])[0].experiment).toEqual(experiment);
+    expect(getOperatorOriginals([post, tweet('2')], [])[1].experiment).toBeNull();
+    expect(JSON.stringify(post)).toBe(before);
+    for (const declaredAt of [undefined, 'invalid', '2026-09-21T13:00:00Z']) {
+      const invalid = { ...post, sourceBrief: JSON.stringify({ operator: 'codex', sources: [], experiment: { ...experiment, declaredAt } }) };
+      expect(getOperatorOriginals([invalid], [])[0].experiment).toBeNull();
+    }
+  });
+  it('exposes inclusive due windows and expired gaps without changing captured snapshots', () => {
+    const upcoming = tweet('1', { postedAt: '2026-09-22T12:00:00Z' });
+    const due = tweet('2'), edge = tweet('3', { postedAt: '2026-09-21T06:00:00Z' });
+    const expired = tweet('4', { postedAt: '2026-09-21T05:59:59Z' });
+    const complete = tweet('5'), partial = tweet('6');
+    const history = [sample(complete, 24), sample(partial, 24, { publicMetricAvailability: null })];
+    const before = JSON.stringify(history);
+    const report = getOperatorComparisonWindows([upcoming, due, edge, expired, complete, partial], history, new Date('2026-09-22T12:00:00Z'));
+    expect(report.due.map(row => row.id)).toEqual(['2', '3']);
+    expect(report.expired.map(row => row.id)).toEqual(['4']);
+    expect(report.upcoming.map(row => row.id)).toEqual(['1']);
+    expect(report.captured).toBe(1);
+    expect(report.incomplete).toMatchObject([{ id: '6', state: 'captured_incomplete' }]);
+    expect(JSON.stringify(history)).toBe(before);
+  });
   it('includes campaign-free satire and campaign posts, keeping eligible observations separate from later totals', () => {
     const satire = tweet('1');
     const artifact = tweet('2', { format: 'data_point', sourceBrief: JSON.stringify({ operator: 'codex', sources: ['https://antihunter.com/machine'], thesis: null, campaign }) });

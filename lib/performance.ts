@@ -963,6 +963,8 @@ export async function checkPerformance(
       quotes: timelineTweet.quotes ?? 0,
       bookmarks: timelineTweet.bookmarks ?? 0,
       profileClicks: timelineTweet.profileClicks ?? null,
+      urlClicks: timelineTweet.urlClicks ?? null,
+      privateMetricAvailability: timelineTweet.privateMetricAvailability ?? null,
       impressions: timelineTweet.impressions ?? 0,
       ...(captureComparisonWindow ? { publicMetricAvailability: timelineTweet.publicMetricAvailability ?? null } : {}),
       engagementRate,

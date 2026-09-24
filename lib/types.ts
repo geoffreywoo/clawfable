@@ -1358,6 +1358,8 @@ export interface TweetPerformance {
   quotes?: number;
   bookmarks?: number;
   profileClicks?: number | null;  // non_public_metrics.user_profile_clicks; null when the API tier does not serve it
+  urlClicks?: number | null; // non_public_metrics.url_link_clicks; absent legacy values remain unknown
+  privateMetricAvailability?: { profileClicks: boolean; urlClicks: boolean } | null;
   impressions: number;
   /** Raw API availability for operator comparisons; absent legacy data is unknown. */
   publicMetricAvailability?: { retweets: boolean; quotes: boolean; impressions: boolean } | null;

@@ -12,11 +12,12 @@ import { assertAgentAutomationEntitlement } from '../lib/automation-entitlement'
 import { getAiBudgetSummary } from '../lib/ai-budget';
 import { ANTIHUNTER_AGENT_ID as AGENT_ID, ANTIHUNTER_X_USER_ID as X_USER_ID, ANTIHUNTER_HANDLE as HANDLE,
   getOperatorGrowth, mutateOperatorGrowth, budgetPolicy, summarizeXSpend, registerCampaign, recordSurge, recordAnalytics,
-  parseOperatorBrief, validateCampaign, claimBoundedRun, recordContribution, type OperatorSourceBrief } from '../lib/antihunter-operator-state';
+  parseOperatorBrief, validateCampaign, validateExperiment, claimBoundedRun, recordContribution, getAnalyticsState,
+  OPERATOR_READ_INTERVAL_HOURS, type OperatorSourceBrief } from '../lib/antihunter-operator-state';
 import { withOperatorXBudget, reserveVerification, releaseVerification, recordMediaPricing } from '../lib/antihunter-x-budget';
 import { describeOperatorImage, uploadOperatorImage, verifyOperatorPost, mediaForOperatorTweet } from '../lib/antihunter-media';
 import { getOperatorComparison, observedAgeHours } from '../lib/antihunter-measurement';
-import { getOperatorOriginals } from '../lib/antihunter-report';
+import { getOperatorOriginals, getOperatorComparisonWindows } from '../lib/antihunter-report';
 import type { Tweet } from '../lib/types';
 import { assertOperatorCadence, getOperatorCadence, getOperatorOutbox } from '../lib/antihunter-publication';
 import { assertNoDuplicateOperatorReply, assertOperatorReplyPolicy, assertReplyTargetUnchanged,
@@ -41,6 +42,7 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
   if (command === 'contribution') return recordContribution(readFileInput().input);
   if (command === 'surge') return recordSurge(readFileInput().input);
   if (command === 'analytics-observation') return recordAnalytics(readFileInput().input);
+  if (command === 'analytics-state') return getAnalyticsState(await getOperatorGrowth());
   if (command === 'media-pricing') return recordMediaPricing(readFileInput().input);
   if (command === 'opt-out') {
     const authorId = arg('--author-id');
@@ -67,6 +69,8 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
     return { ...summary, settings, signals, log, followers, dispatches: growth.dispatches, media: growth.media,
       cadence: getOperatorCadence(tweets, growth), outbox: getOperatorOutbox(tweets, growth),
       operatorOriginals: getOperatorOriginals(tweets, performance),
+      comparisonWindows: getOperatorComparisonWindows(tweets, performance),
+      readIntervalsHours: OPERATOR_READ_INTERVAL_HOURS, analyticsHistory: getAnalyticsState(growth),
       campaigns: Object.values(growth.campaigns).map(campaign => {
         const contributions = Object.values(growth.contributions || {}).filter(c => c.campaignId === campaign.campaignId);
         const episodeContributions = contributions.filter(c => c.episodeId === campaign.episodeId);
@@ -85,7 +89,7 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
         }),
       }; }), performance: [...latest.values()].slice(0, 20) };
   }
-  if (!['draft', 'upload', 'publish', 'verify', 'reconcile', 'metrics', 'research', 'inbox'].includes(command)) throw new Error('Use inspect, budget, report, campaign, contribution, surge, analytics-observation, media-pricing, draft, upload, publish, verify, reconcile, metrics, research, inbox, or opt-out.');
+  if (!['draft', 'upload', 'publish', 'verify', 'reconcile', 'metrics', 'research', 'inbox'].includes(command)) throw new Error('Use inspect, budget, report, campaign, contribution, surge, analytics-observation, analytics-state, media-pricing, draft, upload, publish, verify, reconcile, metrics, research, inbox, or opt-out.');
   const id = arg('--tweet-id');
   if (command === 'publish' && id) {
     const candidate = await getTweet(id, { fresh: true });
@@ -104,7 +108,8 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
   }
   await assertAgentAutomationEntitlement(AGENT_ID, { agent, user });
   const keys = decodeKeys(agent as Required<typeof agent>);
-  if (['metrics', 'research'].includes(command) && !await claimBoundedRun(command as 'metrics' | 'research')) return { skipped: true, reason: 'Six-hour read cadence' };
+  if (['metrics', 'research'].includes(command) && !await claimBoundedRun(command as 'metrics' | 'research')) return {
+    skipped: true, reason: `${OPERATOR_READ_INTERVAL_HOURS[command as 'metrics' | 'research']}-hour ${command} read cadence` };
   return withOperatorXBudget(`${command}${id ? `:${id}` : ''}`, async () => {
     const identity = await getMe(keys);
     if (identity.id !== X_USER_ID || identity.username.toLowerCase() !== HANDLE) throw new Error('Official X identity mismatch.');
@@ -126,11 +131,12 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
           'tweet.fields': ['author_id', 'conversation_id', 'note_tweet', 'entities'],
         })).data) : undefined;
       const campaign = input.campaign ? validateCampaign(input.campaign) : undefined;
+      const experiment = input.experiment ? { ...validateExperiment(input.experiment), declaredAt: new Date().toISOString() } : undefined;
       if (campaign) await registerCampaign(campaign);
       const asset = input.media ? describeOperatorImage(fs.readFileSync(path.resolve(path.dirname(file), input.media.path)), input.media.altText) : undefined;
       const sources = reply ? [...new Set([...input.sources, `https://x.com/i/status/${reply.targetTweetId}`])] : input.sources;
       const brief: OperatorSourceBrief = { operator: 'codex', sources, thesis: input.thesis || null,
-        ...(campaign ? { campaign } : {}), ...(asset ? { asset } : {}), ...(reply ? { reply } : {}) };
+        ...(campaign ? { campaign } : {}), ...(experiment ? { experiment } : {}), ...(asset ? { asset } : {}), ...(reply ? { reply } : {}) };
       const sourceBrief = JSON.stringify(brief);
       const drafts = await getTweets(AGENT_ID);
       const existing = drafts.find(t => dispatchFingerprint(t) === dispatchFingerprint({ content, sourceBrief }) && ['draft', 'queued', 'posted'].includes(t.status));
@@ -145,7 +151,7 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
         mediaExperimentType: asset ? 'image' : 'text_only', mediaBrief: asset?.altText || null,
         quoteTweetId: null, quoteTweetAuthor: null, xTweetId: null, scheduledAt: null,
         followupForTweetId: reply?.targetTweetId || null, replyConversationId: reply?.conversationId || null });
-      return { id: tweet.id, status: tweet.status, content: tweet.content, campaign, asset, reply };
+      return { id: tweet.id, status: tweet.status, content: tweet.content, campaign, experiment, asset, reply };
     }
     if (command === 'metrics') {
       const { checkPerformance } = await import('../lib/performance');

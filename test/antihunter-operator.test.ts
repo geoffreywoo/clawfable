@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mutateAiOperationalState, getAiOperationalState } from '@/lib/kv-storage';
 import { analyticsControl, budgetPolicy, claimBoundedRun, emptyGrowthState, getOperatorGrowth, mutateOperatorGrowth,
-  OPERATOR_GROWTH_NAMESPACE, pacificDay, parseOperatorBrief, recordAnalytics, recordContribution, recordSurge, registerCampaign, summarizeXSpend, validateCampaign } from '@/lib/antihunter-operator-state';
+  OPERATOR_GROWTH_NAMESPACE, pacificDay, parseOperatorBrief, recordAnalytics, recordContribution, recordSurge, registerCampaign, summarizeXSpend,
+  validateCampaign, validateExperiment, getAnalyticsState, recentAnalyticsDays } from '@/lib/antihunter-operator-state';
 import { normalizeSourceBrief } from '@/lib/source-brief';
 import { operatorXBudgetPlugin, priceOperatorXRequest, reserveVerification, reserveXInState, settledRequestEstimate, withOperatorXBudget } from '@/lib/antihunter-x-budget';
 import { assertAssetMatches, describeOperatorImage, uploadOperatorImage, usableMediaReceipt, verifyOperatorPost } from '@/lib/antihunter-media';
@@ -125,10 +126,20 @@ describe('Anti Hunter growth and allocation', () => {
     await expect(recordContribution({ ...receipt, episodeId: 'unregistered' })).rejects.toThrow('Register');
     await expect(recordContribution({ ...receipt, sourceUrl: 'https://x.com/reader/status/999' })).rejects.toThrow('exact');
   });
-  it('claims metrics and research atomically, each at most once per six hours', async () => {
+  it('claims metrics every four hours and research every six hours independently and atomically', async () => {
     expect(await Promise.all([claimBoundedRun('metrics'), claimBoundedRun('metrics')])).toEqual([true, false]);
     expect(await claimBoundedRun('research')).toBe(true);
-    expect(await claimBoundedRun('metrics', new Date(now.getTime() + 6 * 3_600_000))).toBe(true);
+    expect(await claimBoundedRun('metrics', new Date(now.getTime() + 4 * 3_600_000 - 1))).toBe(false);
+    expect(await claimBoundedRun('metrics', new Date(now.getTime() + 4 * 3_600_000))).toBe(true);
+    expect(await claimBoundedRun('research', new Date(now.getTime() + 4 * 3_600_000))).toBe(false);
+    expect(await claimBoundedRun('research', new Date(now.getTime() + 6 * 3_600_000))).toBe(true);
+  });
+  it('validates independent prospective experiment fields without accepting arbitrary metadata', () => {
+    const experiment = { id: 'field-notes-v1', variant: 'first-person', hypothesis: 'Real stakes invite useful responses.', primaryMetric: 'repost_quote_rate' };
+    expect(validateExperiment({ ...experiment, privateData: 'omit' })).toEqual(experiment);
+    for (const patch of [{ id: 'invalid id' }, { variant: '' }, { hypothesis: null }, { primaryMetric: '' }]) {
+      expect(() => validateExperiment({ ...experiment, ...patch })).toThrow();
+    }
   });
   it('uses known analytics overage to reduce discretionary AI after contingency', async () => {
     await recordAnalytics({ ...observation, spendUsd: 3 });
@@ -152,7 +163,7 @@ describe('analytics observation and public control', () => {
   });
   it('rejects invalid observations, preserves cumulative costs, and returns only safe public fields', async () => {
     await expect(recordAnalytics({ ...observation, spendUsd: -1 })).rejects.toThrow('spendUsd');
-    await expect(recordAnalytics({ ...observation, day: '2026-09-20' })).rejects.toThrow('Pacific');
+    await expect(recordAnalytics({ ...observation, day: '2026-09-18' })).rejects.toThrow('Pacific');
     await recordAnalytics(observation);
     vi.setSystemTime(new Date(now.getTime() + 60_000));
     await recordAnalytics({ ...observation, observedAt: new Date().toISOString(), spendUsd: 0.1 });
@@ -162,6 +173,46 @@ describe('analytics observation and public control', () => {
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://antihunter.com');
     const other = await analyticsGET(new Request('https://clawfable.com/api/public/antihunter/analytics-control', { headers: { Origin: 'https://evil.test' } }));
     expect(other.headers.get('Access-Control-Allow-Origin')).toBeNull();
+  });
+  it('reconciles the prior two days without refreshing current collection authorization', async () => {
+    await recordAnalytics(observation);
+    const before = await getOperatorGrowth();
+    await recordAnalytics({ ...observation, day: '2026-09-20', spendUsd: 0.7 });
+    await recordAnalytics({ ...observation, day: '2026-09-19', spendUsd: 0.1 });
+    const after = await getOperatorGrowth();
+    expect(after.analytics[observation.day]).toEqual(before.analytics[observation.day]);
+    expect(after.analyticsControlHistory).toEqual(before.analyticsControlHistory);
+    expect(analyticsControl(after, now)).toEqual(analyticsControl(before, now));
+    expect(Object.keys(getAnalyticsState(after, now).days)).toEqual(['2026-09-21', '2026-09-20', '2026-09-19']);
+    expect(after.analytics['2026-09-20'].observedAt).toBe(now.toISOString());
+    expect(recentAnalyticsDays(new Date('2026-11-02T08:00:00Z'))).toEqual(['2026-11-02', '2026-11-01', '2026-10-31']);
+    expect(recentAnalyticsDays(new Date('2026-03-09T07:00:00Z'))).toEqual(['2026-03-09', '2026-03-08', '2026-03-07']);
+  });
+  it('preserves maximum cost even for out-of-order observations without backdating current aggregate data', async () => {
+    await recordAnalytics(observation);
+    await recordAnalytics({ ...observation, observedAt: new Date(now.getTime() - 60_000).toISOString(), spendUsd: 0.9, events: 1 });
+    const state = await getOperatorGrowth();
+    expect(state.analytics[observation.day]).toMatchObject({ observedAt: observation.observedAt, events: 6000, spendUsd: 0.9 });
+    expect(analyticsControl(state, now).sampleRate).toBe(0);
+    expect(state.analyticsControlHistory?.at(-1)).toMatchObject({ day: observation.day, sampleRate: 0, at: now.toISOString() });
+  });
+  it('retains safe native traffic and read coverage separately from collection authorization', async () => {
+    const row = { ...observation, range: { since: '2026-09-21T07:00:00.000Z', until: now.toISOString() },
+      coverage: { aggregateRead: 'available', qaExcludedEvents: 3, notes: 'Native aggregates may lag; no inference about client collection.' },
+      traffic: { landingPaths: [{ path: '/machine', pageviews: 2 }], referrers: [{ host: 't.co', pageviews: 1 }, { host: null, pageviews: 1 }],
+        availability: { landingPaths: 'available', referrers: 'available' }, scope: 'Native request paths, not unique landings; separate from event counts.' } };
+    expect(await recordAnalytics(row)).toMatchObject(row);
+    const saved = getAnalyticsState(await getOperatorGrowth());
+    expect(saved.controlHistory).toHaveLength(1);
+    expect(saved.controlHistory[0]).toMatchObject({ at: now.toISOString(), sampleRate: 1 });
+    for (const path of ['/machine?input=secret', '//elsewhere', '/a#secret', '/%40private', '/a/../b']) {
+      await expect(recordAnalytics({ ...row, traffic: { ...row.traffic, landingPaths: [{ path, pageviews: 1 }] } })).rejects.toThrow('path');
+    }
+    await expect(recordAnalytics({ ...row, traffic: { ...row.traffic, referrers: [{ host: 'https://t.co/private?x=y', pageviews: 1 }] } })).rejects.toThrow('host');
+    await expect(recordAnalytics({ ...row, range: { ...row.range, until: '2026-09-22T08:00:00Z' } })).rejects.toThrow('range');
+    const later = new Date(now.getTime() + 60_000);
+    await expect(recordAnalytics({ ...row, observedAt: later.toISOString(), coverage: { aggregateRead: 'unavailable', qaExcludedEvents: 0 } }, later)).rejects.toThrow('Unavailable aggregates');
+    expect(analyticsControl(await getOperatorGrowth(), later).expiresAt).toBe(new Date(now.getTime() + 90 * 60_000).toISOString());
   });
 });
 

@@ -6,6 +6,7 @@ export const ANTIHUNTER_HANDLE = 'antihunterai';
 export const OPERATOR_GROWTH_NAMESPACE = 'operator-growth-v1';
 export const NORMAL_ALLOCATION = { total: 30, ai: 24, x: 4, analytics: 1, reserve: 1 } as const;
 export const SURGE_ALLOCATION = { total: 50, ai: 38, x: 7, analytics: 1, reserve: 4 } as const;
+export const OPERATOR_READ_INTERVAL_HOURS = { metrics: 4, research: 6 } as const;
 
 export function pacificDay(now = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
@@ -16,6 +17,12 @@ export interface CampaignMetadata {
   hypothesis: string;
   audience: string;
   landingPath: string;
+  primaryMetric: string;
+}
+export interface ExperimentMetadata {
+  id: string;
+  variant: string;
+  hypothesis: string;
   primaryMetric: string;
 }
 export interface OperatorAsset {
@@ -44,6 +51,7 @@ export interface OperatorSourceBrief {
   sources: string[];
   thesis: string | null;
   campaign?: CampaignMetadata;
+  experiment?: ExperimentMetadata & { declaredAt: string };
   asset?: OperatorAsset;
   reply?: OperatorReplyContext;
 }
@@ -54,7 +62,16 @@ export interface AnalyticsObservation {
   events: number;
   source: string;
   campaigns?: Array<{ campaignId: string; episodeId: string; experience_view: number; experience_complete: number; share_intent: number; token_info_view: number }>;
+  range?: { since: string; until: string };
+  coverage?: { aggregateRead: 'available' | 'unavailable'; qaExcludedEvents: number; notes?: string };
+  traffic?: {
+    landingPaths: Array<{ path: string; pageviews: number }>;
+    referrers: Array<{ host: string | null; pageviews: number }>;
+    availability: { landingPaths: 'available' | 'unavailable'; referrers: 'available' | 'unavailable' };
+    scope: string;
+  };
 }
+export interface AnalyticsControlObservation { day: string; at: string; expiresAt: string; sampleRate: number; }
 export interface SurgeDecision { day: string; at: string; reason: string; expectedBenefit: string; boundedExperiment: string; }
 export interface XSpendAttempt {
   id: string; day: string; at: string; operation: string; endpoint: string;
@@ -77,6 +94,8 @@ export interface OperatorGrowthState {
   version: 1;
   campaigns: Record<string, CampaignMetadata & { registeredAt: string }>;
   analytics: Record<string, AnalyticsObservation>;
+  /** Recorded control-policy projections, not server readback or client event coverage. */
+  analyticsControlHistory?: AnalyticsControlObservation[];
   surges: Record<string, SurgeDecision>;
   xAttempts: Record<string, XSpendAttempt>;
   verificationHolds: Record<string, { day: string; usd: number }>;
@@ -118,6 +137,15 @@ export function validateCampaign(value: unknown): CampaignMetadata {
   return { campaignId: input.campaignId, episodeId: input.episodeId, landingPath: input.landingPath,
     hypothesis: requiredString(input.hypothesis, 'hypothesis'), audience: requiredString(input.audience, 'audience', 300),
     primaryMetric: requiredString(input.primaryMetric, 'primaryMetric', 100) };
+}
+export function validateExperiment(value: unknown): ExperimentMetadata {
+  const input = value as ExperimentMetadata;
+  if (!input || typeof input !== 'object') throw new Error('Experiment object required');
+  for (const key of ['id', 'variant'] as const) {
+    if (typeof input[key] !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(input[key])) throw new Error(`Invalid experiment ${key}`);
+  }
+  return { id: input.id, variant: input.variant, hypothesis: requiredString(input.hypothesis, 'experiment hypothesis'),
+    primaryMetric: requiredString(input.primaryMetric, 'experiment primaryMetric', 100) };
 }
 export async function registerCampaign(value: unknown) {
   const campaign = validateCampaign(value);
@@ -171,9 +199,9 @@ export function summarizeXSpend(state: OperatorGrowthState, now = new Date()) {
 }
 export function validateAnalytics(value: unknown, now = new Date()): AnalyticsObservation {
   const input = value as AnalyticsObservation;
-  if (!input || input.day !== pacificDay(now)) throw new Error('Analytics observation must use the current Pacific day');
+  if (!input || !recentAnalyticsDays(now).includes(input.day)) throw new Error('Analytics observation must use the current or previous two Pacific days');
   const checked = Date.parse(input.observedAt);
-  if (!Number.isFinite(checked) || checked > now.getTime() + 60_000 || pacificDay(new Date(checked)) !== input.day) throw new Error('Invalid observedAt');
+  if (!Number.isFinite(checked) || checked > now.getTime() + 60_000 || pacificDay(new Date(checked)) < input.day) throw new Error('Invalid observedAt');
   for (const key of ['spendUsd', 'events'] as const) if (!Number.isFinite(input[key]) || input[key] < 0 || (key === 'events' && !Number.isInteger(input[key]))) throw new Error(`Invalid ${key}`);
   const source = requiredString(input.source, 'source', 300);
   const campaigns = input.campaigns?.map(row => {
@@ -184,15 +212,71 @@ export function validateAnalytics(value: unknown, now = new Date()): AnalyticsOb
     return { campaignId: row.campaignId, episodeId: row.episodeId, experience_view: row.experience_view,
       experience_complete: row.experience_complete, share_intent: row.share_intent, token_info_view: row.token_info_view };
   });
-  return { day: input.day, observedAt: new Date(checked).toISOString(), spendUsd: input.spendUsd, events: input.events, source, ...(campaigns ? { campaigns } : {}) };
+  let range: AnalyticsObservation['range'];
+  if (input.range) {
+    const since = Date.parse(input.range.since), until = Date.parse(input.range.until);
+    if (!Number.isFinite(since) || !Number.isFinite(until) || until <= since || pacificDay(new Date(since)) !== input.day
+      || pacificDay(new Date(until - 1)) !== input.day) throw new Error('Invalid analytics range');
+    range = { since: new Date(since).toISOString(), until: new Date(until).toISOString() };
+  }
+  let coverage: AnalyticsObservation['coverage'];
+  if (input.coverage) {
+    if (!['available', 'unavailable'].includes(input.coverage.aggregateRead)
+      || !Number.isSafeInteger(input.coverage.qaExcludedEvents) || input.coverage.qaExcludedEvents < 0) throw new Error('Invalid analytics coverage');
+    coverage = { aggregateRead: input.coverage.aggregateRead, qaExcludedEvents: input.coverage.qaExcludedEvents,
+      ...(input.coverage.notes ? { notes: requiredString(input.coverage.notes, 'coverage notes', 1000) } : {}) };
+  }
+  let traffic: AnalyticsObservation['traffic'];
+  if (input.traffic) {
+    const { landingPaths, referrers, availability } = input.traffic;
+    if (!Array.isArray(landingPaths) || !Array.isArray(referrers) || landingPaths.length > 100 || referrers.length > 100
+      || !availability || !['available', 'unavailable'].includes(availability.landingPaths)
+      || !['available', 'unavailable'].includes(availability.referrers)) throw new Error('Invalid analytics traffic');
+    const count = (value: number) => { if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid pageviews'); return value; };
+    traffic = { landingPaths: landingPaths.map(row => {
+      if (typeof row.path !== 'string' || row.path.length > 200 || !/^\/[a-zA-Z0-9/_.-]*$/.test(row.path)
+        || row.path.startsWith('//') || row.path.split('/').some(part => part === '.' || part === '..')) throw new Error('Invalid analytics path');
+      return { path: row.path, pageviews: count(row.pageviews) };
+    }), referrers: referrers.map(row => {
+      if (row.host !== null && (typeof row.host !== 'string' || row.host.length > 253 || !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(row.host))) throw new Error('Invalid analytics referrer host');
+      return { host: row.host, pageviews: count(row.pageviews) };
+    }), availability: { landingPaths: availability.landingPaths, referrers: availability.referrers },
+    scope: requiredString(input.traffic.scope, 'traffic scope', 300) };
+    if ((availability.landingPaths === 'unavailable' && traffic.landingPaths.length)
+      || (availability.referrers === 'unavailable' && traffic.referrers.length)) throw new Error('Unavailable traffic must not contain counts');
+  }
+  return { day: input.day, observedAt: new Date(checked).toISOString(), spendUsd: input.spendUsd, events: input.events, source,
+    ...(campaigns ? { campaigns } : {}), ...(range ? { range } : {}), ...(coverage ? { coverage } : {}), ...(traffic ? { traffic } : {}) };
+}
+export function recentAnalyticsDays(now = new Date()): string[] {
+  const day = pacificDay(now);
+  // Calendar arithmetic rather than elapsed 24h handles both DST boundaries.
+  return [0, 1, 2].map(offset => new Date(Date.parse(`${day}T12:00:00Z`) - offset * 86_400_000).toISOString().slice(0, 10));
+}
+export function getAnalyticsState(state: OperatorGrowthState, now = new Date()) {
+  const days = recentAnalyticsDays(now);
+  return { currentDay: days[0], days: Object.fromEntries(days.map(day => [day, state.analytics[day] || null])),
+    controlHistory: (state.analyticsControlHistory || []).filter(row => days.includes(row.day)),
+    controlHistoryMeaning: 'Recorded control-policy projections only, not server readback or client delivery; gaps are not zero events.' };
 }
 export async function recordAnalytics(value: unknown, now = new Date()) {
   const observation = validateAnalytics(value, now);
+  // A failed provider read is not a fresh observation. Keep the existing public
+  // control compatible: its prior successful observation expires naturally.
+  if (observation.coverage?.aggregateRead === 'unavailable') throw new Error('Unavailable aggregates cannot refresh analytics observations');
   return mutateOperatorGrowth(state => {
     const prior = state.analytics[observation.day];
-    if (prior && Date.parse(prior.observedAt) >= Date.parse(observation.observedAt)) return prior;
     // Do not erase an already observed cost on a late/corrected provider report.
-    state.analytics[observation.day] = { ...observation, spendUsd: Math.max(prior?.spendUsd || 0, observation.spendUsd) };
+    const latest = prior && Date.parse(prior.observedAt) >= Date.parse(observation.observedAt) ? prior : observation;
+    state.analytics[observation.day] = { ...latest, spendUsd: Math.max(prior?.spendUsd || 0, observation.spendUsd) };
+    if (observation.day === pacificDay(now)) {
+      const control = analyticsControl(state, now);
+      const item = { ...control, at: now.toISOString() };
+      state.analyticsControlHistory ||= [];
+      const previous = state.analyticsControlHistory.at(-1);
+      if (!previous || JSON.stringify(previous) !== JSON.stringify(item)) state.analyticsControlHistory.push(item);
+      state.analyticsControlHistory = state.analyticsControlHistory.slice(-5000);
+    }
     return state.analytics[observation.day];
   });
 }
@@ -207,7 +291,7 @@ export function analyticsControl(state: OperatorGrowthState, now = new Date()) {
 export async function claimBoundedRun(operation: 'metrics' | 'research', now = new Date()) {
   return mutateOperatorGrowth(state => {
     const previous = state.lastRuns[operation];
-    if (previous && now.getTime() - Date.parse(previous) < 6 * 60 * 60_000) return false;
+    if (previous && now.getTime() - Date.parse(previous) < OPERATOR_READ_INTERVAL_HOURS[operation] * 60 * 60_000) return false;
     // Claim before starting: failures and concurrent wakes cannot multiply reads.
     state.lastRuns[operation] = now.toISOString();
     return true;

@@ -194,6 +194,15 @@ describe('getLatestTwitterTweetIdCursor', () => {
 });
 
 describe('timeline source metadata', () => {
+  it('preserves URL clicks already returned with private metrics, including observed zero and absence', async () => {
+    const counts = [undefined, 0, 3, -1, 0.5, '7', null];
+    mocks.userTimeline.mockResolvedValue({ data: { data: counts.map((value, n) => ({ id: String(n), text: 'link',
+      non_public_metrics: value === undefined ? {} : { url_link_clicks: value, user_profile_clicks: value } })), meta: {} }, done: true });
+    const rows = await getUserTimeline(keys, 'user-1', 20, { includePrivateMetrics: true, singlePage: true });
+    expect(rows.map(row => row.urlClicks)).toEqual([null, 0, 3, null, null, null, null]);
+    expect(rows.map(row => row.privateMetricAvailability?.urlClicks)).toEqual([false, true, true, false, false, false, false]);
+    expect(mocks.userTimeline).toHaveBeenCalledOnce();
+  });
   describe.each([
     ['recent', getUserTimeline], ['deep', getDeepTimeline],
   ] as const)('%s timeline public metric availability', (_label, readTimeline) => {
