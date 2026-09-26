@@ -1,3 +1,4 @@
+import { operatorXFailure, type OperatorXFailure } from './antihunter-x-diagnostics';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ITwitterApiClientPlugin } from 'twitter-api-v2';
@@ -160,14 +161,17 @@ export function operatorXBudgetPlugin(credentials?: { appKey: string; appSecret:
         context.identityVerified = true;
       }
     },
-    async onRequestError({ params }) { await markUncertain(params); },
-    async onResponseError({ params }) { await markUncertain(params); },
+    async onRequestError({ params, error }) { await markUncertain(params, operatorXFailure(error, 'transport')); },
+    async onResponseError({ params, error }) { await markUncertain(params, operatorXFailure(error, 'response')); },
   };
-  async function markUncertain(params: object) {
+  async function markUncertain(params: object, failure: OperatorXFailure) {
     const receipt = receipts.get(params);
     if (receipt) await mutateOperatorGrowth(state => {
       const attempt = state.xAttempts[receipt.id];
-      if (attempt && attempt.state !== 'settled') attempt.state = 'uncertain';
+      if (attempt && attempt.state !== 'settled') {
+        attempt.state = 'uncertain';
+        attempt.failure = failure;
+      }
     });
   }
 }

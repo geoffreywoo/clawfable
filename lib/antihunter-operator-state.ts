@@ -1,3 +1,4 @@
+import type { OperatorXFailure } from './antihunter-x-diagnostics';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 
 export const ANTIHUNTER_AGENT_ID = '5';
@@ -77,6 +78,7 @@ export interface XSpendAttempt {
   id: string; day: string; at: string; operation: string; endpoint: string;
   reservedUsd: number; estimatedUsd: number | null; state: 'dispatched' | 'settled' | 'uncertain';
   pricingSource: string;
+  failure?: OperatorXFailure;
 }
 export interface MediaReceipt {
   sha256: string; at: string; state: 'pending' | 'uploaded' | 'uncertain';

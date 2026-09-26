@@ -296,6 +296,24 @@ describe('X per-request reservations', () => {
     expect(priceOperatorXRequest('POST', new URL('https://api.x.com/2/tweets'), {}, { text: 'see https://antihunter.com' }, state).reservedUsd).toBe(0.2);
     expect(priceOperatorXRequest('POST', new URL('https://api.x.com/2/tweets'), {}, { text: 'see antihunter.com/machine' }, state).reservedUsd).toBe(0.2);
   });
+  it('retains safe response diagnostics without settling failed requests or releasing holds', async () => {
+    await reserveVerification('diagnostic-draft');
+    await withOperatorXBudget('diagnostic', async () => {
+      const plugin = operatorXBudgetPlugin()!;
+      const args = { params: { method: 'GET', query: {} }, url: new URL('https://api.x.com/2/tweets/123') } as any;
+      await plugin.onBeforeRequest!(args);
+      await plugin.onResponseError!({ ...args, error: { code: 400, headers: { authorization: 'secret' },
+        data: { detail: 'secret', errors: [{ parameters: { text: ['secret'], access_token: ['secret'] }, message: 'secret' }] } } });
+    });
+    const state = await getOperatorGrowth();
+    const attempt = Object.values(state.xAttempts).find(x => x.operation === 'diagnostic')!;
+    expect(attempt.failure).toEqual({ kind: 'response', status: 400, parameters: ['text'] });
+    expect(attempt.state).toBe('uncertain');
+    expect(attempt.estimatedUsd).toBeNull();
+    expect(JSON.stringify(attempt)).not.toContain('secret');
+    expect(summarizeXSpend(state).heldUsd).toBeCloseTo(0.015);
+    expect(summarizeXSpend(state).unresolvedUsd).toBeCloseTo(0.005);
+  });
   it('protects verification capacity from concurrent spending and retains failed-call uncertainty', async () => {
     await reserveVerification('draft');
     await mutateOperatorGrowth(state => { state.xAttempts.full = { id: 'full', day: '2026-09-21', at: now.toISOString(), operation: 'old', endpoint: 'GET /2/tweets', reservedUsd: 3.975, estimatedUsd: null, state: 'uncertain', pricingSource: 'test' }; });
