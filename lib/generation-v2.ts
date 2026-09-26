@@ -1640,6 +1640,13 @@ export function rotateBudgetedBriefsV2<T>(briefs: T[], runId: string): T[] {
   return [...briefs.slice(offset), ...briefs.slice(0, offset)];
 }
 
+export function prioritizeCurrentInterestBriefsV2<T extends { trendTopicId?: string | null; storyClusterId?: string | null }>(briefs: T[], runId: string): T[] {
+  return [
+    ...briefs.filter(brief => Boolean(brief.trendTopicId) && !brief.storyClusterId),
+    ...rotateBudgetedBriefsV2(briefs.filter(brief => !brief.trendTopicId || brief.storyClusterId), runId),
+  ];
+}
+
 const COMMITTED_TWEET_STATUSES = new Set<Tweet['status']>(['queued', 'posted', 'deleted_from_x']);
 
 function isCommittedTweet(tweet: Tweet): boolean {
@@ -2141,10 +2148,6 @@ export function buildGenerationBriefsV2({
   const desiredStoryBriefs = geoffreyPortfolio
     ? Math.min(requestedStoryBriefs, Math.max(1, Math.floor(briefCount / 4)))
     : requestedStoryBriefs;
-  for (const story of storyCandidates) {
-    appendStory(story);
-    if (briefs.filter((brief) => brief.evidenceMode === 'verified_source').length >= desiredStoryBriefs) break;
-  }
 
   const pendingPortfolioCandidate = (
     geoffreyPortfolio
@@ -2167,17 +2170,16 @@ export function buildGenerationBriefsV2({
   const pendingPortfolioCompany = pendingPortfolioCandidate;
 
   // Followed-network engagement can choose a subject, never wording or facts.
-  // Geoffrey gets two current-interest briefs in a four-brief batch; the
-  // remaining source and durable-topic lanes still preserve portfolio taste.
-  const maxOperatorTopicSignalBriefs = geoffreyPortfolio
-    ? Math.min(2, Math.max(0, Math.ceil(briefCount / 3)))
-    : Math.min(2, Math.max(0, Math.floor(briefCount / 4)));
+  // Fill from current interests before considering durable topic fallbacks.
+  // Current interests own the available slots; durable topic labels fill gaps.
+  const maxOperatorTopicSignalBriefs = Math.max(0, briefCount - desiredStoryBriefs);
   const operatorTopicSignals = selectOperatorTopicSignals(
     trending || [],
     voiceProfile,
     learnings,
     style.trendTolerance,
     Math.max(4, maxOperatorTopicSignalBriefs * 4),
+    now.getTime(),
   ).map((signal, index) => ({
     signal,
     index,
@@ -2193,7 +2195,6 @@ export function buildGenerationBriefsV2({
     || left.index - right.index
   )).map((entry) => entry.signal);
   let operatorTopicSignalBriefs = 0;
-  const usedOperatorTopicSignalDomains = new Set<string>();
   for (const signal of operatorTopicSignals) {
     if (briefs.length >= briefCount || operatorTopicSignalBriefs >= maxOperatorTopicSignalBriefs) break;
     const key = topicKey(signal.subject);
@@ -2213,17 +2214,6 @@ export function buildGenerationBriefsV2({
       || researchTokenSimilarity(storySubject(story), signal.subject) >= 0.38
     ))) continue;
     if (usedStorySubjects.some((subject) => researchTokenSimilarity(subject, signal.subject) >= 0.38)) continue;
-    const signalDomain = signal.domain;
-    if (
-      geoffreyPortfolio
-      && (
-        usedOperatorTopicSignalDomains.has(signalDomain)
-        || briefs.some((brief) => (
-          brief.storyClusterId
-          && classifyGeoffreyTopicDomain(briefTopicContext(brief)) === signalDomain
-        ))
-      )
-    ) continue;
     if (!portfolioAllowsTopic(
       signal.subject,
       signal.subject,
@@ -2234,7 +2224,7 @@ export function buildGenerationBriefsV2({
       signal.subject,
       briefs.length,
       Math.max(0.68, signal.identityScore),
-      `recent operator engagement topic signal ${signal.id}`,
+      `recent ${signal.selectionBasis === "network_momentum" ? "followed-network momentum" : "operator engagement"} topic signal ${signal.id}`,
       signal.sourceCount,
       [],
       null,
@@ -2250,12 +2240,19 @@ export function buildGenerationBriefsV2({
         relationshipStatus: 'unverified',
       },
       verifiedEntityMentions: buildVerifiedEntityMentions({ entityRoles: signal.entityRoles }),
-      sourceBrief: `OPERATOR TOPIC SIGNAL [subject=${signal.subject}; topicId=${signal.id}; engagement=${signal.operatorEngagementScore.toFixed(3)}; confidence=${signal.topicConfidence.toFixed(3)}; entityRoles=${signal.entityRoles.map((entry) => `${entry.name}:${entry.role}`).join(',') || 'unknown'}; strippedEvents=${signal.strippedEventTerms.join(',') || 'none'}] Subject cue only. It cannot support a headline, relationship, action, number, quote, or factual claim.`,
+      sourceBrief: `OPERATOR TOPIC SIGNAL [subject=${signal.subject}; topicId=${signal.id}; basis=${signal.selectionBasis || "operator_engagement"}; momentum=${(signal.networkMomentumScore || 0).toFixed(3)}; engagement=${signal.operatorEngagementScore.toFixed(3)}; confidence=${signal.topicConfidence.toFixed(3)}; entityRoles=${signal.entityRoles.map((entry) => `${entry.name}:${entry.role}`).join(',') || 'unknown'}; strippedEvents=${signal.strippedEventTerms.join(',') || 'none'}] Subject cue only. It cannot support a headline, relationship, action, number, quote, or factual claim.`,
     });
     usedTopics.add(key);
     reservedConcreteSubjects.push(signal.subject);
-    usedOperatorTopicSignalDomains.add(signalDomain);
     operatorTopicSignalBriefs += 1;
+  }
+
+  // Current X interests get first use of topic/company quotas. Research may
+  // fill the remaining slots, but cannot suppress an otherwise eligible signal.
+  for (const story of storyCandidates) {
+    if (briefs.length >= briefCount) break;
+    appendStory(story);
+    if (briefs.filter(brief => brief.evidenceMode === 'verified_source').length >= desiredStoryBriefs) break;
   }
 
   const nativeCompanySubjectPending = operatorCandidates.some((candidate) => (
@@ -7648,7 +7645,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         briefKeys.set(brief.id, substantiveBriefDigest(brief, claims, `${trace.voiceCorpusVersion || ''}:${JSON.stringify(input.voiceProfile)}`, `${trace.qualityPolicyVersion || ''}:${trace.generationPolicyVersion}`));
       }
       briefs = briefs.filter(brief => !failed.has(briefKeys.get(brief.id)!));
-      if (input.mode !== 'preview') briefs = rotateBudgetedBriefsV2(briefs, runId);
+      if (input.mode !== 'preview') briefs = prioritizeCurrentInterestBriefsV2(briefs, runId);
       briefs = briefs.slice(0, Math.min(2, input.count));
       if (input.mode !== 'preview') {
         const claimed = new Set(await claimGenerationBriefs(input.agentId, runId, briefs.map(brief => briefKeys.get(brief.id)!)));
@@ -7691,6 +7688,8 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       })).length,
       researchBriefs: briefs.filter((brief) => Boolean(brief.storyClusterId)).length,
       operatorBriefs: briefs.filter((brief) => !brief.storyClusterId).length,
+      currentInterestBriefs: briefs.filter(brief => Boolean(brief.trendTopicId) && !brief.storyClusterId).length,
+      historicalTopicFallbackBriefs: briefs.filter(brief => !brief.storyClusterId && !brief.trendTopicId).length,
       briefs: briefs.length,
     };
     if (briefs.length === 0) {

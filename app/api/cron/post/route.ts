@@ -318,7 +318,7 @@ export async function GET(request: NextRequest) {
         }
 
         try {
-          if (settings.enabled) {
+          if (settings.enabled || settings.autoReply) {
             const topicRefresh = await refreshAgentTopicIntelligence(agent);
             if (topicRefresh.refreshed) {
               topicIntelligenceRefreshed++;

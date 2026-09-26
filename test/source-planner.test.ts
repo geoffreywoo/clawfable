@@ -1508,3 +1508,24 @@ describe('source planner', () => {
     expect(new Set(trendTopicIds).size).toBe(trendTopicIds.length);
   });
 });
+
+it('selects fresh X momentum without requiring a like, while prioritizing actual engagement', () => {
+  const now = Date.now();
+  const profile = { tone: 'casual investor', topics: ['AI', 'startup financing', 'markets'], antiGoals: [],
+    communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.', summary: 'Startups and technology.' };
+  const topic = (id: number, extras: Record<string, unknown> = {}) => ({
+    id, networkTopicId: `network-${id}`, headline: 'Modal startup financing', category: 'Modal startup financing',
+    source: '@network', relevanceScore: 90, timestamp: new Date(now).toISOString(), tweetCount: 3,
+    sourceType: 'x', discoveryMethod: 'followed_network', sourceCount: 3, networkMomentumScore: 0.8, networkBreakoutScore: 0.8,
+    operatorEngagementScore: 0, topicConfidence: 0.85, topicUncertainty: 'low',
+    semanticDomain: 'startups_markets', entities: ['Modal', 'Databricks'], ...extras,
+  } as any);
+  const selected = selectOperatorTopicSignals([
+    topic(1), topic(2, { operatorEngagementScore: 0.9, networkMomentumScore: 0.3, sourceCount: 1 }),
+    topic(3, { sourceCount: 1, networkBreakoutScore: 0.2 }), topic(4, { timestamp: new Date(now - 25 * 3600000).toISOString() }),
+    topic(5, { topicUncertainty: 'high' }),
+  ], profile, null, 'moderate', 8, now);
+  expect(selected.map(signal => signal.id)).toEqual(['network-2', 'network-1']);
+  expect(selected.map(signal => signal.selectionBasis)).toEqual(['operator_engagement', 'network_momentum']);
+  expect(selected[1].networkMomentumScore).toBe(0.8);
+});

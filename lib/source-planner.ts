@@ -98,6 +98,8 @@ export interface OperatorTopicSignal {
   operatorEngagementScore: number;
   topicConfidence: number;
   sourceCount: number;
+  selectionBasis?: 'operator_engagement' | 'network_momentum';
+  networkMomentumScore?: number;
 }
 
 const PROMO_PATTERNS = [
@@ -777,14 +779,15 @@ function operatorTopicSignalStrippedEventTerms(topic: EnrichedTrendingTopic): st
     .filter(Boolean))].slice(0, 4);
 }
 
-function isSpecificOperatorSubjectSignal(topic: EnrichedTrendingTopic): boolean {
+function isSpecificOperatorSubjectSignal(topic: EnrichedTrendingTopic, nowMs = Date.now()): boolean {
   const category = normalizeTopic(topic.category);
   const wordCount = category.split(/\s+/).filter(Boolean).length;
   const domain = classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain);
-  return getOperatorTopicSignalRejectionCodes(topic, { category, wordCount, domain }).length === 0;
+  return getOperatorTopicSignalRejectionCodes(topic, { category, wordCount, domain, nowMs }).length === 0;
 }
 
 export type OperatorTopicSignalRejectionCode =
+  | 'stale_topic_signal'
   | 'not_followed_network'
   | 'operator_engagement_below_floor'
   | 'topic_confidence_below_floor'
@@ -800,7 +803,7 @@ export type OperatorTopicSignalRejectionCode =
 
 export function getOperatorTopicSignalRejectionCodes(
   topic: EnrichedTrendingTopic,
-  normalized?: { category: string; wordCount: number; domain: TopicSemanticDomain },
+  normalized?: { category: string; wordCount: number; domain: TopicSemanticDomain; nowMs?: number },
 ): OperatorTopicSignalRejectionCode[] {
   const category = normalized?.category ?? normalizeTopic(topic.category);
   const wordCount = normalized?.wordCount ?? category.split(/\s+/).filter(Boolean).length;
@@ -808,7 +811,16 @@ export function getOperatorTopicSignalRejectionCodes(
     ?? classifyGeoffreyTopicDomain(`${topic.category} ${topic.headline}`, topic.semanticDomain);
   const codes: OperatorTopicSignalRejectionCode[] = [];
   if (topic.discoveryMethod !== 'followed_network') codes.push('not_followed_network');
-  if (Number(topic.operatorEngagementScore || 0) < 0.7) codes.push('operator_engagement_below_floor');
+  const observedAt = Date.parse(topic.observedAt || topic.timestamp);
+  if (!Number.isFinite(observedAt) || (normalized?.nowMs ?? Date.now()) - observedAt > 24 * 60 * 60 * 1000 || observedAt > (normalized?.nowMs ?? Date.now()) + 5 * 60 * 1000) codes.push('stale_topic_signal');
+  const engaged = Number(topic.operatorEngagementScore || 0) >= 0.7;
+  const networkBreakout = Number(topic.networkMomentumScore || 0) >= 0.5
+    && Number(topic.topicConfidence || 0) >= 0.65
+    && (Number(topic.sourceCount || 0) >= 2
+      || (Number(topic.networkMomentumScore || 0) >= 0.6
+        && Number(topic.networkBreakoutScore || 0) >= 0.65
+        && Number(topic.topicConfidence || 0) >= 0.8));
+  if (!engaged && !networkBreakout) codes.push('operator_engagement_below_floor');
   if (Number(topic.topicConfidence || 0) < 0.55) codes.push('topic_confidence_below_floor');
   if (topic.topicUncertainty === 'high') codes.push('topic_uncertainty_high');
   if (topic.fitScores.identityFit < 0.45) codes.push('identity_below_floor');
@@ -873,20 +885,20 @@ export function selectOperatorTopicSignals(
   learnings: AgentLearnings | null,
   tolerance: TrendTolerance = 'moderate',
   limit = 4,
+  nowMs = Date.now(),
 ): OperatorTopicSignal[] {
   const boundedLimit = Math.max(0, Math.min(12, Math.floor(limit)));
   if (boundedLimit === 0) return [];
   return enrichTrendingTopics(trending, voiceProfile, learnings, tolerance)
-    .filter(isSpecificOperatorSubjectSignal)
+    .filter(topic => isSpecificOperatorSubjectSignal(topic, nowMs))
     .filter((topic) => !isVoiceProfileTopicBlocked(
       voiceProfile,
       `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`,
       topic.semanticDomain,
     ))
     .sort((left, right) => (
-      Number(isGeoffreyDeepTechnicalTopic(`${left.category} ${left.headline}`))
-      - Number(isGeoffreyDeepTechnicalTopic(`${right.category} ${right.headline}`))
-      || Number(right.operatorEngagementScore || 0) - Number(left.operatorEngagementScore || 0)
+      Number(right.operatorEngagementScore || 0) - Number(left.operatorEngagementScore || 0)
+      || Number(right.networkMomentumScore || 0) - Number(left.networkMomentumScore || 0)
       || right.fitScores.identityFit - left.fitScores.identityFit
       || right.fitScores.total - left.fitScores.total
     ))
@@ -906,6 +918,8 @@ export function selectOperatorTopicSignals(
         operatorEngagementScore: Number(topic.operatorEngagementScore || 0),
         topicConfidence: Number(topic.topicConfidence || 0),
         sourceCount: Number(topic.sourceCount || 1),
+        selectionBasis: Number(topic.operatorEngagementScore || 0) >= 0.7 ? 'operator_engagement' : 'network_momentum',
+        networkMomentumScore: Number(topic.networkMomentumScore || 0),
       };
     });
 }
@@ -923,7 +937,7 @@ function buildOperatorTopicSignalEvidence(topic: EnrichedTrendingTopic): SourceP
     spreadMechanics: [],
     entityRoles: operatorTopicSignalEntityRoles(topic, subject),
     strippedEventTerms: operatorTopicSignalStrippedEventTerms(topic),
-    instruction: 'Geoffrey recently engaged with this subject. Treat the classifier label as a topic cue only: use its named entities or domain, but do not repeat or imply the source headline, action, number, quote, or factual claim. Entity roles prevent actor swaps but do not establish a relationship between entities.',
+    instruction: 'This subject is supported by recent operator engagement or followed-network momentum. Treat the classifier label as a topic cue only: use its named entities or domain, but do not repeat or imply the source headline, action, number, quote, or factual claim. Entity roles prevent actor swaps but do not establish a relationship between entities.',
   };
 }
 
@@ -972,9 +986,8 @@ export function buildSourcePlannerPlan({
     .filter(accountTopicAllowed)
     .filter(isSpecificOperatorTopicSignal)
     .sort((a, b) => (
-      Number(isGeoffreyDeepTechnicalTopic(`${a.category} ${a.headline}`))
-      - Number(isGeoffreyDeepTechnicalTopic(`${b.category} ${b.headline}`))
-      || Number(b.operatorEngagementScore || 0) - Number(a.operatorEngagementScore || 0)
+      Number(b.operatorEngagementScore || 0) - Number(a.operatorEngagementScore || 0)
+      || Number(b.networkMomentumScore || 0) - Number(a.networkMomentumScore || 0)
       || b.fitScores.total - a.fitScores.total
     ));
 

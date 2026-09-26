@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildFailedStoryAttemptsV2,
   rotateBudgetedBriefsV2,
+  prioritizeCurrentInterestBriefsV2,
   buildGenerationBriefsV2,
   buildGenerationLearningBriefV2,
   buildGenerationWritingConstraintsV2,
@@ -4862,4 +4863,13 @@ describe('budgeted brief topic mix', () => {
     expect(rotateBudgetedBriefsV2([], 'run-8')).toEqual([]);
     expect(rotateBudgetedBriefsV2(['only'], 'run-8')).toEqual(['only']);
   });
+});
+
+
+it('funds current-interest briefs ahead of historical labels in single-draft runs', () => {
+  const briefs = [{ id: 'research', trendTopicId: 'story-1', storyClusterId: 'story-1' }, { id: 'liked', trendTopicId: 'x-liked' },
+    { id: 'momentum', trendTopicId: 'x-rising' }, { id: 'old-topic', trendTopicId: null }];
+  for (const run of ['run-a', 'run-b', 'run-c', 'run-d']) {
+    expect(prioritizeCurrentInterestBriefsV2(briefs, run).slice(0, 2).map(b => b.id)).toEqual(['liked', 'momentum']);
+  }
 });
