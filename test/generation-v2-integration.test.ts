@@ -404,7 +404,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(critics[0].jsonSchema).toEqual(critics[1].jsonSchema);
     expect(critics.every(o=>o.modelStack==='publishing_v2_gpt_control'&&o.openAiReasoningEffort==='medium')).toBe(true);
     expect(traces.some(t=>t.generationPolicyVersion==='legacy-v2')).toBe(true);
-    expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-6')).toBe(true);
+    expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-7')).toBe(true);
   });
 
   it('compares three ideas in one call and funds one variant-set writer per brief', async () => {
@@ -424,7 +424,7 @@ describe('generateTweetBatchV2 integration', () => {
       expect(writer.system + writer.prompt).not.toContain('this control variant is only the direct reaction');
     }
     expect(calls.filter(o=>o.task==='idea_judgment'||o.task==='copy_judgment').every(o=>o.modelStack==='publishing_v2_gpt_control' && o.openAiReasoningEffort==='medium')).toBe(true);
-    expect(trace.generationPolicyVersion).toBe('geoffrey-autopost-per-dollar-6');
+    expect(trace.generationPolicyVersion).toBe('geoffrey-autopost-per-dollar-7');
     expect(trace.stageCounts.ideasGenerated).toBe(Math.min(2, briefs.length) * 3);
     expect(calls.filter(o=>o.task==='idea_generation').every(o=>JSON.parse(o.prompt).requirements.ideasPerBrief===3)).toBe(true);
     expect(trace.stageCounts.ideaRetryCalls).toBe(0);
@@ -459,7 +459,9 @@ describe('generateTweetBatchV2 integration', () => {
       onTrace: value => { trace = value; },
     }).finally(() => { clock.mockRestore(); uuid.mockRestore(); });
     expect(trace.outcomeCode).not.toBe('budget_exhausted');
-    expect(mocks.generateText.mock.calls.filter(([o]) => o.task === 'idea_generation')).toHaveLength(1);
+    // Two briefs are ideated for breadth; only the best idea funds a writer.
+    expect(mocks.generateText.mock.calls.filter(([o]) => o.task === 'idea_generation')).toHaveLength(2);
+    expect(mocks.generateText.mock.calls.filter(([o]) => o.task === 'tweet_writing')).toHaveLength(1);
     expect(mocks.generateText.mock.calls.some(([o]) => o.task === 'copy_judgment')).toBe(true);
     expect(outputs).toHaveLength(1);
     expect(trace.requestedCount).toBe(2);
