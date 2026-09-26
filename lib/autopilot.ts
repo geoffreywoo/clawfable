@@ -2882,6 +2882,9 @@ export async function refillQueue(
       const currentQueue = await getQueuedTweets(agent.id);
       const valid = await validateQueuedTweetsForPosting(agent, currentQueue.filter(tweet => !tweet.quarantinedAt && tweet.type !== 'reply' && !tweet.followupForTweetId));
       refillCount = Math.min(refillCount, Math.max(0, settings.minQueueSize - valid.length));
+      if (process.env.NODE_ENV !== 'test') {
+        console.info('[refill]', JSON.stringify({ agentId: agent.id, requested: count, queued: currentQueue.length, valid: valid.length, minQueueSize: settings.minQueueSize, refillCount }));
+      }
       if (refillCount === 0) return 0;
     }
     if (context.learnings?.voiceCorpus?.active !== true) {

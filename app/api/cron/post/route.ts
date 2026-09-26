@@ -351,6 +351,12 @@ export async function GET(request: NextRequest) {
 
           const result = await runAutopilot(agent);
           autopilotResults.push(result);
+          // Tick outcomes otherwise live only in KV; never log post copy here.
+          console.info('[cron:autopilot]', JSON.stringify({
+            agentId: agent.id,
+            action: result.action,
+            reason: (result.reason || '').slice(0, 240),
+          }));
 
           // Log the result to the agent's post log (skips, errors, etc.)
           if (result.action !== 'posted') {

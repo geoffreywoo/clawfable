@@ -193,6 +193,11 @@ function isGenerationSubjectBlocked(
 }
 export const V2_MIN_GEOFFREY_AI_FRONTIER_LEAD = 0.72;
 export const V2_MIN_GEOFFREY_AI_BULLISHNESS = PUBLISHING_V2_GEOFFREY_AI_AMBITION;
+// The idea judge scores a premise before any copy exists, and the writer is
+// told to push AI ambition further. Idea floors only veto premises that cannot
+// plausibly clear the final floors; the final copy gates stay authoritative.
+export const V2_MIN_GEOFFREY_IDEA_AI_BULLISHNESS = Number((V2_MIN_GEOFFREY_AI_BULLISHNESS - 0.07).toFixed(2));
+export const V2_MIN_GEOFFREY_IDEA_FRONTIER_LEAD = 0.64;
 export const V2_MIN_GEOFFREY_TRAJECTORY_CONVICTION = 0.72;
 export const V2_MIN_GEOFFREY_FORECAST_GROUNDING = 0.6;
 export const V2_MIN_GEOFFREY_EXPONENTIAL_INTUITION = 0.58;
@@ -4442,10 +4447,10 @@ export function getV2IdeaJudgeRejectionCodes(
     breakdown.nativeReactionPotential < nativeReactionFloor ? 'idea_judge_weak_native_reaction' : null,
     breakdown.publicMoveStrength < publicMoveFloor ? 'idea_judge_weak_public_move' : null,
     breakdown.sharePotential < sharePotentialFloor ? 'idea_judge_low_share_potential' : null,
-    geoffreyAI && breakdown.frontierLead < V2_MIN_GEOFFREY_AI_FRONTIER_LEAD
+    geoffreyAI && breakdown.frontierLead < V2_MIN_GEOFFREY_IDEA_FRONTIER_LEAD
       ? 'idea_judge_lagging_frontier_baseline'
       : null,
-    geoffreyAI && breakdown.aiBullishness < V2_MIN_GEOFFREY_AI_BULLISHNESS
+    geoffreyAI && breakdown.aiBullishness < V2_MIN_GEOFFREY_IDEA_AI_BULLISHNESS
       ? 'idea_judge_timid_ai_posture'
       : null,
     explicitTimedForecast && breakdown.trajectoryConviction < V2_MIN_GEOFFREY_TRAJECTORY_CONVICTION

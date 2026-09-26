@@ -62,6 +62,8 @@ import {
   shouldTryV2SubtractiveTailRepair,
   type GenerationBriefV2,
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
+  V2_MIN_GEOFFREY_AI_BULLISHNESS,
+  V2_MIN_GEOFFREY_IDEA_AI_BULLISHNESS,
 } from '@/lib/generation-v2';
 import { buildResearchSemanticKey, extractResearchEntities, stableResearchId } from '@/lib/research-utils';
 import { getPublishingV2AutopostQualityMargin } from '@/lib/publishing-quality-policy';
@@ -680,15 +682,17 @@ describe('Tweet Generation V2', () => {
     expect(getV2IdeaJudgeRejectionCodes({
       ...lagging,
       frontierLead: 0.9,
-      aiBullishness: 0.899,
+      aiBullishness: V2_MIN_GEOFFREY_IDEA_AI_BULLISHNESS - 0.001,
       trajectoryConviction: 0.9,
       forecastGrounding: 0.9,
       exponentialIntuition: 0.9,
     }, geoffreyVoice, 'OpenAI coding agents')).toContain('idea_judge_timid_ai_posture');
+    // The idea floor is a pre-filter below the final copy floor.
+    expect(V2_MIN_GEOFFREY_IDEA_AI_BULLISHNESS).toBeLessThan(V2_MIN_GEOFFREY_AI_BULLISHNESS);
     expect(getV2IdeaJudgeRejectionCodes({
       ...lagging,
       frontierLead: 0.9,
-      aiBullishness: 0.9,
+      aiBullishness: V2_MIN_GEOFFREY_IDEA_AI_BULLISHNESS,
       trajectoryConviction: 0.9,
       forecastGrounding: 0.9,
       exponentialIntuition: 0.9,
