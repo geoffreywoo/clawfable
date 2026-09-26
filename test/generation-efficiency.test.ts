@@ -40,13 +40,18 @@ describe('autopost efficiency policy',()=>{
    expect(substantiveBriefDigest(b,['qualified claim'],'v1','p1')).toBe(substantiveBriefDigest(Object.assign({},b,{cachedAt:'new'}),['qualified claim'],'v1','p1'));
    expect(substantiveBriefDigest(b,['new claim'],'v1','p1')).not.toBe(substantiveBriefDigest(b,['qualified claim'],'v1','p1'));
  });
- it('blocks unchanged briefs for 24h and pauses three distinct empty runs for 6h',async()=>{
-   const id='efficiency-'+Date.now(), now=Date.now();
-   for(let i=0;i<3;i++) await recordBriefAttempts(id,'r'+i,[{key:'b'+i,outcome:'quality_empty'}],now+i);
-   expect((await failedBriefKeys(id,now+100)).size).toBe(3);
-   expect(await qualityGenerationPauseUntil(id,now+100)).toBe(now+2+21600000);
-   expect(await qualityGenerationPauseUntil(id,now+21600003)).toBe(null);
-   expect((await failedBriefKeys(id,now+86400003)).size).toBe(0);
+ it('cools a brief for 3h after one empty run, 24h after a repeat, and pauses five distinct empty runs for 2h',async()=>{
+   const id='efficiency-'+Date.now(), now=Date.now(), H=3600000;
+   for(let i=0;i<4;i++) await recordBriefAttempts(id,'r'+i,[{key:'b'+i,outcome:'quality_empty'}],now+i);
+   expect((await failedBriefKeys(id,now+100)).size).toBe(4);
+   expect(await qualityGenerationPauseUntil(id,now+100)).toBe(null);
+   await recordBriefAttempts(id,'r4',[{key:'b4',outcome:'quality_empty'}],now+4);
+   expect(await qualityGenerationPauseUntil(id,now+100)).toBe(now+4+2*H);
+   expect(await qualityGenerationPauseUntil(id,now+2*H+5)).toBe(null);
+   expect((await failedBriefKeys(id,now+3*H+5)).size).toBe(0);
+   await recordBriefAttempts(id,'r5',[{key:'b0',outcome:'quality_empty'}],now+3*H+10);
+   expect((await failedBriefKeys(id,now+6*H+20)).has('b0')).toBe(true);
+   expect((await failedBriefKeys(id,now+24*H+5)).has('b0')).toBe(false);
  });
 });
 function examples(n=30):QualityCalibrationExample[]{return ['approved','rejected'].flatMap(label=>Array.from({length:n},(_,i)=>({id:label+i,group:label+i,label:label as any,labelSource:label==='approved'?'owner_approval':'owner_editorial_rejection',isAi:true,aiAmbition:label==='approved'?0.88:0.6,qualityMargin:label==='approved'?0.86:0.6,otherGatesPass:true,usedAsPromptAnchor:false,usedAsEvaluationBrief:false})));}
@@ -64,11 +69,11 @@ describe('owner calibration',()=>{
 
 it('keeps paid failure history but does not apply an obsolete generation policy pause to a corrected policy', async () => {
  const id='policy-pause-'+Date.now(), now=Date.now();
- for(let i=0;i<3;i++) await recordBriefAttempts(id,'old'+i,[{key:'old'+i,outcome:'quality_empty'}],now+i,'old');
+ for(let i=0;i<5;i++) await recordBriefAttempts(id,'old'+i,[{key:'old'+i,outcome:'quality_empty'}],now+i,'old');
  expect(await qualityGenerationPauseUntil(id,now+100,'old')).not.toBeNull();
  expect(await qualityGenerationPauseUntil(id,now+100,'new')).toBeNull();
- expect((await failedBriefKeys(id,now+100)).size).toBe(3);
- for(let i=0;i<3;i++) await recordBriefAttempts(id,'new'+i,[{key:'new'+i,outcome:'quality_empty'}],now+10+i,'new');
+ expect((await failedBriefKeys(id,now+100)).size).toBe(5);
+ for(let i=0;i<5;i++) await recordBriefAttempts(id,'new'+i,[{key:'new'+i,outcome:'quality_empty'}],now+10+i,'new');
  expect(await qualityGenerationPauseUntil(id,now+100,'new')).not.toBeNull();
 });
 
@@ -78,4 +83,21 @@ it('does not mistake credit for revenue run-rate for a leadership-installation p
  expect(isOperatorPremiseReskinV2('I would give Cognition full credit for a revenue run-rate milestone.', [leadership])).toBe(false);
  expect(isOperatorPremiseReskinV2('I would give Cognition full credit for a revenue run rate milestone.', [leadership])).toBe(false);
  expect(isOperatorPremiseReskinV2('I would give Sam control of the company.', [leadership])).toBe(true);
+});
+
+it('feeds recent rejected premises for the same brief back to ideation and never pauses on zero-cost empty context', async () => {
+ const { buildPriorBriefFailuresV2, getGenerationV2QualityPauseUntil } = await import('@/lib/generation-v2');
+ const now = Date.parse('2026-09-26T12:00:00Z');
+ const idea = (over: any) => ({ briefId: 'b1', status: 'rejected', generationRunId: 'old', rejectionCodes: ['idea_judge_timid_ai_posture'],
+   createdAt: new Date(now - 3600000).toISOString(), claim: 'c', tension: 't', implication: 'i', publicMove: 'move', ...over });
+ const failures = buildPriorBriefFailuresV2([{ id: 'b1' } as any, { id: 'b2' } as any], [
+   idea({}), idea({ generationRunId: 'current' }), idea({ status: 'selected' }),
+   idea({ createdAt: new Date(now - 25 * 3600000).toISOString() }), idea({ briefId: 'b2', rejectionCodes: [] }),
+ ] as any, 'current', now);
+ expect(failures).toHaveLength(1);
+ expect(failures[0]).toMatchObject({ briefId: 'b1', attempts: [{ rejectionCodes: ['idea_judge_timid_ai_posture'] }] });
+ const run = (outcomeCode: string) => ({ mode: 'live', status: 'empty', inputFingerprint: 'fp', outcomeCode,
+   startedAt: new Date(now - 60000).toISOString(), completedAt: new Date(now - 60000).toISOString() }) as any;
+ expect(getGenerationV2QualityPauseUntil([run('no_qualified_context')], 'fp', new Date(now))).toBeNull();
+ expect(getGenerationV2QualityPauseUntil([run('quality_empty')], 'fp', new Date(now))).not.toBeNull();
 });

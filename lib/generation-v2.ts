@@ -458,7 +458,9 @@ export function getGenerationV2QualityPauseUntil(
       run.mode !== 'preview'
       && run.status === 'empty'
       && run.inputFingerprint === inputFingerprint
-      && (run.outcomeCode === 'quality_empty' || run.outcomeCode === 'no_qualified_context')
+      // no_qualified_context makes no model calls, so pausing on it saves nothing
+      // and only delays the run that follows fresh research.
+      && run.outcomeCode === 'quality_empty'
     ))
     .sort((left, right) => Date.parse(right.completedAt || right.startedAt) - Date.parse(left.completedAt || left.startedAt))[0];
   if (!previous) return null;
@@ -4003,6 +4005,38 @@ function compactIdeaLearningBrief(
   };
 }
 
+const PRIOR_BRIEF_FAILURE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export function buildPriorBriefFailuresV2(
+  briefs: GenerationBriefV2[],
+  recentIdeas: IdeaCandidate[],
+  runId: string,
+  now = Date.now(),
+): Array<{ briefId: string; attempts: Array<{ publicMove: string; claim: string; tension: string; implication: string; rejectionCodes: string[] }> }> {
+  return briefs.map((brief) => ({
+    briefId: brief.id,
+    attempts: recentIdeas
+      .filter((idea) => {
+        const createdAt = Date.parse(idea.createdAt);
+        return idea.briefId === brief.id
+          && idea.status === 'rejected'
+          && idea.generationRunId !== runId
+          && idea.rejectionCodes.length > 0
+          && Number.isFinite(createdAt)
+          && now - createdAt < PRIOR_BRIEF_FAILURE_WINDOW_MS;
+      })
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+      .slice(0, MAX_IDEA_CANDIDATES_PER_BRIEF)
+      .map((idea) => ({
+        publicMove: ideaPublicMove(idea),
+        claim: idea.claim,
+        tension: idea.tension,
+        implication: idea.implication,
+        rejectionCodes: idea.rejectionCodes.slice(0, 6),
+      })),
+  })).filter((failure) => failure.attempts.length > 0);
+}
+
 async function generateIdeas({
   input,
   briefs,
@@ -4011,6 +4045,7 @@ async function generateIdeas({
   runId,
   calls,
   onRetryBudgetDeferred,
+  recentIdeas = [],
 }: {
   input: GenerateTweetBatchV2Input;
   briefs: GenerationBriefV2[];
@@ -4019,6 +4054,7 @@ async function generateIdeas({
   runId: string;
   calls: GenerationModelCallTrace[];
   onRetryBudgetDeferred?: (briefCount: number) => void;
+  recentIdeas?: IdeaCandidate[];
 }): Promise<IdeaCandidate[]> {
   const premiseExclusions = operatorPremiseExclusions(input, briefs.map((brief) => brief.topic));
   const semanticMemory = uniqueStrings([
@@ -4146,7 +4182,12 @@ async function generateIdeas({
     return results;
   };
   const briefBatches = splitBriefs(briefs);
-  const batchResults = await runBriefBatches(briefBatches);
+  // Efficient runs remember failed premises rather than silencing the brief:
+  // the next attempt sees what was rejected and why, and must develop a new idea.
+  const priorFailures = usesEfficientGeneration(input)
+    ? buildPriorBriefFailuresV2(briefs, recentIdeas, runId)
+    : [];
+  const batchResults = await runBriefBatches(briefBatches, priorFailures);
   assertGenerationRunBudget(calls);
   if (batchResults.every((result) => result.failed)) {
     throw new Error('idea_generation_failed');
@@ -5359,8 +5400,14 @@ async function writeIdeaDrafts({
     collectOperatorAnchors(input),
   );
   const budgetedSingleDraft = usesEfficientGeneration(input) && initialSingleDraft;
+  // A budgeted run funds one writer call. Asking it for alternatives keeps the
+  // same substance contract while giving the conjunctive final gates three
+  // chances instead of one.
+  const budgetedVariantSet = usesEfficientGeneration(input) && initialMultiDraft;
   const variantInstruction = budgetedSingleDraft
     ? 'Write exactly one complete X post from the approved idea. State the judgment and retain one supplied reason, concrete choice, or consequence when it is what makes the judgment distinctive. Use one or two natural sentences; stop when the thought is complete.'
+    : budgetedVariantSet
+    ? `Write exactly ${draftCount} complete, separately conceived X posts from the approved idea. Each states the judgment and retains one supplied reason, concrete choice, or consequence when it is what makes the judgment distinctive. Each uses one or two natural sentences and stops when the thought is complete. Use different openings and sentence skeletons; they are alternatives, not short, medium, and long versions of one sentence.`
     : initialSingleDraft && initialCreativeMove
     ? `Write exactly one X post. ${INITIAL_CREATIVE_MOVE_INSTRUCTIONS_V2[initialCreativeMove]}`
     : draftCount === 1
@@ -5380,7 +5427,7 @@ async function writeIdeaDrafts({
         ? 'Return exactly two candidate revisions. The first makes the smallest substantive critic-directed repair. The second starts from the approved publicMove again and applies the same diagnosis with a different sentence skeleton. A change to capitalization, punctuation, or grammar alone is not a revision.'
         : 'Return exactly two newly conceived X posts from the approved publicMove. Apply the critic diagnosis with different openings and sentence skeletons; neither may edit or paraphrase the failed attempt.'
     : 'Write exactly three separately conceived X posts from one approved idea. They are not short, medium, and long versions of one sentence. Do not summarize or reconcile all three.';
-  const shapeInstruction = budgetedSingleDraft
+  const shapeInstruction = budgetedSingleDraft || budgetedVariantSet
     ? 'Choose the shortest natural shape that preserves the actual decision and what is at stake. Brevity must not erase the approved idea’s distinctive substance. Do not add a second argument, unsupported fact, or slogan-like closer.'
     : draftCount === 1
     ? initialSingleDraft
@@ -5397,7 +5444,7 @@ async function writeIdeaDrafts({
         ? 'Let both initial drafts choose their own natural length and shape. Use different openings and public moves; neither draft is a revision of the other.'
         : 'Keep one candidate close enough to preserve the sound core, but make the other materially different in wording and shape. Both must fix the substantive issue named by the critic.'
       : 'Let each draft choose its own natural length and shape. Use three genuinely different openings, public moves, and sentence skeletons; do not assign fixed length roles.';
-  const consequenceInstruction = budgetedSingleDraft
+  const consequenceInstruction = budgetedSingleDraft || budgetedVariantSet
     ? 'You may express one concrete reason or consequence already present in publicMove, pressure, or stakes. Keep it part of the same judgment, not an appended lesson. Never invent supporting facts, personal experience, a mechanism, or an additional thesis.'
     : initialSingleDraft && initialCreativeMove
     ? `This independent variant must perform only the ${initialCreativeMove.replace(/_/g, ' ')} move assigned in the payload. Use the approved packet only; no new facts, personal experiences, or conclusions.`
@@ -5754,7 +5801,7 @@ async function generateDraftEvaluations({
       anchorOffset: number;
       initialSingleMoveFromAnchor: boolean;
       initialCreativeMove?: InitialCreativeMoveV2;
-    }> = usesEfficientGeneration(input) ? [{ modelStack: input.modelStack, initialDraftCount: 1, candidateIdSalt: 'budget-single', anchorOffset: 0, initialSingleMoveFromAnchor: false }] : input.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK || (isGeoffreyVoiceProfile(input.voiceProfile)
+    }> = usesEfficientGeneration(input) ? [{ modelStack: input.modelStack, initialDraftCount: MAX_DRAFTS_PER_IDEA, candidateIdSalt: 'budget-variants', anchorOffset: 0, initialSingleMoveFromAnchor: false }] : input.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK || (isGeoffreyVoiceProfile(input.voiceProfile)
       && (
         input.modelStack === PUBLISHING_V2_CONTROL_MODEL_STACK
         || input.modelStack === PUBLISHING_V2_GPT_CONTROL_MODEL_STACK
@@ -7656,7 +7703,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
 
     if (Date.now() >= runDeadlineAt) throw new Error('run_deadline');
     try {
-      ideas = await generateIdeas({ input, briefs, documents, blocks, runId, calls: trace.modelCalls,
+      ideas = await generateIdeas({ input, briefs, documents, blocks, runId, calls: trace.modelCalls, recentIdeas,
         onRetryBudgetDeferred: (briefCount) => { trace.stageCounts.ideaRetryBudgetDeferred = briefCount; },
       });
     } finally {

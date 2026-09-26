@@ -2,7 +2,7 @@ import type { CandidateJudgeBreakdown } from './types';
 import { createHash } from 'node:crypto';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 
-export const EFFICIENT_GENERATION_POLICY = 'geoffrey-autopost-per-dollar-5';
+export const EFFICIENT_GENERATION_POLICY = 'geoffrey-autopost-per-dollar-6';
 export interface RepairDecision {
   disposition: 'pass' | 'repair' | 'abandon';
   failingDimension: string;
@@ -54,18 +54,34 @@ export function substantiveBriefDigest(brief: { topic: string; title: string; so
 }
 interface BriefAttempt { policyVersion?: string; key: string; runId: string; at: number; outcome: 'quality_empty' | 'completed' | 'running'; }
 interface FailureState { attempts: BriefAttempt[]; }
-export async function failedBriefKeys(agentId: string, now = Date.now()): Promise<Set<string>> {
-  const state = await getAiOperationalState<FailureState>(agentId, 'brief-attempts');
-  return new Set((state?.attempts || []).filter(a => (a.outcome === 'quality_empty' && now - a.at < 86400000) || (a.outcome === 'running' && now-a.at<300000)).map(a => a.key));
+// Rejected premises are fed back to ideation, so a brief is worth retrying soon
+// after one empty run. Only a brief that keeps failing is rested for a day.
+export const BRIEF_FIRST_FAILURE_COOLDOWN_MS = 3 * 60 * 60 * 1000;
+export const BRIEF_REPEAT_FAILURE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const BRIEF_CLAIM_TTL_MS = 5 * 60 * 1000;
+export function isBriefCoolingDown(attempts: BriefAttempt[], key: string, now: number, runId?: string): boolean {
+  const mine = attempts.filter(a => a.key === key && a.runId !== runId);
+  if (mine.some(a => a.outcome === 'running' && now - a.at < BRIEF_CLAIM_TTL_MS)) return true;
+  const failures = mine.filter(a => a.outcome === 'quality_empty' && now - a.at < BRIEF_REPEAT_FAILURE_COOLDOWN_MS);
+  if (failures.length >= 2) return true;
+  return failures.some(a => now - a.at < BRIEF_FIRST_FAILURE_COOLDOWN_MS);
 }
+export async function failedBriefKeys(agentId: string, now = Date.now()): Promise<Set<string>> {
+  const attempts = (await getAiOperationalState<FailureState>(agentId, 'brief-attempts'))?.attempts || [];
+  return new Set(attempts.map(a => a.key).filter(key => isBriefCoolingDown(attempts, key, now)));
+}
+export const QUALITY_PAUSE_EMPTY_RUNS = 5;
+export const QUALITY_PAUSE_MS = 2 * 60 * 60 * 1000;
 export async function qualityGenerationPauseUntil(agentId: string, now = Date.now(), policyVersion?: string): Promise<number | null> {
   const state = await getAiOperationalState<FailureState>(agentId, 'brief-attempts');
   const runs = new Map<string, BriefAttempt[]>();
   for (const a of [...(state?.attempts || []).filter(a=>a.outcome!=='running' && (!policyVersion || a.policyVersion === policyVersion))].sort((a,b) => b.at-a.at)) runs.set(a.runId, [...(runs.get(a.runId) || []), a]);
-  const recent = [...runs.values()].slice(0,3);
-  if (recent.length < 3 || recent.some(run => run.some(a => a.outcome !== 'quality_empty'))) return null;
-  if (new Set(recent.flat().map(a => a.key)).size < 3) return null;
-  const until = Math.max(...recent[0].map(a => a.at)) + 21600000;
+  // The daily budget ledger bounds spend; this pause only stops a clearly
+  // broken configuration from draining it, so it needs a longer empty streak.
+  const recent = [...runs.values()].slice(0,QUALITY_PAUSE_EMPTY_RUNS);
+  if (recent.length < QUALITY_PAUSE_EMPTY_RUNS || recent.some(run => run.some(a => a.outcome !== 'quality_empty'))) return null;
+  if (new Set(recent.flat().map(a => a.key)).size < QUALITY_PAUSE_EMPTY_RUNS) return null;
+  const until = Math.max(...recent[0].map(a => a.at)) + QUALITY_PAUSE_MS;
   return until > now ? until : null;
 }
 export async function recordBriefAttempts(agentId: string, runId: string, entries: {key: string; outcome: BriefAttempt['outcome']}[], now = Date.now(), policyVersion?: string): Promise<void> {
@@ -77,8 +93,7 @@ export async function recordBriefAttempts(agentId: string, runId: string, entrie
 export async function claimGenerationBriefs(agentId: string, runId: string, keys: string[], now = Date.now()): Promise<string[]> {
   return mutateAiOperationalState<FailureState,string[]>(agentId,'brief-attempts',state=>{
     const current=(state?.attempts || []).filter(a=>now-a.at<7*86400000);
-    const available=keys.filter(key=>!current.some(a=>a.key===key && a.runId!==runId && (
-      (a.outcome==='quality_empty' && now-a.at<86400000) || (a.outcome==='running' && now-a.at<300000))));
+    const available=keys.filter(key=>!isBriefCoolingDown(current,key,now,runId));
     return {value:{attempts:[...current,...available.filter(key=>!current.some(a=>a.runId===runId&&a.key===key)).map(key=>({key,runId,at:now,outcome:'running' as const}))]},result:available};
   });
 }
