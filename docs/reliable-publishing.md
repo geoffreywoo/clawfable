@@ -40,3 +40,13 @@ Follow-up verification must inspect job stage/blocker/retry time, paid and unres
 ## Verification of the stop and recovery follow-up
 
 All 168 test files passed (1,849 tests), including the corrected distributed-storage harness. TypeScript checking and the production build passed. Targeted coverage includes canary deduplication, legacy operational/selection dispositions, single expression-repair eligibility, and qualified fifth-selection exploration. These checks establish implementation behavior, not live editorial yield.
+
+## September 26 follow-up — 11:40 Pacific
+
+The canary remained blocked at $0.77710, with no new original generation, queue entries, or X publication receipts. Daily commitments were $12.33824, including the unchanged $5.49037 unresolved; the $0.45009 increase came from seven settled background research, topic, seed, and performance calls. Both production domains responded successfully and the exact production deployment remained Ready.
+
+Offline replay of all six saved canary drafts reproduced the technical failure: four scored 0.160, one 0.215, and one 0.220 against the unchanged 0.450 floor. All six received zero domain and specificity credit. This supports the vocabulary-coverage diagnosis; it is not an owner-quality label or proof of factual correctness. The private replay artifact is `.gstack/reliable-publishing/2026-09-26-technical-replay.json`. No paid experiment or policy relaxation was used.
+
+Posting logs were still emitting a generic empty-queue message despite the explicit canary stop. The follow-up fixes those missed-slot reasons to name the durable stage/blocker, failed gates, and next eligible action. A blocked canary overrides an old reserve retry timestamp and explicitly reports that automatic retry is stopped; expired evidence cannot be described as resumable. Owner calibration and a validated content-stage recovery remain outstanding.
+
+Validation: 1,852 tests across 169 files passed after isolating the judge-recovery fixture from random subject rotation; the fixture now explicitly pairs its fixed investing prediction with a markets brief. The three new blocker tests cover canary precedence, evidence expiry, and provider retry timing. The posting log looks up the active job's trace, so an unrelated newer preview cannot supply its rejection reasons.

@@ -377,10 +377,16 @@ describe('generateTweetBatchV2 integration', () => {
       if(options.task==='idea_judgment') throw new Error('judge temporarily unavailable');
       throw new Error(`Unexpected task ${options.task}`);
     });
-    const durableInput={...input,agentId:'13',count:1,durableGeneration:true,modelStack:'publishing_v2_astra' as const,generationPolicy:'budget_v1' as const};
+    // This test exercises judge recovery, not random brief/topic rotation.
+    // Keep its fixed activist-investing idea paired with a markets subject.
+    const durableInput={...input,agentId:'13',count:1,requestedTopic:'markets',
+      voiceProfile:{...input.voiceProfile,topics:['markets']},
+      analysis:{...input.analysis,engagementPatterns:{topTopics:['markets']}},
+      durableGeneration:true,modelStack:'publishing_v2_astra' as const,generationPolicy:'budget_v1' as const};
     await generateTweetBatchV2(durableInput);
     expect(mocks.durableState.get('generation-job').checkpoints.ideas_ready).toHaveLength(1);
-    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='idea_judgment')).toHaveLength(1);
+    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='idea_judgment'),
+      JSON.stringify(mocks.durableState.get('generation-job').checkpoints.ideas_ready)).toHaveLength(1);
     const saved=mocks.durableState.get('generation-job');
     mocks.durableState.set('generation-job',{...saved,nextAttemptAt:0,owner:null,leaseUntil:0});
     await generateTweetBatchV2(durableInput);

@@ -1,5 +1,6 @@
 import { repairTweetIndexes } from './kv-storage';
-import { durableGenerationEnabled, acknowledgeGenerationQueue, recordGenerationCanary, getGenerationCanary } from './generation-job';
+import { durableGenerationEnabled, acknowledgeGenerationQueue, recordGenerationCanary, getGenerationCanary, getGenerationJob } from './generation-job';
+import { originalQueueBlockerReason } from './original-queue-blocker';
 import { recordEmptyQueueRun } from './generation-efficiency';
 import { dispatchOriginalPost,reconcileOriginalPostDispatch,OriginalDispatchPendingError } from './original-post-dispatch';
 import { originalPostingCadence } from './original-post-cadence';
@@ -1610,8 +1611,15 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   }
 
   if (activeQueue.length === 0) {
-    const latestGeneration = (await getGenerationRuns(agentId, 1))[0];
-    const emptyQueueReason = latestGeneration?.outcomeCode === 'budget_exhausted'
+    const durableState = durableGenerationEnabled(agentId, settings)
+      ? await Promise.all([getGenerationJob(agentId), getGenerationCanary(agentId)]) : null;
+    const recentGenerations = await getGenerationRuns(agentId, durableState ? 120 : 1);
+    const latestGeneration = durableState
+      ? recentGenerations.find(run => run.id === durableState[0]?.id)
+      : recentGenerations[0];
+    const emptyQueueReason = durableState
+      ? originalQueueBlockerReason(durableState[0], durableState[1], latestGeneration?.rejectionCounts)
+      : latestGeneration?.outcomeCode === 'budget_exhausted'
       ? 'AI generation budget limit reached. Queue refill is paused; existing spending limits remain in effect.'
       : 'Queue empty after auto-repair and generation attempts';
     return {
