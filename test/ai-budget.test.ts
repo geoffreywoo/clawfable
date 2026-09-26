@@ -137,3 +137,22 @@ it('applies the publishing floor through real account admission, not only the le
   const ledger = (await getAiOperationalState<AiSpendLedger>(agent.id, 'spend'))!;
   expect(Object.values(ledger.attempts).some(a => a.task === 'idea_generation')).toBe(true);
 });
+
+it('reloads only generation capacity for the authorized day without erasing usage or bypassing run caps', async () => {
+  const { addGenerationBudgetTopUp, generationTopUpUsd } = await import('@/lib/ai-budget');
+  const today = aiBudgetDay(), agentId = 'top-up-test';
+  const prior = { ...attempt('prior', 20, 'old-run'), day: today, state: 'settled' as const, observedUsd: 20 };
+  await mutateAiOperationalState<AiSpendLedger, void>(agentId, 'spend', () => ({
+    value: { version: 'account-budget-1', day: today, attempts: { prior } }, result: undefined,
+  }));
+  await addGenerationBudgetTopUp(agentId, 'authorized-recovery', 5, 'User requested a bounded recovery');
+  await addGenerationBudgetTopUp(agentId, 'authorized-recovery', 5, 'User requested a bounded recovery');
+  const ledger = (await getAiOperationalState<AiSpendLedger>(agentId, 'spend'))!;
+  expect(generationTopUpUsd(ledger, today)).toBe(5);
+  expect(generationTopUpUsd(ledger, '2099-01-01')).toBe(0);
+  expect(ledger.attempts.prior).toEqual(prior);
+  const next = { ...attempt('next', 0.7), day: today };
+  expect(reserveAiSpendInLedger(ledger, { ...context, downstreamReserveUsd: 1.1 }, next, today).attempts.next).toBeDefined();
+  expect(() => reserveAiSpendInLedger(ledger, { ...context, operation: 'seed-synthesis' }, next, today)).toThrow('budget_exhausted');
+  expect(() => reserveAiSpendInLedger(ledger, context, { ...next, reservedUsd: 3.01 }, today)).toThrow('budget_exhausted');
+});

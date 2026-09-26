@@ -56,6 +56,7 @@ export interface AiSpendLedger {
   attempts: Record<string, AiSpendAttempt>;
   openingBalance?: { day: string; unresolvedUsd: number; reason: 'pre_enforcement_usage_unknown' };
   completionHolds?: Record<string, { day: string; usd: number }>;
+  topUps?: Record<string, { day: string; amountUsd: number; purpose: 'generation'; reason: string; createdAt: string }>;
   outputs?: Record<string, { day: string; tweetId: string; runId: string; contentHash: string }>;
 }
 export class AiBudgetError extends Error {
@@ -72,12 +73,36 @@ export function aiSpendContext(agentId: string, operation: string, runId: string
 export function committedAiSpend(attempt: AiSpendAttempt): number {
   return attempt.state === 'released' ? 0 : attempt.observedUsd ?? attempt.reservedUsd;
 }
+export function generationTopUpUsd(ledger: AiSpendLedger | null, day = aiBudgetDay()): number {
+  return Object.values(ledger?.topUps || {}).filter(t => t.day === day && t.purpose === 'generation')
+    .reduce((sum, t) => sum + (Number.isFinite(t.amountUsd) && t.amountUsd > 0 ? t.amountUsd : 0), 0);
+}
+
+/** Explicit operator authorization only. Idempotent, day-scoped, and never erases receipts. */
+export async function addGenerationBudgetTopUp(agentId: string, id: string, amountUsd: number, reason: string): Promise<void> {
+  if (!id || !reason.trim() || !Number.isFinite(amountUsd) || amountUsd <= 0 || amountUsd > 20) throw new Error('invalid_budget_top_up');
+  const day = aiBudgetDay();
+  await mutateAiOperationalState<AiSpendLedger, void>(agentId, 'spend', ledger => {
+    if (!ledger) throw new Error('budget_ledger_missing');
+    if (ledger.topUps?.[id]) {
+      if (ledger.topUps[id].day !== day || ledger.topUps[id].amountUsd !== amountUsd) throw new Error('budget_top_up_conflict');
+      return { value: ledger, result: undefined, skip: true };
+    }
+    return { value: { ...ledger, topUps: { ...ledger.topUps, [id]: {
+      day, amountUsd, purpose: 'generation', reason, createdAt: new Date().toISOString(),
+    } } }, result: undefined };
+  });
+}
+
 export function summarizeAiSpend(ledger: AiSpendLedger | null, dailyLimitUsd = GEOFFREY_DAILY_AI_LIMIT_USD) {
+  const baseDailyLimitUsd = dailyLimitUsd;
+  const topUpUsd = generationTopUpUsd(ledger);
+  dailyLimitUsd += topUpUsd;
   const attempts = Object.values(ledger?.attempts || {}).filter(a => a.day === aiBudgetDay());
   const openingUnresolvedUsd = ledger?.openingBalance?.day === aiBudgetDay() ? ledger.openingBalance.unresolvedUsd : 0;
   const outputs = new Set(Object.values(ledger?.outputs || {}).filter(o=>o.day===aiBudgetDay()).map(o=>o.contentHash)).size;
   const completionReservedUsd = Object.values(ledger?.completionHolds || {}).filter(h=>h.day===aiBudgetDay()).reduce((n,h)=>n+h.usd,0);
-  return { openingUnresolvedUsd, openingReason: openingUnresolvedUsd ? ledger?.openingBalance?.reason : null, completionReservedUsd, remainingUsd: Math.max(0,dailyLimitUsd-openingUnresolvedUsd-completionReservedUsd-attempts.reduce((n,a)=>n+committedAiSpend(a),0)), autopostReadyTweets: outputs, costPerAutopostReadyTweetUsd: outputs ? attempts.reduce((n,a)=>n+committedAiSpend(a),0)/outputs : null, version: AI_BUDGET_VERSION, day: aiBudgetDay(), dailyLimitUsd,
+  return { openingUnresolvedUsd, openingReason: openingUnresolvedUsd ? ledger?.openingBalance?.reason : null, completionReservedUsd, remainingUsd: Math.max(0,dailyLimitUsd-openingUnresolvedUsd-completionReservedUsd-attempts.reduce((n,a)=>n+committedAiSpend(a),0)), autopostReadyTweets: outputs, costPerAutopostReadyTweetUsd: outputs ? attempts.reduce((n,a)=>n+committedAiSpend(a),0)/outputs : null, version: AI_BUDGET_VERSION, day: aiBudgetDay(), dailyLimitUsd, baseDailyLimitUsd, topUpUsd,
     observedUsd: attempts.reduce((n, a) => n + (a.observedUsd ?? 0), 0),
     unresolvedUsd: attempts.filter(a => a.state !== 'released' && a.observedUsd === null).reduce((n, a) => n + a.reservedUsd, 0),
     committedUsd: attempts.reduce((n, a) => n + committedAiSpend(a), 0), attempts: attempts.length };
@@ -85,6 +110,7 @@ export function summarizeAiSpend(ledger: AiSpendLedger | null, dailyLimitUsd = G
 export function reserveAiSpendInLedger(ledger: AiSpendLedger | null, context: AiSpendContext, attempt: AiSpendAttempt, day: string, dailyLimitUsd = GEOFFREY_DAILY_AI_LIMIT_USD, publishingReserveUsd = 0): AiSpendLedger {
   const value: AiSpendLedger = ledger || { version: AI_BUDGET_VERSION, day, attempts: {} };
   if (value.attempts[attempt.id]) return value;
+  if (context.operation === 'generation') dailyLimitUsd += generationTopUpUsd(value, day);
   const attempts = Object.values(value.attempts);
   const daily = (value.openingBalance?.day === day ? value.openingBalance.unresolvedUsd : 0) + attempts.filter(a => a.day === day).reduce((n, a) => n + committedAiSpend(a), 0);
   const run = attempts.filter(a => a.runId === context.runId).reduce((n, a) => n + committedAiSpend(a), 0);
