@@ -3485,7 +3485,7 @@ const PREMISE_CONCEPT_RULES: Array<{ id: string; pattern: RegExp }> = [
 ];
 const ACQUISITION_CEO_SENTENCE_SKELETON = /\b(?:should\s+)?(?:buy|acquire)\b.{0,100}\b(?:make|name|install)\b.{0,60}\b(?:ceo|chief executive)\b/i;
 const DIRECT_ACQUISITION_RECOMMENDATION = /\bshould\s+(?:just\s+)?(?:buy|acquire)\b/i;
-const LEADERSHIP_INSTALLATION_CALL = /\b(?:make|name|install|hand|give|put)\b.{0,80}\b(?:ceo|chief executive|control|in charge|run(?:ning)?)\b/i;
+const LEADERSHIP_INSTALLATION_CALL = /\b(?:make|name|install|hand|give|put)\b.{0,80}\b(?:ceo|chief executive|control|in charge|run(?:ning)?(?![-\s]+rate\b))\b/i;
 
 // Buckets whose trigger words are everyday startup vocabulary ("team",
 // "hire", "ship", "build", "ambitious"). A pair match that leans on one of

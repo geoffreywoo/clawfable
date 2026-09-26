@@ -71,3 +71,11 @@ it('keeps paid failure history but does not apply an obsolete generation policy 
  for(let i=0;i<3;i++) await recordBriefAttempts(id,'new'+i,[{key:'new'+i,outcome:'quality_empty'}],now+10+i,'new');
  expect(await qualityGenerationPauseUntil(id,now+100,'new')).not.toBeNull();
 });
+
+it('does not mistake credit for revenue run-rate for a leadership-installation premise', async () => {
+ const { isOperatorPremiseReskinV2 } = await import('@/lib/generation-v2');
+ const leadership = 'I would give Alex control of the company.';
+ expect(isOperatorPremiseReskinV2('I would give Cognition full credit for a revenue run-rate milestone.', [leadership])).toBe(false);
+ expect(isOperatorPremiseReskinV2('I would give Cognition full credit for a revenue run rate milestone.', [leadership])).toBe(false);
+ expect(isOperatorPremiseReskinV2('I would give Sam control of the company.', [leadership])).toBe(true);
+});
