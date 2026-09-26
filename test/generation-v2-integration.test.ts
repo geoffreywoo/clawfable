@@ -420,10 +420,13 @@ describe('generateTweetBatchV2 integration', () => {
       ledger.attempts[id] = { ...ledger.attempts[id], state: 'settled', observedUsd: 0.13 };
       return response;
     });
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-08-02T02:00:00Z'));
+    const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000000');
     let trace: any;
     const outputs = await generateTweetBatchV2({ ...input, modelStack: 'publishing_v2_astra', generationPolicy: 'budget_v1',
-      mode: 'live', persistArtifacts: false, onTrace: value => { trace = value; },
-    });
+      mode: 'live', persistArtifacts: false,
+      onTrace: value => { trace = value; },
+    }).finally(() => { clock.mockRestore(); uuid.mockRestore(); });
     expect(trace.outcomeCode).not.toBe('budget_exhausted');
     expect(mocks.generateText.mock.calls.filter(([o]) => o.task === 'idea_generation')).toHaveLength(1);
     expect(mocks.generateText.mock.calls.some(([o]) => o.task === 'copy_judgment')).toBe(true);

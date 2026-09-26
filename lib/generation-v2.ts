@@ -1631,6 +1631,13 @@ function seedRotationOffset(value: string): number {
   ), 0);
 }
 
+/** Preserve the planner's topic mix when a live budget funds only one brief. */
+export function rotateBudgetedBriefsV2<T>(briefs: T[], runId: string): T[] {
+  if (briefs.length < 2) return briefs;
+  const offset = seedRotationOffset(runId) % briefs.length;
+  return [...briefs.slice(offset), ...briefs.slice(0, offset)];
+}
+
 const COMMITTED_TWEET_STATUSES = new Set<Tweet['status']>(['queued', 'posted', 'deleted_from_x']);
 
 function isCommittedTweet(tweet: Tweet): boolean {
@@ -7507,7 +7514,9 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         const claims = sourceDocumentsForBrief(brief, documents).flatMap(doc => doc.claims.filter(c => brief.qualifiedClaimIds.includes(c.id)).map(c => c.text));
         briefKeys.set(brief.id, substantiveBriefDigest(brief, claims, `${trace.voiceCorpusVersion || ''}:${JSON.stringify(input.voiceProfile)}`, `${trace.qualityPolicyVersion || ''}:${trace.generationPolicyVersion}`));
       }
-      briefs = briefs.filter(brief => !failed.has(briefKeys.get(brief.id)!)).slice(0, Math.min(2, input.count));
+      briefs = briefs.filter(brief => !failed.has(briefKeys.get(brief.id)!));
+      if (input.mode !== 'preview') briefs = rotateBudgetedBriefsV2(briefs, runId);
+      briefs = briefs.slice(0, Math.min(2, input.count));
       if (input.mode !== 'preview') {
         const claimed = new Set(await claimGenerationBriefs(input.agentId, runId, briefs.map(brief => briefKeys.get(brief.id)!)));
         briefs = briefs.filter(brief => claimed.has(briefKeys.get(brief.id)!));

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildFailedStoryAttemptsV2,
+  rotateBudgetedBriefsV2,
   buildGenerationBriefsV2,
   buildGenerationLearningBriefV2,
   buildGenerationWritingConstraintsV2,
@@ -4846,5 +4847,19 @@ describe('Tweet Generation V2', () => {
     ];
     expect(getGenerationV2CircuitPauseUntil(failures, at)).toBe('2026-08-01T13:59:00.000Z');
     expect(getGenerationV2CircuitPauseUntil([failures[0], run('empty', '2026-08-01T11:58:30.000Z'), ...failures.slice(1)], at)).toBeNull();
+  });
+});
+
+
+describe('budgeted brief topic mix', () => {
+  it('does not always truncate the source-first portfolio to its research lane', () => {
+    const briefs = ['research', 'native-a', 'native-b', 'native-c'];
+    const selected = Array.from({ length: 100 }, (_, i) => rotateBudgetedBriefsV2(briefs, `run-${i}`)[0]);
+    expect(new Set(selected)).toEqual(new Set(briefs));
+    expect(selected.filter(x => x === 'research').length).toBeLessThan(35);
+    expect(rotateBudgetedBriefsV2(briefs, 'run-8')).toEqual(rotateBudgetedBriefsV2(briefs, 'run-8'));
+    expect(briefs).toEqual(['research', 'native-a', 'native-b', 'native-c']);
+    expect(rotateBudgetedBriefsV2([], 'run-8')).toEqual([]);
+    expect(rotateBudgetedBriefsV2(['only'], 'run-8')).toEqual(['only']);
   });
 });
