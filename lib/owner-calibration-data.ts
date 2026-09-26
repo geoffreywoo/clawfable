@@ -56,7 +56,9 @@ export function collectOwnerCalibrationData(input: { signals: LearningSignal[]; 
     if(seen.has(`${label.label}:${textHash}`) || excluded.has(label.content) || excludedGroups.has(root(textKey(label.content)))) continue;
     seen.add(`${label.label}:${textHash}`);
     eligibleLabels.push(label);
-    const draft=input.drafts.find(d=>d.content.trim()===label.content && d.judgeBreakdown && d.judgeModel===(input.judge?.model || 'gpt-5.6') && d.judgePolicyVersion===(input.judge?.policyVersion || 'budget-copy-judge-1'));
+    // Label-only consumers need no model. Scored calibration must supply
+    // its active contract explicitly; never silently select an older judge.
+    const draft=input.judge ? input.drafts.find(d=>d.content.trim()===label.content && d.judgeBreakdown && d.judgeModel===input.judge!.model && d.judgePolicyVersion===input.judge!.policyVersion) : undefined;
     const score=draft?.judgeBreakdown;
     if(!draft || typeof score?.qualityMargin!=='number' || typeof score?.aiBullishness!=='number') { missingScores.push(label); continue; }
     const idea=input.ideas.find(i=>i.id===draft.ideaId);

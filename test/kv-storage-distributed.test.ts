@@ -1,4 +1,5 @@
 import { normalizeSourceBrief } from '@/lib/source-brief';
+import { normalizeCandidateDisposition } from '@/lib/candidate-disposition';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { webcrypto } from 'node:crypto';
@@ -114,6 +115,7 @@ function independentStorage(server: ReturnType<typeof redisServer>): typeof impo
     './virality-signals': { computeActionRewards, computeEarlyVelocityScore },
     './internal-accounts': { normalizeUsername },
     './source-brief': { normalizeSourceBrief },
+    './candidate-disposition': { normalizeCandidateDisposition },
   };
   vm.runInNewContext(storageCode, {
     module, exports: module.exports, require: (name: string) => dependencies[name] || {},

@@ -57,7 +57,7 @@ export async function claimGenerationJob(agentId: string, input: unknown, policy
       // policy. Preserve raw paid response checkpoints: identical stage
       // contracts replay, changed prompts buy only that affected stage.
       value.status='running';value.result=undefined;value.blocker=null;
-      value.checkpoints=Object.fromEntries(Object.entries(current.checkpoints).filter(([key])=>key!=='ideaNormalizationVersion' && !key.startsWith('drafts_ready')));
+      value.checkpoints=Object.fromEntries(Object.entries(current.checkpoints).filter(([key])=>key!=='ideaNormalizationVersion' && !key.startsWith('drafts_ready') && !key.startsWith('repair:')));
     }
     value.revision = (reusable ? current.revision || 0 : 0) + 1;
     return {value, result: value};
@@ -79,7 +79,7 @@ export class GenerationJobSession {
     if (Object.prototype.hasOwnProperty.call(this.job.checkpoints, key)) return structuredClone(this.job.checkpoints[key]) as T;
     await this.write(current => ({...current, stage:key.startsWith('call:') ? key.split(':')[1] : key}));
     const value = await compute();
-    if ((key === "ideas_ready" || key.startsWith("drafts_ready")) && Array.isArray(value) && !value.length) throw new Error("stage_output_unavailable");
+    if ((key === "ideas_ready" || key.startsWith("drafts_ready") || key.startsWith('repair:')) && Array.isArray(value) && !value.length) throw new Error("stage_output_unavailable");
     await this.write(current => ({...current, checkpoints:{...current.checkpoints,[key]:value}}));
     return structuredClone(value);
   }
@@ -109,13 +109,15 @@ export async function acknowledgeGenerationQueue(agentId: string, runId: string,
   });
 }
 
-export interface GenerationCanary { id:string; limitUsd:number; emptyRuns:number; queuedIds:string[]; status:'active'|'passed'|'blocked'; }
+export interface GenerationCanary { id:string; limitUsd:number; emptyRuns:number; emptyAttemptIds?:string[]; queuedIds:string[]; status:'active'|'passed'|'blocked'; }
 export const getGenerationCanary = (agentId:string) => getAiOperationalState<GenerationCanary>(agentId,'generation-canary');
-export async function recordGenerationCanary(agentId:string, event:{queuedId?:string;empty?:boolean}) {
+export async function recordGenerationCanary(agentId:string, event:{queuedId?:string;empty?:boolean;attemptId?:string}) {
   return mutateAiOperationalState<GenerationCanary,void>(agentId,'generation-canary',state=>{
     if (!state || state.status!=='active') return {value:state!,result:undefined,skip:true};
+    if(event.empty && event.attemptId && state.emptyAttemptIds?.includes(event.attemptId)) return {value:state,result:undefined,skip:true};
     const queuedIds=[...new Set([...state.queuedIds,...event.queuedId?[event.queuedId]:[]])];
     const emptyRuns=event.queuedId ? 0 : state.emptyRuns+(event.empty?1:0);
-    return {value:{...state,queuedIds,emptyRuns,status:queuedIds.length>=2?'passed':emptyRuns>=3?'blocked':'active'},result:undefined};
+    const emptyAttemptIds=event.empty && event.attemptId ? [...state.emptyAttemptIds || [],event.attemptId] : state.emptyAttemptIds;
+    return {value:{...state,queuedIds,emptyRuns,emptyAttemptIds,status:queuedIds.length>=2?'passed':emptyRuns>=3?'blocked':'active'},result:undefined};
   });
 }

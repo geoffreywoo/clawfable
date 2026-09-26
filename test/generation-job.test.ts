@@ -94,3 +94,15 @@ it('caps canary paid empty runs without treating deferrals as editorial failures
  for(let i=0;i<3;i++)await recordGenerationCanary('canary-test',{empty:true});
  expect((await getGenerationCanary('canary-test'))?.status).toBe('blocked');
 });
+
+it('counts an editorial empty attempt once even when reserve work remains',async()=>{
+ const {mutateAiOperationalState}=await import('@/lib/kv-storage');
+ const {recordGenerationCanary,getGenerationCanary}=await import('@/lib/generation-job');
+ await mutateAiOperationalState<any,void>('canary-reserve','generation-canary',()=>({value:{id:'test',limitUsd:6,emptyRuns:0,queuedIds:[],status:'active'},result:undefined}));
+ await recordGenerationCanary('canary-reserve',{empty:true,attemptId:'job:idea-a'});
+ await recordGenerationCanary('canary-reserve',{empty:true,attemptId:'job:idea-a'});
+ expect((await getGenerationCanary('canary-reserve'))?.emptyRuns).toBe(1);
+ await recordGenerationCanary('canary-reserve',{empty:true,attemptId:'job:idea-b'});
+ await recordGenerationCanary('canary-reserve',{empty:true,attemptId:'job:idea-c'});
+ expect((await getGenerationCanary('canary-reserve'))?.status).toBe('blocked');
+});

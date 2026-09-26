@@ -128,6 +128,12 @@ describe('research seed evidence rehydration', () => {
 });
 
 describe('qualified exploration selection', () => {
+  it('allocates every fifth durable selection to a qualified under-tested alternative',()=>{
+    const options={selected:[candidate('base')],qualifiedCandidates:[candidate('alt',.875)],input:explorationInput(20),random:()=>.5};
+    expect(selectQualifiedExplorationV2({...options,selectionOrdinal:4})[0].generationSelection?.mode).toBe('exploit');
+    expect(selectQualifiedExplorationV2({...options,selectionOrdinal:5})[0].generationSelection?.mode).toBe('explore');
+    expect(selectQualifiedExplorationV2({...options,selectionOrdinal:6})[0].generationSelection?.mode).toBe('exploit');
+  });
   it('swaps at most one near-tie and records the actual randomized pool and propensity', () => {
     const selected = [candidate('keep', 0.97), candidate('base')];
     const result = selectQualifiedExplorationV2({ selected, qualifiedCandidates: [candidate('alt', 0.875), candidate('alt2', 0.88), candidate('weak', 0.86)], input: explorationInput(50), random: () => 0 });

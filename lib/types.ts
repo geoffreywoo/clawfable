@@ -862,6 +862,7 @@ export interface IdeaJudgeBreakdown {
 }
 
 export interface IdeaCandidate {
+  failureCategory?: 'editorial' | 'selection' | 'provider' | 'malformed_assessment' | 'budget' | 'evidence' | 'deadline';
   diagnosticCodes?: string[];
   contentMode?: 'observation' | 'opinion' | 'prediction' | 'factual_claim';
   schemaVersion: 2;
@@ -899,6 +900,7 @@ export interface IdeaCandidate {
 }
 
 export interface DraftCandidate {
+  failureCategory?: IdeaCandidate['failureCategory'];
   judgePolicyVersion?: string;
   repairDecision?: import('./generation-efficiency').RepairDecision | null;
   schemaVersion: 2;

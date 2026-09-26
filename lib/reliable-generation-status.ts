@@ -32,8 +32,8 @@ export async function getReliableGenerationStatus(agentId:string) {
   const {inspectPublishableOriginalQueue}=await import('./autopilot');
   const publishable=agent ? await inspectPublishableOriginalQueue(agent) : [];
   const campaignCommittedUsd=Object.values(ledger?.attempts || {}).filter(a=>a.campaignId===canary?.id).reduce((n,a)=>n+committedAiSpend(a),0);
-  const blocker=canary?.status==='blocked' ? 'canary_empty_limit' : job?.blocker || null;
-  const nextAction=blocker==='canary_empty_limit' ? 'Inspect the shared failed stage before any further paid canary work.'
+  const blocker=dispatch?.state==='dispatched' ? 'x_publication_unresolved' : canary?.status==='blocked' ? 'canary_empty_limit' : job?.blocker || null;
+  const nextAction=blocker==='x_publication_unresolved' ? 'Reconcile the official X receipt before another original write.' : blocker==='canary_empty_limit' ? 'Inspect the shared failed stage before any further paid canary work.'
     : blocker==='reserve_ready' ? 'Resume the next qualified reserve idea.'
     : blocker?.includes('budget') ? 'Wait for funded capacity; preserve all unresolved charges.'
     : blocker ? 'Resume the saved stage at nextAttemptAt; inspect repeated failures without discarding paid artifacts.'

@@ -1,4 +1,5 @@
 import { normalizeSourceBrief } from './source-brief';
+import { normalizeCandidateDisposition } from './candidate-disposition';
 import type {
   Agent,
   Tweet,
@@ -3134,8 +3135,9 @@ export async function upsertStoryClusters(agentId: string, clusters: StoryCluste
 
 export async function getIdeaCandidates(agentId: string, limit = 100): Promise<IdeaCandidate[]> {
   const candidates = await kvGet<IdeaCandidate[]>(KEYS.agentIdeaCandidates(agentId));
+  const reinterpret=agentId==='13' && (await getProtocolSettings(agentId)).durableGenerationEnabled;
   return newestByTimestamp(
-    (candidates ?? []).filter((entry) => entry.schemaVersion === 2),
+    (candidates ?? []).filter((entry) => entry.schemaVersion === 2).map(entry=>reinterpret?normalizeCandidateDisposition(entry):entry),
     (entry) => entry.createdAt,
   ).slice(0, Math.max(0, limit));
 }
@@ -3167,8 +3169,9 @@ export async function updateIdeaCandidate(
 
 export async function getDraftCandidates(agentId: string, limit = 100): Promise<DraftCandidate[]> {
   const candidates = await kvGet<DraftCandidate[]>(KEYS.agentDraftCandidates(agentId));
+  const reinterpret=agentId==='13' && (await getProtocolSettings(agentId)).durableGenerationEnabled;
   return newestByTimestamp(
-    (candidates ?? []).filter((entry) => entry.schemaVersion === 2),
+    (candidates ?? []).filter((entry) => entry.schemaVersion === 2).map(entry=>reinterpret?normalizeCandidateDisposition(entry):entry),
     (entry) => entry.createdAt,
   ).slice(0, Math.max(0, limit));
 }

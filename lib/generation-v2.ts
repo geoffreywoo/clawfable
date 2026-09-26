@@ -3,7 +3,7 @@ import { GenerationJobSession, claimGenerationJob, jobFingerprint, GENERATION_JO
 import { editorialRejectionCodes, normalizeCandidateDisposition } from './candidate-disposition';
 import { PUBLISHING_V2_GEOFFREY_AI_AMBITION } from './publishing-quality-policy';
 import { EFFICIENT_GENERATION_POLICY, REPAIR_DECISION_SCHEMA, parseRepairDecision, canRepairDraft, preservesRepairDecision, substantiveBriefDigest, claimGenerationBriefs, failedBriefKeys, recordBriefAttempts, qualityGenerationPauseUntil, type RepairDecision } from './generation-efficiency';
-import { releaseAiCompletionHold, aiSpendContext, aiBudgetDay, AiBudgetError, type AiSpendContext } from './ai-budget';
+import { releaseAiCompletionHold, aiSpendContext, aiBudgetDay, AiBudgetError, type AiSpendContext, type AiSpendLedger } from './ai-budget';
 import type {
   AccountAnalysis,
   CandidateFeatureTags,
@@ -58,6 +58,7 @@ import {
 } from './ai';
 import {
   getDynamicIdeaSeeds,
+  getAiOperationalState,
   getIdeaCandidates,
   getSemanticBlocks,
   getGenerationRuns,
@@ -3055,15 +3056,18 @@ export function selectQualifiedExplorationV2({
   qualifiedCandidates,
   input,
   random = Math.random,
+  selectionOrdinal,
 }: {
   selected: RankedProtocolTweet[];
   qualifiedCandidates: RankedProtocolTweet[];
   input: Pick<GenerateTweetBatchV2Input, 'style' | 'voiceProfile' | 'allTweets' | 'signals' | 'count' | 'memory' | 'learnings'>;
   random?: () => number;
+  selectionOrdinal?: number;
 }): RankedProtocolTweet[] {
   if (selected.length === 0) return [];
   const configuredRate = Number(input.style.exploration?.rate);
-  const rate = Number.isFinite(configuredRate) ? Math.max(0, Math.min(1, configuredRate / 100)) : 0;
+  const rate = selectionOrdinal !== undefined ? (selectionOrdinal > 0 && selectionOrdinal % 5 === 0 ? 1 : 0)
+    : Number.isFinite(configuredRate) ? Math.max(0, Math.min(1, configuredRate / 100)) : 0;
   const key = (candidate: RankedProtocolTweet) => (
     (candidate.judgeBreakdown?.qualityMargin ?? 0)
     + (candidate.judgeBreakdown?.viralityUpside ?? 0) * V2_VIRALITY_SELECTION_WEIGHT
@@ -3113,10 +3117,12 @@ export function selectQualifiedExplorationV2({
   // baseline could admit a materially weaker draft into the random draw.
   const bestAvailableMargin = Math.max(baseline.judgeBreakdown?.qualityMargin ?? -Infinity,
     ...feasibleCandidates.map((candidate) => candidate.judgeBreakdown!.qualityMargin!));
+  const underTested = (candidate:RankedProtocolTweet) => isUnderTestedBanditArm(input.style.banditPolicy,'format',candidate.format)
+    || isUnderTestedBanditArm(input.style.banditPolicy,'hook',candidate.featureTags.hook)
+    || (selectionOrdinal !== undefined && input.allTweets.filter(t=>t.xTweetId && t.type!=='reply' && t.topic?.toLowerCase()===candidate.targetTopic.toLowerCase()).length<3);
   const alternatives = feasibleCandidates.filter((candidate) => (
     candidate.judgeBreakdown!.qualityMargin! + V2_EXPLORATION_QUALITY_MARGIN_TOLERANCE + 1e-8 >= bestAvailableMargin
-    && (isUnderTestedBanditArm(input.style.banditPolicy, 'format', candidate.format)
-      || isUnderTestedBanditArm(input.style.banditPolicy, 'hook', candidate.featureTags.hook))
+    && underTested(candidate)
   ));
   const result: RankedProtocolTweet[] = selected.map((candidate) => ({
     ...candidate,
@@ -3129,6 +3135,9 @@ export function selectQualifiedExplorationV2({
       qualityMarginTolerance: V2_EXPLORATION_QUALITY_MARGIN_TOLERANCE,
     },
   }));
+  if (selectionOrdinal !== undefined && rate===1 && !alternatives.length && underTested(baseline)) {
+    result[slot].generationSelection!.mode='explore';result[slot].experimentHoldout=true;
+  }
   if (rate === 0 || alternatives.length === 0) return result;
   const explore = random() < rate;
   const chosen = explore
@@ -7055,6 +7064,12 @@ const V2_PREFLIGHT_REWRITEABLE_RESCUE_CODES = new Set([
   'final_quality_margin',
 ]);
 
+const DURABLE_EXPRESSION_REPAIR_CODES = new Set(['generated_writing_pattern','final_native_voice_below_floor','final_casual_startup_below_floor','final_cringe_risk','final_stiffness_risk','final_generated_pattern_risk','final_voice_drift','final_technical_credibility_below_floor']);
+export function canRepairDurableExpression(idea:IdeaCandidate,draft:DraftCandidate):boolean {
+  return (idea.judgeBreakdown?.evidenceFidelity || 0)>=0.8
+    && draft.rejectionCodes.length>0 && draft.rejectionCodes.every(code=>DURABLE_EXPRESSION_REPAIR_CODES.has(code));
+}
+
 function preflightRescueTargetsV2(evaluations: DraftEvaluation[], limit: number): DraftEvaluation[] {
   const ranked = evaluations
     .filter((entry) => (
@@ -7564,7 +7579,9 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       }};
     });
     await session.finish(result,outcome);
-    if (!session.deferred && outcome==='quality_empty' && session.job.status==='failed') await recordGenerationCanary(input.agentId,{empty:true});
+    // A completed editorial failure is empty even when a reserve remains.
+    // Only unfinished operational stages are exempt from the canary stop.
+    if (!session.deferred && outcome==='quality_empty') await recordGenerationCanary(input.agentId,{empty:true,attemptId:`${job.id}:${(session.job.checkpoints.selectedIdeas as string[] || []).join(',') || 'ideas'}`});
     return result;
   } catch (error) {
     await session.finish([],error instanceof Error ? error.message : 'provider_failure').catch(()=>null);
@@ -7926,20 +7943,23 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
         evaluations.filter((entry) => !eligibleIdeaIds.has(entry.idea.id)),
         input.count - Math.min(input.count, eligibleIdeaIds.size),
       );
-      const targets = isGeoffreyVoiceProfile(input.voiceProfile) || usesEfficientGeneration(input) ? [] : preflightCandidates;
+      const targets = input.jobSession ? preflightCandidates.filter(entry=>canRepairDurableExpression(entry.idea,entry.draft)).slice(0,1)
+        : isGeoffreyVoiceProfile(input.voiceProfile) || usesEfficientGeneration(input) ? [] : preflightCandidates;
       trace.stageCounts.preflightRescueTargets = targets.length;
       trace.stageCounts.preflightRescueSuppressedNegativeValue = preflightCandidates.length - targets.length;
       trace.stageCounts.rescueTargets = (trace.stageCounts.rescueTargets || 0) + targets.length;
       if (targets.length > 0 && Date.now() + 60_000 < runDeadlineAt) {
         retryUsed = true;
-        const retry = await generateRescueDraftEvaluations({
+        const repair = () => generateRescueDraftEvaluations({
           targets,
           priorEvaluations: evaluations,
           input,
           runId,
           calls: trace.modelCalls,
           blocks,
+          ...(input.jobSession ? {revisionStrategy:'critic_surgical' as const} : {}),
         });
+        const retry = input.jobSession ? await input.jobSession.checkpoint(`repair:${targets[0].idea.id}`,repair) : await repair();
         trace.stageCounts.rescueDraftsGenerated = (trace.stageCounts.rescueDraftsGenerated || 0) + retry.length;
         evaluations.push(...retry);
         eligibleDrafts = evaluations.filter((entry) => entry.draft.status !== 'rejected');
@@ -8059,7 +8079,7 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
       entry.draft.rejectionCodes.includes('copy_judge_unavailable')
       || entry.draft.rejectionCodes.includes('malformed_copy_judgment')
     ));
-    if (selected.length < input.count && !initialCopyJudgeFailure) {
+    if (selected.length < input.count && !initialCopyJudgeFailure && !(input.jobSession && retryUsed)) {
       let retryEvaluations: DraftEvaluation[] = [];
       const selectedIdeaIds = new Set(selected.map((tweet) => tweet.ideaId).filter((id): id is string => Boolean(id)));
       const remaining = input.count - selected.length;
@@ -8296,6 +8316,7 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
     }
     if (input.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK && selected.length > 0) {
       const beforeExplorationIds = new Set(selected.map((candidate) => candidate.draftCandidateId));
+      const selectionOrdinal = input.jobSession ? Object.values((await getAiOperationalState<AiSpendLedger>(input.agentId,'spend'))?.outputs || {}).filter(output=>output.runId.startsWith('generation-job-')).length+1 : undefined;
       selected = selectQualifiedExplorationV2({
         selected,
         qualifiedCandidates: evaluations.flatMap((entry) => (
@@ -8304,6 +8325,7 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
             ? [entry.qualifiedCandidate] : []
         )),
         input,
+        selectionOrdinal,
       });
       const selectedById = new Map(selected.map((candidate) => [candidate.draftCandidateId, candidate]));
       for (const evaluation of evaluations) {

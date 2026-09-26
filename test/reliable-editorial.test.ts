@@ -5,7 +5,7 @@ import {jobFingerprint} from '@/lib/generation-job';
 import {normalizeIdeaCandidatesV2,buildPriorBriefFailuresV2} from '@/lib/generation-v2';
 import {filterLearningEvidence} from '@/lib/learning-evidence';
 import {buildSubjectPacket} from '@/lib/subject-packet';
-import {hasUnsupportedOperatorEvidenceV2} from '@/lib/generation-v2';
+import {hasUnsupportedOperatorEvidenceV2,canRepairDurableExpression} from '@/lib/generation-v2';
 
 it('retains good topic packets during degraded extraction without changing their observation time',()=>{
  const now=Date.now(), old={category:'named subject',topicConfidence:.9,observedAt:new Date(now-3600000).toISOString(),discoveryMethod:'followed_network'} as any;
@@ -44,4 +44,11 @@ it('excludes operational feedback paired with a model rejection while keeping ow
  const result=filterLearningEvidence([{tweetId:'a',metadata:{qualityGate:'model'}}] as any,[{tweetId:'a',rating:'down',userProvidedReason:false},{tweetId:'a',rating:'down',userProvidedReason:true}] as any);
  expect(result.feedback).toHaveLength(1);
  expect(result.feedback[0].userProvidedReason).toBe(true);
+});
+it('repairs expression only when the premise is sound, never factual or duplicate failures',()=>{
+ const idea={judgeBreakdown:{evidenceFidelity:.95}} as any;
+ expect(canRepairDurableExpression(idea,{rejectionCodes:['final_technical_credibility_below_floor']} as any)).toBe(true);
+ expect(canRepairDurableExpression(idea,{rejectionCodes:['claim_evidence']} as any)).toBe(false);
+ expect(canRepairDurableExpression(idea,{rejectionCodes:['recent_copy_duplicate']} as any)).toBe(false);
+ expect(canRepairDurableExpression({judgeBreakdown:{evidenceFidelity:.4}} as any,{rejectionCodes:['final_stiffness_risk']} as any)).toBe(false);
 });
