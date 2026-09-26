@@ -604,6 +604,30 @@ describe('autopilot remote debug logging', () => {
     expect(mocks.getAgentOwnerId).toHaveBeenCalledWith(baseAgent.id);
     expect(mocks.getProtocolSettings).toHaveBeenCalledWith(baseAgent.id);
   });
+  it('keeps drafting for review while Geoffrey auto-post is off, without posting', async () => {
+    const agent = { ...baseAgent, handle: 'geoffwoo' };
+    mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings, enabled: false, autoReply: true, minQueueSize: 2 });
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.buildGenerationContext.mockResolvedValue({
+      voiceProfile: { tone: 'casual', topics: ['startups'], antiGoals: [], communicationStyle: 'direct', summary: 'founder' },
+      learnings: null,
+      settings: { ...baseSettings, minQueueSize: 2 },
+      style: { autonomyMode: 'balanced', bias: {}, exploration: { rate: 35, underusedFormats: [], underusedTopics: [] } },
+      recentPosts: [], allTweets: [], memory: null, ideaAtoms: [], signals: [],
+    });
+    const result = await runAutopilot(agent as any);
+    expect(result).toMatchObject({ action: 'skipped' });
+    expect(result.reason).toMatch(/^Auto-post disabled/);
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalled();
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
+  it('does not draft for other accounts while their auto-post is off', async () => {
+    mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings, enabled: false, autoReply: true });
+    await runAutopilot(baseAgent);
+    expect(mocks.generateTweetBatchV2).not.toHaveBeenCalled();
+  });
+
   it('uses only warmed caches during a V2 refill and never performs live topic discovery', async () => {
     process.env.VERCEL_ENV = 'production';
     const agent = { ...baseAgent, handle: 'geoffwoo' };

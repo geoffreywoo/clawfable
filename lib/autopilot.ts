@@ -1387,10 +1387,22 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
 
   // --- Auto-post from queue ---
   if (!settings.enabled) {
+    // Supervised drafting: with auto-post off, keep reviewable drafts ready so
+    // turning autopilot on (or approving manually) is never blocked on an empty
+    // queue. Nothing is posted here; the refill caps to the queue deficit.
+    let drafted = 0;
+    if (isGeoffreyAccount(agent.handle)) {
+      try {
+        drafted = await refillQueue(agent, settings.minQueueSize + 3);
+      } catch (err) {
+        console.error('[autopilot] supervised refill failed', agentId, err instanceof Error ? err.message : err);
+      }
+    }
+    const draftedNote = drafted > 0 ? `; drafted ${drafted} for review` : '';
     return {
       agentId,
       action: repliesSent > 0 ? 'replied' : 'skipped',
-      reason: repliesSent > 0 ? `Sent ${repliesSent} replies (auto-post disabled)` : 'Auto-post disabled',
+      reason: (repliesSent > 0 ? `Sent ${repliesSent} replies (auto-post disabled)` : 'Auto-post disabled') + draftedNote,
       repliesSent,
     };
   }
