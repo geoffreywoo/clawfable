@@ -4,6 +4,8 @@ import {getGeneratedPublishIssue} from '@/lib/generation-origin';
 import {jobFingerprint} from '@/lib/generation-job';
 import {normalizeIdeaCandidatesV2,buildPriorBriefFailuresV2} from '@/lib/generation-v2';
 import {filterLearningEvidence} from '@/lib/learning-evidence';
+import {buildSubjectPacket} from '@/lib/subject-packet';
+import {hasUnsupportedOperatorEvidenceV2} from '@/lib/generation-v2';
 
 it('retains good topic packets during degraded extraction without changing their observation time',()=>{
  const now=Date.now(), old={category:'named subject',topicConfidence:.9,observedAt:new Date(now-3600000).toISOString(),discoveryMethod:'followed_network'} as any;
@@ -22,4 +24,20 @@ it('keeps operational and housekeeping signals out of learned taste',()=>{
 it('does not turn runner-up ideas into rejection lessons',()=>{
  const now=Date.now();
  expect(buildPriorBriefFailuresV2([{id:'b'}] as any,[{briefId:'b',generationRunId:'old',status:'rejected',createdAt:new Date(now).toISOString(),rejectionCodes:['idea_not_selected']}] as any,'new',now)).toEqual([]);
+});
+it('does not freshen a retained trend packet when building another brief',()=>{
+ const now=Date.now(), observedAt=new Date(now-23*3600000).toISOString();
+ const packet=buildSubjectPacket({title:'rocket launches',observedAt,evidenceMode:'operator_opinion',sourceDocumentIds:[],evidence:[],trendTopicId:'trend',identityScore:.8} as any,[],now);
+ expect(packet.observedAt).toBe(observedAt);
+ expect(Date.parse(packet.expiresAt)).toBe(now+3600000);
+ expect(packet.supportedFacts).toEqual([]);
+});
+it('allows an opinion without treating an unverified numbered event as evidence',()=>{
+ expect(hasUnsupportedOperatorEvidenceV2('i want reusable rockets cheap enough that launch day feels boring.')).toBe(false);
+ expect(hasUnsupportedOperatorEvidenceV2('starship flight 14: the countdown should serve the engineers.')).toBe(true);
+});
+it('excludes operational feedback paired with a model rejection while keeping owner decisions',()=>{
+ const result=filterLearningEvidence([{tweetId:'a',metadata:{qualityGate:'model'}}] as any,[{tweetId:'a',rating:'down',userProvidedReason:false},{tweetId:'a',rating:'down',userProvidedReason:true}] as any);
+ expect(result.feedback).toHaveLength(1);
+ expect(result.feedback[0].userProvidedReason).toBe(true);
 });

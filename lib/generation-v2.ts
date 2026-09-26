@@ -498,6 +498,7 @@ export interface OperatorTopicContextV2 {
 
 export interface GenerationBriefV2 {
   subjectPacket?: SubjectPacket;
+  observedAt?: string;
   id: string;
   topic: string;
   sourceLane: ContentSourceLane;
@@ -2274,6 +2275,7 @@ export function buildGenerationBriefsV2({
       ...brief,
       id: stableResearchId('brief', 'operator-topic-signal', signal.id),
       trendTopicId: signal.id,
+      observedAt: signal.observedAt,
       authorOpportunity: operatorTopicSignalAuthorOpportunity(signal),
       operatorTopicContext: {
         entityRoles: signal.entityRoles,
@@ -4185,7 +4187,7 @@ async function generateIdeas({
         maxTokens: 2200,
         temperature: 0.85,
         jsonSchema: input.jobSession ? DURABLE_IDEA_SCHEMA : IDEA_GENERATION_SCHEMA,
-        system: input.jobSession ? `${DURABLE_EDITORIAL_CONTRACT} Generate three different thoughts per subject. Return the requested schema. Evidence IDs must come from the subject packet.` : input.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK ? ASTRA_IDEA_GENERATION_SYSTEM_V2 : IDEA_GENERATION_SYSTEM,
+        system: input.jobSession ? `${DURABLE_EDITORIAL_CONTRACT} Generate three different thoughts per subject. Return the requested schema. Evidence IDs must come from the subject packet. The subject/title is an INTEREST CUE, never proof. If supportedFacts is empty, discard event-specific wording, dates, flight/version numbers, alleged actions and relationships. Write about the underlying named subject as a preference or question that remains valid even if the alleged event never occurred. For example an unverified rocket-launch countdown permits an opinion about reusable rockets, but not a claim about a numbered flight. Do not repeat unverified context as a factual premise. Respect permittedModes.` : input.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK ? ASTRA_IDEA_GENERATION_SYSTEM_V2 : IDEA_GENERATION_SYSTEM,
         prompt: input.jobSession ? JSON.stringify({author:ideaAuthorBlockV2(input.voiceProfile),subjects:briefBatch,previousPremises:batchPremiseMemory,ownerExclusions:batchExclusions,voiceExamples:batchReactionAnchors.slice(0,3),learning:batchLearning}) : prompt,
       }, calls);
       const root = parseJsonRoot(result.text);

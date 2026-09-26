@@ -45,6 +45,7 @@ import {
 import { generatePublishingBatchV2 } from './publishing-v2';
 import { getCommittedTweetCopyMemoryV2 } from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
+import { retainQualifiedTopicPackets } from './topic-intelligence-refresh';
 import { buildGenerationContext } from './generation-context';
 import { buildLearnings } from './performance';
 import { postTweet, replyToTweet, decodeKeys, getMe, getMentionsFromTwitter, getLatestTwitterTweetIdCursor, getSanitizedTweetTextIssue, type TwitterKeys } from './twitter-client';
@@ -2909,9 +2910,10 @@ export async function refillQueue(
     const { voiceProfile, learnings, settings, style, recentPosts, allTweets, memory, signals = [] } = context;
     const publishingModelStack = resolvePublishingV2ModelStacks(agent.handle).activeStack;
     const trendingSnapshot = await getTrendingCacheSnapshot(agent.id).catch(() => null);
-    const trending = trendingSnapshot?.isFresh && Array.isArray(trendingSnapshot.data)
-      ? trendingSnapshot.data as TrendingTopic[]
-      : null;
+    const cachedTopics = Array.isArray(trendingSnapshot?.data) ? trendingSnapshot.data as TrendingTopic[] : [];
+    const trending = durableGenerationEnabled(agent.id, settings)
+      ? retainQualifiedTopicPackets(cachedTopics, [])
+      : trendingSnapshot?.isFresh ? cachedTopics : null;
 
     // If momentum or calendar focus exists, pass those biases into generation
     // so the batch can explore timely angles instead of repeating evergreen takes.

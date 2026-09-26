@@ -12,11 +12,13 @@ export function isUnverifiedRemovalSignal(signal: LearningSignal): boolean {
 export function isOperationalLearningSignal(signal: LearningSignal): boolean {
   const metadata = signal.metadata || {};
   return metadata.softArchive === true || metadata.qualityGate != null
+    || ['x_post_rejected','tweet_like_failed'].includes(signal.signalType)
     || ['operational','model_criticism','selection'].includes(String(metadata.evidenceCategory || ''));
 }
 export function filterLearningEvidence(signals: LearningSignal[], feedback: FeedbackEntry[] = [], tweets: Tweet[] = []) {
   const uncertain = new Set(signals.filter(isUnverifiedRemovalSignal).map((signal) => String(signal.tweetId || '')));
   const verified = new Set(signals.filter((signal) => signal.signalType === 'deleted_from_x' && !isUnverifiedRemovalSignal(signal)).map((signal) => String(signal.tweetId || '')));
+  const operational = new Set(signals.filter(isOperationalLearningSignal).map(signal => String(signal.tweetId || '')));
   for (const tweet of tweets) {
     if (tweet.status === 'deleted_from_x' && (tweet.xRemovalConfirmationCount || 0) < 2 && !verified.has(String(tweet.id))) {
       // Legacy signals can have fallen out of the bounded ledger. An inferred
@@ -26,7 +28,8 @@ export function filterLearningEvidence(signals: LearningSignal[], feedback: Feed
   }
   return {
     signals: signals.filter((signal) => !isUnverifiedRemovalSignal(signal) && !isOperationalLearningSignal(signal)),
-    feedback: feedback.filter((entry) => !(entry.tweetId && uncertain.has(String(entry.tweetId))
+    feedback: feedback.filter(entry => !(entry.tweetId && operational.has(String(entry.tweetId)) && entry.userProvidedReason === false))
+      .filter((entry) => !(entry.tweetId && uncertain.has(String(entry.tweetId))
       && !verified.has(String(entry.tweetId)) && entry.rating === 'down'
       && entry.userProvidedReason === false && entry.source === 'queue_delete')),
   };

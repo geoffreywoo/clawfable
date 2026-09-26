@@ -805,7 +805,12 @@ export async function reconcileAiProviderAttempts(agentId: string): Promise<{set
   const client = process.env.OPENAI_API_KEY ? new OpenAI({apiKey:process.env.OPENAI_API_KEY,maxRetries:0,timeout:15_000}) : null;
   let settled=0,unavailable=0;
   const traces = await getGenerationRuns(agentId,120);
+  // Leave the generation worker its complete 240-second window. Pending
+  // recoveries are revisited by later ticks without buying replacement work.
+  const deadline = Date.now() + 30_000;
+  let providerReads = 0;
   for (const a of Object.values(ledger?.attempts || {}).filter(a=>a.state==='dispatched' && Date.now()-Date.parse(a.createdAt)>300_000 && a.reconciliationState!=='unavailable').slice(-8)) {
+    if (Date.now() >= deadline || providerReads >= 2) break;
     const reservation={context:{agentId,operation:a.operation,runId:a.runId},id:a.id,day:a.day};
     if (!a.responseId && a.provider==='openai') {
       const ids=[...new Set((traces.find(t=>t.id===a.runId)?.modelCalls || []).filter(c=>c.stage===a.task && (c.model===a.model || c.requestedModel===a.model)).flatMap(c=>c.responseProgress?.responseId ? [c.responseProgress.responseId] : []))];
@@ -815,6 +820,7 @@ export async function reconcileAiProviderAttempts(agentId: string): Promise<{set
       await updateAiAttempt(reservation,{reconciliationState:'unavailable'}); unavailable++; continue;
     }
     try {
+      providerReads++;
       const response=await client.responses.retrieve(a.responseId);
       if (['queued','in_progress'].includes(response.status || '')) continue;
       const observedUsd=estimateAiUsageCostUsd(a.model,response.usage?.input_tokens,response.usage?.output_tokens);

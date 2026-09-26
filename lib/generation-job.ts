@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 
-export const GENERATION_JOB_VERSION = 'durable-original-1';
+export const GENERATION_JOB_VERSION = 'durable-original-2';
 export const GENERATION_JOB_NAMESPACE = 'generation-job';
 export interface GenerationJob {
   version: string;
@@ -18,35 +18,51 @@ export interface GenerationJob {
   nextAttemptAt: number;
   failures: number;
   checkpoints: Record<string, unknown>;
+  revision?: number;
   result?: unknown[];
 }
 export function durableGenerationEnabled(agentId: string, settings: { durableGenerationEnabled?: boolean }): boolean {
   return agentId === '13' && settings.durableGenerationEnabled === true;
 }
 export const getGenerationJob = (agentId: string) => getAiOperationalState<GenerationJob>(agentId, GENERATION_JOB_NAMESPACE);
+export const getGenerationJobRecord = (agentId:string, id:string) => getAiOperationalState<GenerationJob>(agentId, `generation-job:${id}`);
+async function archiveGenerationJob(agentId:string, job:GenerationJob):Promise<void> {
+  await mutateAiOperationalState<GenerationJob,void>(agentId,`generation-job:${job.id}`,stored=>
+    stored && (stored.revision || 0) > (job.revision || 0)
+      ? {value:stored,result:undefined,skip:true}
+      : {value:job,result:undefined});
+}
 export function jobFingerprint(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 export async function claimGenerationJob(agentId: string, input: unknown, policy: string, now = Date.now()): Promise<GenerationJob | null> {
   const owner = randomUUID();
+  const previous = await getGenerationJob(agentId);
+  // Archive before replacing the active pointer. A crash or newer worker
+  // cannot erase paid artifacts merely because the old job became terminal.
+  if (previous) await archiveGenerationJob(agentId,previous);
   return mutateAiOperationalState<GenerationJob, GenerationJob | null>(agentId, GENERATION_JOB_NAMESPACE, current => {
     if (current && current.leaseUntil > now && current.owner) return {value: current, result: null, skip: true};
     if (current && current.nextAttemptAt > now && current.policy === policy && current.expiresAt > now) return {value: current, result: null, skip: true};
     const reusable = current && current.policy === policy && current.expiresAt > now && !['queued','failed'].includes(current.status);
+    if (!reusable && current && (current.id !== previous?.id || (current.revision || 0) !== (previous?.revision || 0))) return {value:current,result:null,skip:true};
     const value: GenerationJob = reusable ? {...current, owner, leaseUntil: now + 300_000, status: current.status === 'assessed' ? 'assessed' : 'running'} : {
       version: GENERATION_JOB_VERSION, id: `generation-job-${randomUUID()}`, policy, input,
       createdAt: now, expiresAt: now + 24*3600_000, owner, leaseUntil: now + 300_000,
       stage: 'subject_ready', status: 'running', blocker: null, nextAttemptAt: 0, failures: 0, checkpoints: {},
     };
+    value.revision = (reusable ? current.revision || 0 : 0) + 1;
     return {value, result: value};
   });
 }
 export async function updateGenerationJob(agentId: string, job: Pick<GenerationJob,'id'|'owner'>, update: (current: GenerationJob) => GenerationJob, now = Date.now()): Promise<GenerationJob> {
-  return mutateAiOperationalState<GenerationJob, GenerationJob>(agentId, GENERATION_JOB_NAMESPACE, current => {
+  const saved = await mutateAiOperationalState<GenerationJob, GenerationJob>(agentId, GENERATION_JOB_NAMESPACE, current => {
     if (!current || current.id !== job.id || current.owner !== job.owner || current.leaseUntil <= now) throw new Error('generation_lease_lost');
-    const value = update(current);
+    const value = {...update(current),revision:(current.revision || 0)+1};
     return {value, result:value};
   });
+  await archiveGenerationJob(agentId,saved);
+  return saved;
 }
 export class GenerationJobSession {
   deferred = false;

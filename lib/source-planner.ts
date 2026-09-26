@@ -88,6 +88,7 @@ export interface SourcePlannerPlan {
 }
 
 export interface OperatorTopicSignal {
+  observedAt?: string;
   id: string;
   subject: string;
   semanticAliases: string[];
@@ -909,6 +910,7 @@ export function selectOperatorTopicSignals(
       const entityDomainAlias = operatorTopicSignalEntityDomainAlias(topic);
       return {
         id: getTrendingTopicStableId(topic),
+        observedAt: topic.observedAt || topic.timestamp,
         subject,
         semanticAliases: entityDomainAlias && entityDomainAlias !== subject ? [entityDomainAlias] : [],
         entityRoles,
