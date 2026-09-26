@@ -61,3 +61,13 @@ describe('owner calibration',()=>{
    const conflict=examples();conflict.forEach(x=>x.group='same');expect(calibrateQualityCutoffs(conflict).activated).toBe(false);
  });
 });
+
+it('keeps paid failure history but does not apply an obsolete generation policy pause to a corrected policy', async () => {
+ const id='policy-pause-'+Date.now(), now=Date.now();
+ for(let i=0;i<3;i++) await recordBriefAttempts(id,'old'+i,[{key:'old'+i,outcome:'quality_empty'}],now+i,'old');
+ expect(await qualityGenerationPauseUntil(id,now+100,'old')).not.toBeNull();
+ expect(await qualityGenerationPauseUntil(id,now+100,'new')).toBeNull();
+ expect((await failedBriefKeys(id,now+100)).size).toBe(3);
+ for(let i=0;i<3;i++) await recordBriefAttempts(id,'new'+i,[{key:'new'+i,outcome:'quality_empty'}],now+10+i,'new');
+ expect(await qualityGenerationPauseUntil(id,now+100,'new')).not.toBeNull();
+});

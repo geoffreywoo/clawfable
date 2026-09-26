@@ -193,3 +193,11 @@ describe('Astra idea development contract', () => {
     expect(hydrateDynamicSeedEvidenceV2(brief, seed, [story], [document], now, geoffrey).portfolioCompanyContext?.companyName).toBe('OpenAI');
   });
 });
+
+it('varies the sole efficient idea direction instead of always assigning the first approach', async () => {
+ const { efficientIdeaApproachIndex } = await import('@/lib/generation-v2');
+ const directions = Array.from({length:30}, (_,i)=>efficientIdeaApproachIndex('run-'+i,'same-brief'));
+ expect(new Set(directions)).toEqual(new Set([0,1,2]));
+ expect(efficientIdeaApproachIndex('run-1','same-brief')).toBe(efficientIdeaApproachIndex('run-1','same-brief'));
+ expect(ASTRA_IDEA_GENERATION_SYSTEM_V2).toContain('Never write "X, not Y"');
+});

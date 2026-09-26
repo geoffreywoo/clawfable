@@ -2,7 +2,7 @@ import type { CandidateJudgeBreakdown } from './types';
 import { createHash } from 'node:crypto';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 
-export const EFFICIENT_GENERATION_POLICY = 'geoffrey-autopost-per-dollar-1';
+export const EFFICIENT_GENERATION_POLICY = 'geoffrey-autopost-per-dollar-2';
 export interface RepairDecision {
   disposition: 'pass' | 'repair' | 'abandon';
   failingDimension: string;
@@ -52,26 +52,26 @@ export function substantiveBriefDigest(brief: { topic: string; title: string; so
   return createHash('sha256').update(JSON.stringify([normalize(brief.topic), normalize(brief.title), normalize(brief.sourceBrief || ''),
     brief.evidenceMode, claims.map(normalize).sort(), voiceVersion, policyVersion])).digest('hex');
 }
-interface BriefAttempt { key: string; runId: string; at: number; outcome: 'quality_empty' | 'completed' | 'running'; }
+interface BriefAttempt { policyVersion?: string; key: string; runId: string; at: number; outcome: 'quality_empty' | 'completed' | 'running'; }
 interface FailureState { attempts: BriefAttempt[]; }
 export async function failedBriefKeys(agentId: string, now = Date.now()): Promise<Set<string>> {
   const state = await getAiOperationalState<FailureState>(agentId, 'brief-attempts');
   return new Set((state?.attempts || []).filter(a => (a.outcome === 'quality_empty' && now - a.at < 86400000) || (a.outcome === 'running' && now-a.at<300000)).map(a => a.key));
 }
-export async function qualityGenerationPauseUntil(agentId: string, now = Date.now()): Promise<number | null> {
+export async function qualityGenerationPauseUntil(agentId: string, now = Date.now(), policyVersion?: string): Promise<number | null> {
   const state = await getAiOperationalState<FailureState>(agentId, 'brief-attempts');
   const runs = new Map<string, BriefAttempt[]>();
-  for (const a of [...(state?.attempts || []).filter(a=>a.outcome!=='running')].sort((a,b) => b.at-a.at)) runs.set(a.runId, [...(runs.get(a.runId) || []), a]);
+  for (const a of [...(state?.attempts || []).filter(a=>a.outcome!=='running' && (!policyVersion || a.policyVersion === policyVersion))].sort((a,b) => b.at-a.at)) runs.set(a.runId, [...(runs.get(a.runId) || []), a]);
   const recent = [...runs.values()].slice(0,3);
   if (recent.length < 3 || recent.some(run => run.some(a => a.outcome !== 'quality_empty'))) return null;
   if (new Set(recent.flat().map(a => a.key)).size < 3) return null;
   const until = Math.max(...recent[0].map(a => a.at)) + 21600000;
   return until > now ? until : null;
 }
-export async function recordBriefAttempts(agentId: string, runId: string, entries: {key: string; outcome: BriefAttempt['outcome']}[], now = Date.now()): Promise<void> {
+export async function recordBriefAttempts(agentId: string, runId: string, entries: {key: string; outcome: BriefAttempt['outcome']}[], now = Date.now(), policyVersion?: string): Promise<void> {
   await mutateAiOperationalState<FailureState, void>(agentId, 'brief-attempts', state => ({ value: { attempts: [
     ...(state?.attempts || []).filter(a => now-a.at < 7*86400000 && a.runId !== runId),
-    ...entries.map(a => ({ ...a, runId, at: now })) ] }, result: undefined }));
+    ...entries.map(a => ({ ...a, runId, at: now, ...(policyVersion ? { policyVersion } : {}) })) ] }, result: undefined }));
 }
 
 export async function claimGenerationBriefs(agentId: string, runId: string, keys: string[], now = Date.now()): Promise<string[]> {

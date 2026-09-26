@@ -2151,7 +2151,7 @@ export async function buildGenerationQualityAudit(agent: Agent) {
     models: {
       activeStack: activeModelStack,
       aiModelPolicy: process.env.AI_MODEL_POLICY || 'legacy_task_chains',
-      generationPolicy: efficientGeneration ? (process.env.AI_MODEL_POLICY === 'astra_all' ? 'geoffrey-autopost-per-dollar-1-astra-judge' : 'geoffrey-autopost-per-dollar-1') : 'legacy-v2',
+      generationPolicy: efficientGeneration ? (process.env.AI_MODEL_POLICY === 'astra_all' ? 'geoffrey-autopost-per-dollar-2-astra-judge' : 'geoffrey-autopost-per-dollar-2') : 'legacy-v2',
       efficientGenerationFlag: process.env.GEOFFREY_EFFICIENT_GENERATION === 'true',
       pipelineVersion,
       routingReason: modelStackAssignment.reason,
