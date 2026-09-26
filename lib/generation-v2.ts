@@ -7311,6 +7311,42 @@ function countRejections(
   return counts;
 }
 
+/**
+ * One metadata line per finished run. Run traces otherwise live only in KV, so
+ * production logs could show AI spend but never why a run produced nothing.
+ * Never includes prompts, source text, or draft copy.
+ */
+export function summarizeGenerationRunForLog(trace: GenerationRunTrace): Record<string, unknown> {
+  const topRejections = Object.entries(trace.rejectionCounts || {})
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 8);
+  const pick = (key: string) => trace.stageCounts?.[key] ?? null;
+  return {
+    agentId: trace.agentId,
+    runId: trace.id,
+    mode: trace.mode,
+    status: trace.status,
+    outcomeCode: trace.outcomeCode,
+    policy: trace.generationPolicyVersion || null,
+    requested: trace.requestedCount,
+    briefs: pick('briefs'),
+    ideas: pick('ideasGenerated'),
+    ideasSelected: pick('ideasSelected'),
+    drafts: pick('draftsGenerated'),
+    selected: trace.selectedDraftIds.length,
+    topRejections: Object.fromEntries(topRejections),
+    modelCalls: trace.modelCalls.length,
+    failedCalls: trace.modelCalls.filter((call) => !call.succeeded).length,
+    estimatedCostUsd: trace.estimatedCostUsd ?? null,
+    error: trace.error || null,
+  };
+}
+
+function logGenerationRunSummary(trace: GenerationRunTrace): void {
+  if (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true') return;
+  console.info('[gen:run]', JSON.stringify(summarizeGenerationRunForLog(trace)));
+}
+
 function finalizeTrace(trace: GenerationRunTrace): GenerationRunTrace {
   const budgetStop = trace.modelCalls.find(call => ['budget_exhausted', 'budget_unavailable', 'evaluation_deferred'].includes(call.error || ''));
   if (budgetStop && trace.selectedDraftIds.length === 0) trace = { ...trace, status: 'empty', outcomeCode: budgetStop.error as GenerationRunTrace['outcomeCode'], error: budgetStop.error };
@@ -7411,6 +7447,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     input.onTrace?.(trace);
     // Polling a budget pause must not evict the paid run that explains it.
     if (persistArtifacts && trace.error !== 'budget_paused') await saveGenerationRun(input.agentId, trace);
+    if (trace.status !== 'running') logGenerationRunSummary(trace);
   };
   const persistIdeas = async (candidates: IdeaCandidate[]) => {
     observedIdeas = candidates;

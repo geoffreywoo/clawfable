@@ -107,7 +107,7 @@ describe('frozen Astra evaluation contracts (mocked, no quality claim)', () => {
   });
 
   it('does not turn a common-judge diagnostic into full-stack promotion even with perfect mocked votes', async () => {
-    const comparison=await runFrozenEvaluation(snapshot(),{generate:fakeGenerate});
+    const comparison=await runFrozenEvaluation(snapshot(),{generate:fakeGenerate,now});
     for(const packet of comparison.packets) {
       packet.baseline.previewJudgeModelStack='publishing_v2_gpt_control';
       packet.astra.previewJudgeModelStack='publishing_v2_gpt_control';
