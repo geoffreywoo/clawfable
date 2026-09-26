@@ -2780,6 +2780,7 @@ export function buildAstraIdeaGenerationPromptV2(...args: Parameters<typeof buil
       learnedVoiceGuidance: undefined, coachingNewestFirst: astraIdeaCoaching(voiceProfile, subject) },
     requirements: {
       ideasPerBrief: MAX_IDEA_CANDIDATES_PER_BRIEF,
+      candidateDiversity: 'Develop three different underlying judgments, not three wordings of one thesis. Explore subject-specific choices, affected people, and institutional consequences where they fit. Each publicMove must stand alone as something this author would actually say. Do not manufacture a question, governance rule, or business model just to fill a slot.',
       ...(hasSources ? { evidence: 'claim must be directly entailed by one supplied factual atom. Preserve who says/reports it and its numerical scope. publicMove may react or infer, but cannot add an asserted event, cause, mechanism, price, or behavior. Paraphrase independently; retain attribution and avoid copying four consecutive source words except names/irreducible terms. Copy allowedEvidenceIds exactly; they identify documents.' } : {}),
       ...(hasOpinion ? { opinion: 'Every field independently remains an owned judgment, question, or explicit prediction/conditional. No invented current event, measured number, quote, customer behavior, relationship, personal experience, habit, or emotion. Subjective valuation/timing/price bets are allowed if every repeated number stays explicitly subjective. Never add invented headcount, multiplier, rate, benchmark, market size, or adoption data. Future mechanisms must remain future/conditional within 12 months. At least one idea owns its position in first person; the others may be blunt convictions, desires, or questions. Do not write third-person founder advice or repeat the same first-person opening.' } : {}),
       subject: 'Keep the brief subject. Preserve supplied entity roles, but infer no relationships and never restore stripped event terms. If subject cues exist, retain one concrete cue object in each publicMove and vary cues across ideas. A subject can be a decision, behavior, market, or instrument; do not invent a company or personal scene. Seeds and SOUL themes supply interests, never evidence. Ignore mismatched inspiration.',
@@ -3319,7 +3320,10 @@ const GEOFFREY_GENERIC_PRODUCT_OPS_OBJECT = /\b(?:permission(?:s)?|authority|vet
 const GEOFFREY_GENERIC_PRODUCT_OPS_FRAME = /\b(?:the first\b.{0,100}\bi(?:['’]d|\s+would)\s+trust|(?:product|agent|company)\s+i(?:['’]d|\s+would)\s+(?:trust|hand)|i(?:['’]d|\s+would)\s+(?:trust|hand)\b.{0,80}\b(?:authority|permission|veto)|(?:should|needs?\s+to)\s+(?:make|let|turn|become|earn|grant|give|ask)|will\s+be\s+judged\b.{0,100}\b(?:the minute|when)|if true\b.{0,100}\bi(?:['’]d|\s+would)\s+(?:watch|judge|care|value|believe)|more\s+closely\s+than|not just\b.{0,100}\bwhere|into operating software)\b/i;
 
 export function isGenericGeoffreyProductOpsIdeaV2(text: string): boolean {
-  return GEOFFREY_GENERIC_PRODUCT_OPS_OBJECT.test(text)
+  // Authority and vetoes are also concrete corporate-governance subjects.
+  // This gate targets software/product wishlists, not every allocation of rights.
+  return /\b(?:ai|agents?|models?|chatgpt|openai|software|products?|tools?|platforms?|releases?|workflows?)\b/i.test(text)
+    && GEOFFREY_GENERIC_PRODUCT_OPS_OBJECT.test(text)
     && GEOFFREY_GENERIC_PRODUCT_OPS_FRAME.test(text);
 }
 
@@ -4071,7 +4075,10 @@ async function generateIdeas({
       const promptArgs: Parameters<typeof buildIdeaGenerationPromptV2> = [briefBatch, input.voiceProfile,
         batchPremiseMemory, batchLearning, batchExclusions, batchReactionAnchors, retryFailures,
         subjectReactionPatterns, promptSpreadReferences];
-      const prompt = astra ? buildAstraSingleIdeaGenerationPromptV2(promptArgs, approachIndex!) : buildIdeaGenerationPromptV2(...promptArgs);
+      const shortlist = astra && usesEfficientGeneration(input);
+      const prompt = astra
+        ? shortlist ? buildAstraIdeaGenerationPromptV2(...promptArgs) : buildAstraSingleIdeaGenerationPromptV2(promptArgs, approachIndex!)
+        : buildIdeaGenerationPromptV2(...promptArgs);
       const remainingIdeaMs = attemptDeadline - Date.now();
       if (remainingIdeaMs <= 0 || remainingIdeaMs < minimumAttemptMs) return {
         raw: [] as Record<string, unknown>[], failed: true, retryBudgetDeferred: minimumAttemptMs > 0,
@@ -4092,7 +4099,7 @@ async function generateIdeas({
         ? (root.ideas as unknown[]).filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
         : parseJsonObjects(result.text);
       // A model returning extra propositions cannot gain more selection chances.
-      return { raw: astra ? raw.filter((entry) => entry.briefId === briefBatch[0].id).slice(0, 1) : raw, failed: false };
+      return { raw: astra ? raw.filter((entry) => entry.briefId === briefBatch[0].id).slice(0, shortlist ? MAX_IDEA_CANDIDATES_PER_BRIEF : 1) : raw, failed: false };
     } catch {
       return { raw: [] as Record<string, unknown>[], failed: true };
     }
@@ -4150,7 +4157,7 @@ async function generateIdeas({
     now: new Date().toISOString(),
   });
   const initial = normalize(batchResults.flatMap((result) => result.raw));
-  if (usesEfficientGeneration(input)) return initial.filter((idea, index) => initial.findIndex(other => other.briefId === idea.briefId) === index);
+  if (usesEfficientGeneration(input)) return initial;
   const eligibleBriefIds = new Set(initial
     .filter((idea) => idea.status !== 'rejected')
     .map((idea) => idea.briefId));

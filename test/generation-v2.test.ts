@@ -930,6 +930,8 @@ describe('Tweet Generation V2', () => {
       'Let it block the bad release. That is the product I would trust with actual authority.',
     ];
     const nativeMoves = [
+      'vc term sheets should let founders kick investor-appointed directors off the board and veto their replacements.',
+      'I want VC term sheets to give founders the right to remove an investor-appointed director and veto the replacement.',
       'OpenAI should ship a model that maintains one small open-source repository for a year under its own name.',
       'i think oai and ant are 5-10T before 2029.',
       'google should be willing to cannibalize chrome for gemini.',
