@@ -17,6 +17,10 @@ it('invalidates an assessment receipt when content changes',()=>{
  const receipt={contentHash:jobFingerprint('original'),policyVersion:'p',criticVersion:'c',assessedAt:new Date().toISOString()};
  expect(getGeneratedPublishIssue({content:'edited',assessmentReceipt:receipt,qualityPolicyVersion:'p',finalCriticVersion:'c'} as any)).toContain('changed after assessment');
 });
+it('invalidates expired evidence before any posting eligibility checks',()=>{
+ const receipt={contentHash:jobFingerprint('original'),policyVersion:'p',criticVersion:'c',assessedAt:new Date().toISOString(),validUntil:'2020-01-01T00:00:00Z'};
+ expect(getGeneratedPublishIssue({content:'original',assessmentReceipt:receipt,qualityPolicyVersion:'p',finalCriticVersion:'c'} as any)).toContain('evidence expired');
+});
 it('keeps operational and housekeeping signals out of learned taste',()=>{
  const signals=[{id:'owner',signalType:'taste_less_like_this',metadata:{}},{id:'timeout',metadata:{evidenceCategory:'operational'}},{id:'archive',metadata:{softArchive:true}}] as any;
  expect(filterLearningEvidence(signals).signals.map(s=>s.id)).toEqual(['owner']);

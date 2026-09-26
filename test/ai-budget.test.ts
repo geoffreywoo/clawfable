@@ -167,3 +167,11 @@ it('enforces the research and background envelopes while generation can borrow u
  const background={...allocated,operation:'performance'};
  expect(()=>reserveAiSpendInLedger(null,background,{...attempt('bg',3.01),operation:'performance'},day)).toThrow('budget_exhausted');
 });
+it('fences expired undispatched reservations and never releases a dispatched race',async()=>{
+ const agentId='reservation-fence',nowDay=aiBudgetDay();
+ const row={id:'expired',day:nowDay,runId:'r',operation:'generation',state:'released',reservedUsd:1,observedUsd:0} as AiSpendAttempt;
+ await mutateAiOperationalState<AiSpendLedger,void>(agentId,'spend',()=>({value:{version:'account-budget-1',day:nowDay,attempts:{expired:row,sent:{...row,id:'sent',state:'dispatched',observedUsd:null}}},result:undefined}));
+ await expect(updateAiAttempt({context:{agentId,operation:'generation',runId:'r'},id:'expired',day:nowDay},{state:'dispatched'})).rejects.toThrow('budget_unavailable');
+ await updateAiAttempt({context:{agentId,operation:'generation',runId:'r'},id:'sent',day:nowDay},{state:'released',reason:'expired_undispatched',observedUsd:0});
+ expect((await getAiOperationalState<AiSpendLedger>(agentId,'spend'))?.attempts.sent.state).toBe('dispatched');
+});

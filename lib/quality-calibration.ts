@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const QUALITY_CALIBRATION_VERSION = 'geoffrey-owner-calibration-1';
+export const QUALITY_CALIBRATION_VERSION = 'geoffrey-owner-calibration-2';
 export interface QualityCalibrationExample {
   id: string;
   group: string; // Shared premise/lineage identity; a group may never cross a split.
@@ -29,15 +29,19 @@ export function calibrateQualityCutoffs(examples: QualityCalibrationExample[]) {
     && [x.aiAmbition,x.qualityMargin].every(n=>Number.isFinite(n) && n>=0 && n<=1));
   const groups = new Map<string,QualityCalibrationExample[]>();
   for (const x of valid) groups.set(x.group,[...(groups.get(x.group)||[]),x]);
-  // Conflicting ownership labels need a human resolution, not an inferred winner.
-  const unique = [...groups.values()].filter(group=>new Set(group.map(x=>x.label)).size===1)
-    .map(group=>[...group].sort((a,b)=>a.id.localeCompare(b.id))[0]);
+  const excludedGroups=new Set(examples.filter(x=>x.usedAsPromptAnchor || x.usedAsEvaluationBrief).map(x=>x.group));
+  // A rejected original and an approved final edit are useful supervision,
+  // not contradictory labels. Keep one example per label in each lineage,
+  // and assign the entire lineage to one side of the split.
+  const unique = [...groups.values()].filter(group=>!excludedGroups.has(group[0].group)).flatMap(group=>
+    ['approved','rejected'].flatMap(label=>[...group].filter(x=>x.label===label).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,1)));
   const train: QualityCalibrationExample[]=[]; const holdout: QualityCalibrationExample[]=[];
-  for (const label of ['approved','rejected']) {
-    const rows=unique.filter(x=>x.label===label).sort((a,b)=>
-      createHash('sha256').update(`${QUALITY_CALIBRATION_VERSION}:${a.group}`).digest('hex').localeCompare(
-        createHash('sha256').update(`${QUALITY_CALIBRATION_VERSION}:${b.group}`).digest('hex')));
-    const n=Math.floor(rows.length*0.7); train.push(...rows.slice(0,n)); holdout.push(...rows.slice(n));
+  const independent=[...new Set(unique.map(x=>x.group))].map(group=>unique.filter(x=>x.group===group));
+  for (const label of ['approved','rejected','mixed']) {
+    const rows=independent.filter(group=>(group.length>1?'mixed':group[0].label)===label).sort((a,b)=>
+      createHash('sha256').update(`${QUALITY_CALIBRATION_VERSION}:${a[0].group}`).digest('hex').localeCompare(
+        createHash('sha256').update(`${QUALITY_CALIBRATION_VERSION}:${b[0].group}`).digest('hex')));
+    const n=Math.floor(rows.length*0.7); train.push(...rows.slice(0,n).flat()); holdout.push(...rows.slice(n).flat());
   }
   const base={ version:QUALITY_CALIBRATION_VERSION, cutoffs:DEFAULT_GEOFFREY_CUTOFFS, activated:false,
     counts:{ approved:unique.filter(x=>x.label==='approved').length,rejected:unique.filter(x=>x.label==='rejected').length },

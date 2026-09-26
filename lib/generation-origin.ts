@@ -49,6 +49,7 @@ export function getGeneratedPublishIssue(
   options: { currentVoiceCorpusVersion?: string | null; accountHandle?: string | null } = {},
 ): string | null {
   if (tweet.assessmentReceipt && (tweet.assessmentReceipt.contentHash !== createHash('sha256').update(JSON.stringify(tweet.content)).digest('hex') || tweet.assessmentReceipt.policyVersion !== tweet.qualityPolicyVersion || tweet.assessmentReceipt.criticVersion !== tweet.finalCriticVersion)) return 'Generated copy changed after assessment; reassessment is required.';
+  if (tweet.assessmentReceipt?.validUntil && (!Number.isFinite(Date.parse(tweet.assessmentReceipt.validUntil)) || Date.parse(tweet.assessmentReceipt.validUntil) <= Date.now())) return 'Subject evidence expired; reassessment with current evidence is required.';
   if (tweet.pipelineVersion === 'v2') {
     const qualityPolicyVersion = getPublishingV2QualityPolicyVersion(
       tweet.generationSurface,

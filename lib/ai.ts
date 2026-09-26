@@ -762,6 +762,9 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
         durationMs: Date.now() - attemptStartedAt,
         ...(responseProgress ? { responseProgress: { ...responseProgress } } : {}),
       });
+      // A durable request must reconcile an unknown dispatched attempt before
+      // purchasing replacement output, including within this same call.
+      if (reservation && options.spendContext?.requestKey) break;
       if (!IS_TEST_ENV) {
         const detail = providerError.statusCode || providerError.errorType
           ? ` (${[providerError.statusCode, providerError.errorType].filter(Boolean).join('/')})`
@@ -802,6 +805,9 @@ function recordAiCallAudit(options: GenerateTextOptions, result: GenerateTextRes
 /** Read-only provider recovery plus atomic receipt settlement; unknown charges stay committed. */
 export async function reconcileAiProviderAttempts(agentId: string): Promise<{settled:number;unavailable:number}> {
   const ledger = await getAiOperationalState<AiSpendLedger>(agentId,'spend');
+  for (const a of Object.values(ledger?.attempts || {}).filter(a=>a.state==='reserved' && Date.now()-Date.parse(a.createdAt)>600_000)) {
+    await updateAiAttempt({context:{agentId,operation:a.operation,runId:a.runId},id:a.id,day:a.day},{state:'released',reason:'expired_undispatched',observedUsd:0});
+  }
   const client = process.env.OPENAI_API_KEY ? new OpenAI({apiKey:process.env.OPENAI_API_KEY,maxRetries:0,timeout:15_000}) : null;
   let settled=0,unavailable=0;
   const traces = await getGenerationRuns(agentId,120);

@@ -5,6 +5,28 @@ const POSITIVE = new Set(['approved_without_edit','edited_before_queue','edited_
 const NEGATIVE = new Set(['taste_less_like_this','deleted_from_queue']);
 /** Only owner decisions are labels. Automatic posting and removal inference provide no supervision here. */
 export function collectOwnerCalibrationData(input: { signals: LearningSignal[]; feedback: FeedbackEntry[]; tweets: Tweet[]; drafts: DraftCandidate[]; ideas: IdeaCandidate[]; excludedTexts?: string[]; judge?: { model: string; policyVersion: string } }) {
+  // Union premise and editing lineage, rather than choosing one or the other.
+  // Siblings can have different semantic keys after an edit and must still
+  // stay in the same calibration partition.
+  const parents=new Map<string,string>();
+  const root=(key:string):string=>{const parent=parents.get(key);if(!parent){parents.set(key,key);return key;}if(parent===key)return key;const r=root(parent);parents.set(key,r);return r;};
+  const join=(a:string,b:string)=>{const left=root(a),right=root(b);if(left!==right)parents.set(left,right);};
+  const textKey=(text:string)=>`text:${createHash('sha256').update(text.trim()).digest('hex')}`;
+  for(const idea of input.ideas) {
+    if(idea.semanticKey)join(`idea:${idea.id}`,`premise:${idea.semanticKey}`);
+    if(idea.parentIdeaId)join(`idea:${idea.id}`,`idea:${idea.parentIdeaId}`);
+  }
+  for(const draft of input.drafts) {
+    const key=`draft:${draft.id}`;
+    join(key,textKey(draft.content));
+    if(draft.ideaId)join(key,`idea:${draft.ideaId}`);
+    if(draft.parentDraftId)join(key,`draft:${draft.parentDraftId}`);
+    if(draft.parentIdeaId)join(key,`idea:${draft.parentIdeaId}`);
+  }
+  for(const tweet of input.tweets) {
+    if(tweet.draftCandidateId)join(textKey(tweet.content),`draft:${tweet.draftCandidateId}`);
+    if(tweet.parentDraftCandidateId)join(textKey(tweet.content),`draft:${tweet.parentDraftCandidateId}`);
+  }
   const labels: Array<{id:string;content:string;tweetId?:string;label:QualityCalibrationExample['label'];labelSource:QualityCalibrationExample['labelSource']}> = [];
   for (const signal of input.signals) {
     if(signal.inferred || signal.metadata?.manualQualityEdit === true || signal.metadata?.qualityGate || ['autopilot','cron','mentions','engage'].includes(signal.surface)) continue;
@@ -26,18 +48,19 @@ export function collectOwnerCalibrationData(input: { signals: LearningSignal[]; 
   }
   const examples:QualityCalibrationExample[]=[]; const missingScores:typeof labels=[];
   const excluded=new Set((input.excludedTexts || []).map(s=>s.trim()));
+  const excludedGroups=new Set([...excluded].map(text=>root(textKey(text))));
   const seen=new Set<string>();
   const eligibleLabels:typeof labels=[];
   for(const label of labels) {
     const textHash=createHash('sha256').update(label.content).digest('hex');
-    if(seen.has(`${label.label}:${textHash}`) || excluded.has(label.content)) continue;
+    if(seen.has(`${label.label}:${textHash}`) || excluded.has(label.content) || excludedGroups.has(root(textKey(label.content)))) continue;
     seen.add(`${label.label}:${textHash}`);
     eligibleLabels.push(label);
     const draft=input.drafts.find(d=>d.content.trim()===label.content && d.judgeBreakdown && d.judgeModel===(input.judge?.model || 'gpt-5.6') && d.judgePolicyVersion===(input.judge?.policyVersion || 'budget-copy-judge-1'));
     const score=draft?.judgeBreakdown;
     if(!draft || typeof score?.qualityMargin!=='number' || typeof score?.aiBullishness!=='number') { missingScores.push(label); continue; }
     const idea=input.ideas.find(i=>i.id===draft.ideaId);
-    examples.push({id:label.id,group:idea?.semanticKey || draft.parentDraftId || draft.ideaId || textHash,label:label.label,labelSource:label.labelSource,
+    examples.push({id:label.id,group:root(`draft:${draft.id}`),label:label.label,labelSource:label.labelSource,
       isAi:/\b(ai|inference|robot|robotics|models?|agents?)\b/i.test(`${idea?.topic || ''} ${label.content}`),
       aiAmbition:score.aiBullishness,qualityMargin:score.qualityMargin,
       otherGatesPass:!draft.rejectionCodes.some(code=>!['final_ai_bullishness_below_floor','final_quality_margin','copy_not_selected'].includes(code)),

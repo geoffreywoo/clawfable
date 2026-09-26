@@ -3715,8 +3715,10 @@ export function normalizeIdeaCandidatesV2({
   const qualityPolicyVersion = getGenerationPolicyVersions(voiceProfile, surface).qualityPolicyVersion;
   const candidates = raw.flatMap((entry, index) => {
     const briefId = stringField(entry, 'briefId', 100) || stringField(entry, 'brief_id', 100);
-    const brief = briefs.find((item) => item.id === briefId);
-    if (!brief) return [];
+    const sourceBrief = briefs.find((item) => item.id === briefId);
+    if (!sourceBrief) return [];
+    const subjectiveOnly = simpleContract && entry.contentMode === 'opinion' && Array.isArray(entry.evidenceIds) && entry.evidenceIds.length === 0;
+    const brief = subjectiveOnly ? subjectiveBrief(sourceBrief) : sourceBrief;
     const rawPublicMove = stringField(entry, 'publicMove', 280) || stringField(entry, 'public_move', 280);
     const publicMove = normalizeDirectComparisonPublicMoveV2(rawPublicMove, brief);
     const claim = stringField(entry, 'claim', 240) || (simpleContract ? brief.evidenceMode === 'verified_source' ? brief.evidence.find(e=>Array.isArray(entry.evidenceIds) && entry.evidenceIds.includes(e.sourceDocumentId))?.claim || '' : publicMove : '');
@@ -3918,6 +3920,16 @@ export function normalizeIdeaCandidatesV2({
     }
   }
   return candidates;
+}
+
+/** A subject may support both sourced claims and an independent opinion.
+ * The latter gets stricter no-evidence factual checks, never borrowed facts. */
+function subjectiveBrief(brief:GenerationBriefV2):GenerationBriefV2 {
+  return {...brief,evidenceMode:'operator_opinion',evidenceIds:[],sourceDocumentIds:[],qualifiedClaimIds:[],evidence:[],
+    sourceBrief:'Subject cue only. This idea is a subjective opinion with no cited facts.'};
+}
+function briefForIdea(brief:GenerationBriefV2|undefined,idea:IdeaCandidate):GenerationBriefV2|undefined {
+  return brief && idea.contentMode==='opinion' && !idea.evidenceIds.length ? subjectiveBrief(brief) : brief;
 }
 
 function isCuratedOperatorReference(
@@ -4717,7 +4729,7 @@ async function selectIdeas({
       requirement: 'ranking and scores must each contain every required ID exactly once, including ideas that should fail a threshold',
     },
     ideas: shuffled.map((idea) => {
-      const brief = briefs.find((entry) => entry.id === idea.briefId);
+      const brief = briefForIdea(briefs.find((entry) => entry.id === idea.briefId),idea);
       return {
         id: idea.id,
         briefId: idea.briefId,
@@ -5839,7 +5851,7 @@ async function generateDraftEvaluations({
       ))[0]?.id || null
     : null;
   const outputs = await Promise.all(ideas.map(async (idea) => {
-    const brief = briefs.find((entry) => entry.id === idea.briefId);
+    const brief = briefForIdea(briefs.find((entry) => entry.id === idea.briefId),idea);
     if (!brief) return [];
     const sourceDocuments = sourceDocumentsForBrief(brief, documents);
     const anchors = anchorsForIdea(idea, anchorPool);
@@ -7520,7 +7532,17 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   try {
     let result = await generateTweetBatchV2Internal({...job.input as GenerateTweetBatchV2Input,jobSession:session,
       entitlement:input.entitlement,onArtifacts:input.onArtifacts,onTrace:trace=>{outcome=trace.outcomeCode || 'provider_failure'; input.onTrace?.(trace);}});
-    result = result.map(item=>({...item,assessmentReceipt:{contentHash:jobFingerprint(item.content),policyVersion:item.qualityPolicyVersion || '',criticVersion:item.finalCriticVersion || '',assessedAt:new Date().toISOString()}}));
+    const savedIdeas = session.job.checkpoints.ideas_ready as IdeaCandidate[] || [];
+    const savedBriefs = session.job.checkpoints.briefs as GenerationBriefV2[] || [];
+    const savedDocuments = (session.job.checkpoints.context as [SourceDocument[]] | undefined)?.[0] || [];
+    result = result.map(item=>{
+      const idea = savedIdeas.find(i=>i.id===item.ideaId);
+      const brief = savedBriefs.find(b=>b.id===idea?.briefId);
+      return {...item,assessmentReceipt:{contentHash:jobFingerprint(item.content),policyVersion:item.qualityPolicyVersion || '',criticVersion:item.finalCriticVersion || '',assessedAt:new Date().toISOString(),
+        validUntil:brief?.subjectPacket?.expiresAt,
+        evidence:savedDocuments.filter(d=>brief?.sourceDocumentIds.includes(d.id)).map(d=>({sourceDocumentId:d.id,contentHash:d.contentHash})),
+      }};
+    });
     await session.finish(result,outcome);
     if (!session.deferred && outcome==='quality_empty' && session.job.status==='failed') await recordGenerationCanary(input.agentId,{empty:true});
     return result;
@@ -7789,6 +7811,12 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
         onRetryBudgetDeferred: (briefCount) => { trace.stageCounts.ideaRetryBudgetDeferred = briefCount; },
       });
       ideas = input.jobSession ? await input.jobSession.checkpoint('ideas_ready',produceIdeas) : await produceIdeas();
+      if (input.jobSession && input.jobSession.job.checkpoints.ideaNormalizationVersion !== 'subjective-modes-2') {
+        // A deterministic contract fix revalidates the saved artifact. It
+        // does not purchase another idea call or throw away its provenance.
+        ideas = normalizeIdeaCandidatesV2({raw:ideas as unknown as Array<Record<string,unknown>>,agentId:input.agentId,runId,briefs,voiceProfile:input.voiceProfile,recentPosts:input.recentPosts,blocks,documents,surface:input.surface || 'original',triggerId:input.triggerId,idempotencyKey:input.idempotencyKey,simpleContract:true,now:ideas[0]?.createdAt || new Date().toISOString()});
+        await input.jobSession.write(job=>({...job,checkpoints:{...job.checkpoints,ideas_ready:ideas,ideaNormalizationVersion:'subjective-modes-2'}}));
+      }
     } finally {
       trace.stageCounts.ideaGenerationCalls = trace.modelCalls.filter((call) => call.stage === 'idea_generation').length;
       trace.stageCounts.ideaRetryCalls = Math.max(

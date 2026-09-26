@@ -88,6 +88,15 @@ const voiceProfile = {
   summary: 'A founder and investor who cares about company formation, markets, and human performance.',
 };
 
+it('allows a subjective idea from a researched subject without borrowing its facts',()=>{
+ const make=(publicMove:string)=>normalizeIdeaCandidatesV2({raw:[{briefId:'space',publicMove,contentMode:'opinion',evidenceIds:[],factualRisk:'low'}],
+   agentId:'13',runId:'subjective',briefs:[brief('space','space exploration','verified_source')],voiceProfile,recentPosts:[],blocks:[],simpleContract:true,now:new Date().toISOString()})[0];
+ const opinion=make('i still want us building for mars, even without an obvious earthside market.');
+ expect(opinion.rejectionCodes).not.toContain('missing_verified_evidence');
+ expect(opinion.rejectionCodes).not.toContain('unsupported_operator_fact');
+ expect(make('starship flight 14 is my favorite rocket launch.').rejectionCodes).toContain('unsupported_operator_fact');
+});
+
 function brief(id: string, topic: string, evidenceMode: GenerationBriefV2['evidenceMode'] = 'operator_opinion'): GenerationBriefV2 {
   return {
     id,

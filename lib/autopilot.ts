@@ -1,6 +1,8 @@
 import { repairTweetIndexes } from './kv-storage';
 import { durableGenerationEnabled, acknowledgeGenerationQueue, recordGenerationCanary } from './generation-job';
 import { recordEmptyQueueRun } from './generation-efficiency';
+import { dispatchOriginalPost,reconcileOriginalPostDispatch,OriginalDispatchPendingError } from './original-post-dispatch';
+import { originalPostingCadence } from './original-post-cadence';
 import { recordAutopostReadyOutput } from './ai-budget';
 import { isOperatorManagedAgent, OPERATOR_MANAGED_AUTOPILOT_REASON } from './operator-management';
 /**
@@ -21,6 +23,8 @@ import {
   getQueuedTweets,
   getQueueVersion,
   getTweet,
+  getSourceDocuments,
+  getStoryClusters,
   getTweets,
   getAnalysis,
   updateTweet,
@@ -524,6 +528,7 @@ function getSemanticHistoryIssue(
 }
 
 interface QueuePolicyRescoreOptions {
+  readOnly?: boolean;
   /**
    * Recent post log (newest first) used to avoid re-logging an unchanged
    * content-mix deferral on every tick. Entries logged by this pass are
@@ -547,6 +552,8 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   }> = [];
   const requiredAutopostMargin = getPublishingV2AutopostQualityMargin(agent.handle);
   const currentVoiceCorpusVersion = context?.learnings?.voiceCorpus?.snapshotId || null;
+  const needsEvidence = queuedTweets.some(t=>t.assessmentReceipt?.evidence?.length);
+  const [currentSources,currentStories] = needsEvidence ? await Promise.all([getSourceDocuments(agent.id),getStoryClusters(agent.id)]) : [[],[]];
   for (const tweet of queuedTweets) {
     const accountTopicIssue = getAccountTopicPolicyIssue(
       agent.handle,
@@ -561,7 +568,9 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     const originIssue = getGeneratedPublishIssue(tweet, {
       currentVoiceCorpusVersion,
       accountHandle: agent.handle,
-    });
+    }) || (tweet.assessmentReceipt?.evidence?.some(e=>!currentSources.some(source=>source.id===e.sourceDocumentId && source.contentHash===e.contentHash && source.metadata?.withdrawn!==true && source.metadata?.contradicted!==true))
+      || (tweet.storyClusterId && tweet.assessmentReceipt?.evidence?.length && !currentStories.some(story=>story.id===tweet.storyClusterId && story.evidenceQualified && !story.blockReason))
+      ? 'Subject evidence changed or was withdrawn; reassessment is required.' : null);
     const portfolioCompanyIssue = isGeoffreyAccount(agent.handle) || tweet.portfolioCompanyContext
       ? getAntiFundPortfolioPolicyIssue(tweet.content, tweet.portfolioCompanyContext)
       : null;
@@ -634,7 +643,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       const lastDeferralEntry = (options.recentLog || []).find((entry) => (
         entry.format === 'queue_refresh' && entry.topic === 'content_mix'
       ));
-      if (lastDeferralEntry?.skipReason !== deferralKey) {
+      if (!options.readOnly && lastDeferralEntry?.skipReason !== deferralKey) {
         const entry: Omit<PostLogEntry, 'id'> = {
           agentId: agent.id,
           tweetId: '',
@@ -653,6 +662,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       }
     }
   }
+  if (options.readOnly) return {valid, deferred};
   await Promise.all(invalid.map(({ tweet, issue }) => updateTweet(tweet.id, {
     status: 'quarantined',
     preQuarantineStatus: 'queued',
@@ -725,6 +735,15 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     });
   }
   return { valid, deferred };
+}
+
+/** The same deterministic checks as posting, without repairs, writes or AI calls. */
+export async function inspectPublishableOriginalQueue(agent: Agent): Promise<Tweet[]> {
+  const context = await buildGenerationContext(agent, {negativeLimit:10,directiveLimit:10});
+  const queue = context.allTweets.filter(tweet => tweet.status === 'queued' && isAutopostableQueuedTweet(tweet));
+  const {valid} = await rescoreQueuedTweetsForCurrentPolicy(agent,queue,context,{readOnly:true});
+  const history = context.allTweets.filter(tweet => tweet.xTweetId && ['posted','deleted_from_x'].includes(tweet.status)).slice(0,50).map(tweet => tweet.content);
+  return valid.filter(tweet => clearsQueuedPostPreflight(agent,tweet,history,context));
 }
 
 export async function refreshQueuedTweetsForCurrentQualityPolicy(
@@ -1349,6 +1368,11 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     accessSecret: agent.accessSecret,
   });
 
+  if (durableGenerationEnabled(agent.id,settings)) {
+    const pending = await reconcileOriginalPostDispatch(agent,keys);
+    if (pending) return {agentId,action:'skipped',reason:pending};
+  }
+
   // --- Auto-reply to mentions (runs regardless of active hours) ---
   let repliesSent = 0;
   if (settings.autoReply) {
@@ -1550,7 +1574,12 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     Math.round(baseIntervalMs * cooldownMultiplier),
     cadenceAnchor ? `${agentId}:${cadenceAnchor}` : null,
   );
-  if (cadenceAnchor) {
+  if (durableGenerationEnabled(agent.id,settings)) {
+    const cadence=originalPostingCadence(agent.id,postLog.filter(isSuccessfulOriginalPostLogEntry));
+    if(!cadence.due) return {agentId,action:repliesSent?'replied':'skipped',repliesSent,reason:cadence.nextAt
+      ? `Next original slot: ${cadence.nextAt}. ${cadence.confirmedOriginals}/5 confirmed this Pacific day.`
+      : 'Five originals confirmed this Pacific day; next action is tomorrow’s first slot.'};
+  } else if (cadenceAnchor) {
     const elapsed = Date.now() - new Date(cadenceAnchor).getTime();
     if (elapsed < minIntervalMs) {
       const minsLeft = Math.round((minIntervalMs - elapsed) / 60000);
@@ -1726,8 +1755,9 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
 
   let result: Awaited<ReturnType<typeof postTweet>>;
   try {
-    result = await postTweet(keys, tweet.content, { username: agent.handle });
+    result = durableGenerationEnabled(agent.id,settings) ? await dispatchOriginalPost(agent,tweet,keys) : await postTweet(keys, tweet.content, { username: agent.handle });
   } catch (err) {
+    if (err instanceof OriginalDispatchPendingError) return {agentId,action:'skipped',reason:err.message,tweetId:tweet.id,repliesSent};
     const message = formatActionError(err, 'post_tweet', {
       draftId: tweet.id,
       format: tweet.format || 'unknown',
@@ -3071,6 +3101,10 @@ export async function refillQueue(
         const committed = allTweets.find(tweet=>tweet.draftCandidateId && tweet.draftCandidateId === item.draftCandidateId);
         if (committed) {
           if (durableGenerationEnabled(agent.id,settings)) await repairTweetIndexes(committed);
+          if (durableGenerationEnabled(agent.id,settings) && committed.status === 'queued' && !committed.quarantinedAt && !getGeneratedPublishIssue(committed,{accountHandle:agent.handle})) {
+            await recordGenerationCanary(agent.id,{queuedId:committed.id});
+            await recordAutopostReadyOutput(agent.id,committed);
+          }
           if (durableGenerationEnabled(agent.id,settings) && item.generationRunId) await acknowledgeGenerationQueue(agent.id,item.generationRunId,true);
           continue;
         }

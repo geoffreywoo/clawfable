@@ -496,7 +496,7 @@ export interface GenerationSelectionTrace {
 }
 
 export interface Tweet {
-  assessmentReceipt?: { contentHash: string; policyVersion: string; criticVersion: string; assessedAt: string } | null;
+  assessmentReceipt?: { contentHash: string; policyVersion: string; criticVersion: string; assessedAt: string; validUntil?: string; evidence?: Array<{sourceDocumentId:string;contentHash:string}> } | null;
   id: string;
   agentId: string;
   content: string;

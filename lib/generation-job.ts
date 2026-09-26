@@ -44,9 +44,10 @@ export async function claimGenerationJob(agentId: string, input: unknown, policy
   return mutateAiOperationalState<GenerationJob, GenerationJob | null>(agentId, GENERATION_JOB_NAMESPACE, current => {
     if (current && current.leaseUntil > now && current.owner) return {value: current, result: null, skip: true};
     if (current && current.nextAttemptAt > now && current.policy === policy && current.expiresAt > now) return {value: current, result: null, skip: true};
-    const reusable = current && current.policy === policy && current.expiresAt > now && !['queued','failed'].includes(current.status);
+    const hasReserve = current?.status === 'queued' && (current.checkpoints.reserveIdeas as string[] || []).length > 0;
+    const reusable = current && current.policy === policy && current.expiresAt > now && (hasReserve || !['queued','failed'].includes(current.status));
     if (!reusable && current && (current.id !== previous?.id || (current.revision || 0) !== (previous?.revision || 0))) return {value:current,result:null,skip:true};
-    const value: GenerationJob = reusable ? {...current, owner, leaseUntil: now + 300_000, status: current.status === 'assessed' ? 'assessed' : 'running'} : {
+    const value: GenerationJob = reusable ? {...current, owner, leaseUntil: now + 300_000, status: current.status === 'assessed' ? 'assessed' : 'running',...(hasReserve ? {result:undefined,blocker:null,stage:'ideas_ready'} : {})} : {
       version: GENERATION_JOB_VERSION, id: `generation-job-${randomUUID()}`, policy, input,
       createdAt: now, expiresAt: now + 24*3600_000, owner, leaseUntil: now + 300_000,
       stage: 'subject_ready', status: 'running', blocker: null, nextAttemptAt: 0, failures: 0, checkpoints: {},
@@ -83,17 +84,21 @@ export class GenerationJobSession {
     if (reserve) await this.write(current=>({...current,checkpoints:{...current.checkpoints,attemptedIdeas:[...current.checkpoints.attemptedIdeas as string[] || [],...current.checkpoints.selectedIdeas as string[] || []]}}));
     const operational = reserve || this.deferred || ['run_deadline','provider_failure','idea_generation_failed','idea_judgment_failed','copy_judgment_failed','writing_failed','malformed_output','budget_exhausted','budget_unavailable','evaluation_deferred','stage_output_unavailable'].includes(outcome);
     await this.write(current => ({...current, result:result.length ? result : undefined,
-      status:result.length ? 'assessed' : operational && current.failures < 3 ? 'deferred' : 'failed',
+      // Repeated provider trouble must not discard paid stages and restart
+      // ideation. Keep the job resumable while it is valid, with capped backoff.
+      status:result.length ? 'assessed' : operational ? 'deferred' : 'failed',
       blocker:result.length ? null : this.deferred ? 'stage_deferred' : reserve ? 'reserve_ready' : outcome,
       failures:current.failures + (operational && !this.deferred ? 1 : 0),
-      nextAttemptAt: result.length ? 0 : Date.now() + (outcome === 'quality_empty' ? 30*60_000 : this.deferred ? 10*60_000 : Math.min(120,10*2**current.failures)*60_000),
+      nextAttemptAt: result.length ? 0 : Date.now() + (reserve || this.deferred ? 1000 : outcome === 'quality_empty' ? 30*60_000 : Math.min(120,10*2**current.failures)*60_000),
       owner:result.length ? current.owner : null,leaseUntil:result.length ? current.leaseUntil : 0}));
   }
 }
 export async function acknowledgeGenerationQueue(agentId: string, runId: string, queued: boolean): Promise<void> {
   await mutateAiOperationalState<GenerationJob,void>(agentId,GENERATION_JOB_NAMESPACE,current=>{
     if (!current || current.id !== runId) return {value:current!,result:undefined,skip:true};
-    return {value:{...current,status:queued?'queued':'failed',owner:null,leaseUntil:0,stage:queued?'queued':current.stage,blocker:queued?null:'queue_rejected',nextAttemptAt:queued?0:Date.now()+30*60_000},result:undefined};
+    const attemptedIdeas=[...new Set([...current.checkpoints.attemptedIdeas as string[] || [],...current.checkpoints.selectedIdeas as string[] || []])];
+    return {value:{...current,status:queued?'queued':'failed',owner:null,leaseUntil:0,stage:queued?'queued':current.stage,blocker:queued?null:'queue_rejected',nextAttemptAt:queued?0:Date.now()+30*60_000,revision:(current.revision || 0)+1,
+      checkpoints:{...current.checkpoints,attemptedIdeas}},result:undefined};
   });
 }
 

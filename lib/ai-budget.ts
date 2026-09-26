@@ -207,7 +207,12 @@ export async function updateAiAttempt(reservation: AiReservation | null, patch: 
       const original = ledger?.attempts[reservation.id];
       if (!ledger || !original) throw new AiBudgetError('budget_unavailable');
       // A repeated/late settlement cannot release or overwrite a completed receipt.
-      if (original.state === 'settled' || original.state === 'released') return { value: ledger, result: undefined, skip: true };
+      if (original.state === 'settled' || original.state === 'released') {
+        if (patch.state === 'dispatched') throw new AiBudgetError('budget_unavailable');
+        return { value: ledger, result: undefined, skip: true };
+      }
+      // Cleanup races with dispatch admission must never free a sent request.
+      if (patch.reason === 'expired_undispatched' && original.state !== 'reserved') return {value:ledger,result:undefined,skip:true};
       return { value: { ...ledger, attempts: { ...ledger.attempts, [reservation.id]: { ...original, ...patch } } }, result: undefined };
     });
   } catch { throw new AiBudgetError('budget_unavailable'); }

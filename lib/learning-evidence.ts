@@ -1,6 +1,6 @@
 import type { FeedbackEntry, LearningSignal, Tweet } from './types';
 
-export const LEARNING_DERIVATION_VERSION = 'learning-2026-09-26-v4';
+export const LEARNING_DERIVATION_VERSION = 'learning-2026-09-26-v5';
 
 /** Historical timeline absence was recorded as a deletion without verification. */
 export function isUnverifiedRemovalSignal(signal: LearningSignal): boolean {

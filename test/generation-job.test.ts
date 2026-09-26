@@ -1,5 +1,5 @@
 import { describe,it,expect,vi } from 'vitest';
-import { claimGenerationJob,updateGenerationJob,GenerationJobSession,getGenerationJob,acknowledgeGenerationQueue } from '@/lib/generation-job';
+import { claimGenerationJob,updateGenerationJob,GenerationJobSession,getGenerationJob,getGenerationJobRecord,acknowledgeGenerationQueue } from '@/lib/generation-job';
 import { normalizeCandidateDisposition,editorialRejectionCodes } from '@/lib/candidate-disposition';
 
 describe('durable generation jobs',()=>{
@@ -38,6 +38,32 @@ describe('durable generation jobs',()=>{
   const session=new GenerationJobSession('job-empty',(await claimGenerationJob('job-empty',{},'p'))!);
   await expect(session.checkpoint('ideas_ready',async()=>[])).rejects.toThrow('stage_output_unavailable');
   expect(session.job.checkpoints.ideas_ready).toBeUndefined();
+ });
+ it('keeps completed paid artifacts addressable after replacing a terminal job',async()=>{
+  const session=new GenerationJobSession('job-archive',(await claimGenerationJob('job-archive',{},'p'))!);
+  await session.checkpoint('drafts_ready',async()=>[{id:'saved'}]);
+  await session.finish([],'quality_empty');
+  await claimGenerationJob('job-archive',{},'new-policy');
+  expect((await getGenerationJobRecord('job-archive',session.job.id))?.checkpoints.drafts_ready).toEqual([{id:'saved'}]);
+ });
+ it('uses paid reserve ideas after a successful queue insertion',async()=>{
+  const session=new GenerationJobSession('job-reserve',(await claimGenerationJob('job-reserve',{},'p'))!);
+  await session.write(j=>({...j,checkpoints:{ideas_ready:['idea-a','idea-b'],selectedIdeas:['idea-a'],reserveIdeas:['idea-b']}}));
+  await session.finish([{id:'draft-a'}],'completed');
+  await acknowledgeGenerationQueue('job-reserve',session.job.id,true);
+  const next=await claimGenerationJob('job-reserve',{different:true},'p');
+  expect(next?.id).toBe(session.job.id);
+  expect(next?.result).toBeUndefined();
+  expect(next?.checkpoints.attemptedIdeas).toEqual(['idea-a']);
+ });
+ it('does not discard paid work after repeated provider failures',async()=>{
+  let job=(await claimGenerationJob('job-long-outage',{},'p'))!;
+  const session=new GenerationJobSession('job-long-outage',job);
+  await session.checkpoint('drafts_ready',async()=>['paid draft']);
+  await session.write(j=>({...j,failures:8}));
+  await session.finish([],'copy_judgment_failed');
+  expect(session.job.status).toBe('deferred');
+  expect(session.job.checkpoints.drafts_ready).toEqual(['paid draft']);
  });
  it('preserves real rejection alongside selection or operational codes',()=>{
   const item={status:'rejected',rejectionCodes:['idea_not_selected']} as any;
