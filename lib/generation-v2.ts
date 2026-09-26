@@ -7316,7 +7316,39 @@ function countRejections(
  * production logs could show AI spend but never why a run produced nothing.
  * Never includes prompts, source text, or draft copy.
  */
-export function summarizeGenerationRunForLog(trace: GenerationRunTrace): Record<string, unknown> {
+export function summarizeGenerationRunForLog(
+  trace: GenerationRunTrace,
+  artifacts: { ideas?: IdeaCandidate[]; drafts?: DraftCandidate[] } = {},
+): Record<string, unknown> {
+  const round = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? Math.round(value * 100) / 100 : null);
+  // Numeric judge scores only, so floors can be calibrated against real runs.
+  const ideaScores = (artifacts.ideas || []).slice(0, 6).map((idea) => ({
+    status: idea.status,
+    codes: idea.rejectionCodes.slice(0, 6),
+    ...(idea.judgeBreakdown ? {
+      ambition: round(idea.judgeBreakdown.aiBullishness),
+      frontier: round(idea.judgeBreakdown.frontierLead),
+      evidence: round(idea.judgeBreakdown.evidenceFidelity),
+      authorFit: round(idea.judgeBreakdown.authorFit),
+      move: round(idea.judgeBreakdown.publicMoveStrength),
+      reaction: round(idea.judgeBreakdown.nativeReactionPotential),
+      distinct: round(idea.judgeBreakdown.distinctiveness),
+      consequence: round(idea.judgeBreakdown.consequence),
+      share: round(idea.judgeBreakdown.sharePotential),
+    } : {}),
+  }));
+  const draftScores = (artifacts.drafts || []).slice(0, 6).map((draft) => ({
+    status: draft.status,
+    codes: draft.rejectionCodes.slice(0, 6),
+    judge: round(draft.judgeScore),
+    ...(draft.judgeBreakdown ? {
+      margin: round(draft.judgeBreakdown.qualityMargin),
+      ambition: round(draft.judgeBreakdown.aiBullishness),
+      frontier: round(draft.judgeBreakdown.frontierLead),
+      voice: round(draft.judgeBreakdown.voiceFit),
+      cringe: round(draft.judgeBreakdown.cringeRisk),
+    } : {}),
+  }));
   const topRejections = Object.entries(trace.rejectionCounts || {})
     .sort((left, right) => right[1] - left[1])
     .slice(0, 8);
@@ -7339,12 +7371,17 @@ export function summarizeGenerationRunForLog(trace: GenerationRunTrace): Record<
     failedCalls: trace.modelCalls.filter((call) => !call.succeeded).length,
     estimatedCostUsd: trace.estimatedCostUsd ?? null,
     error: trace.error || null,
+    ideaScores,
+    draftScores,
   };
 }
 
-function logGenerationRunSummary(trace: GenerationRunTrace): void {
+function logGenerationRunSummary(
+  trace: GenerationRunTrace,
+  artifacts: { ideas?: IdeaCandidate[]; drafts?: DraftCandidate[] } = {},
+): void {
   if (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true') return;
-  console.info('[gen:run]', JSON.stringify(summarizeGenerationRunForLog(trace)));
+  console.info('[gen:run]', JSON.stringify(summarizeGenerationRunForLog(trace, artifacts)));
 }
 
 function finalizeTrace(trace: GenerationRunTrace): GenerationRunTrace {
@@ -7447,7 +7484,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     input.onTrace?.(trace);
     // Polling a budget pause must not evict the paid run that explains it.
     if (persistArtifacts && trace.error !== 'budget_paused') await saveGenerationRun(input.agentId, trace);
-    if (trace.status !== 'running') logGenerationRunSummary(trace);
+    if (trace.status !== 'running') logGenerationRunSummary(trace, { ideas: observedIdeas, drafts: observedDrafts });
   };
   const persistIdeas = async (candidates: IdeaCandidate[]) => {
     observedIdeas = candidates;
