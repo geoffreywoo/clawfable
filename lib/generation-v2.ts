@@ -199,8 +199,11 @@ export const V2_MIN_GEOFFREY_AI_BULLISHNESS = PUBLISHING_V2_GEOFFREY_AI_AMBITION
 // The idea judge scores a premise before any copy exists, and the writer is
 // told to push AI ambition further. Idea floors only veto premises that cannot
 // plausibly clear the final floors; the final copy gates stay authoritative.
-export const V2_MIN_GEOFFREY_IDEA_AI_BULLISHNESS = Number((V2_MIN_GEOFFREY_AI_BULLISHNESS - 0.07).toFixed(2));
-export const V2_MIN_GEOFFREY_IDEA_FRONTIER_LEAD = 0.64;
+// Production scores were bimodal: premises scored 1.0 on ambition collapsed on
+// author fit and distinctiveness, while the day's strongest premise (0.72-0.79
+// everywhere else) failed only at ambition 0.69.
+export const V2_MIN_GEOFFREY_IDEA_AI_BULLISHNESS = Number((V2_MIN_GEOFFREY_AI_BULLISHNESS - 0.2).toFixed(2));
+export const V2_MIN_GEOFFREY_IDEA_FRONTIER_LEAD = 0.6;
 export const V2_MIN_GEOFFREY_TRAJECTORY_CONVICTION = 0.72;
 export const V2_MIN_GEOFFREY_FORECAST_GROUNDING = 0.6;
 export const V2_MIN_GEOFFREY_EXPONENTIAL_INTUITION = 0.58;
@@ -262,6 +265,12 @@ const GENERATION_RUN_DEADLINE_MS = 240 * 1000;
 // minutes. Give them room inside the unchanged four-minute run ceiling.
 const ASTRA_IDEA_GENERATION_DEADLINE_MS = 180 * 1000;
 const ASTRA_IDEA_RETRY_DEADLINE_MS = 120 * 1000;
+// The efficient policy runs one high-reasoning ideation call per brief, then one
+// three-variant writer call. Production ideation took 90-170s and a third of
+// calls hit the 180s cap, which left the writer no room inside 240s. The cron
+// allows 800s and holds a 15-minute lock, so this policy gets a longer runway.
+const EFFICIENT_GENERATION_RUN_DEADLINE_MS = 360 * 1000;
+const EFFICIENT_ASTRA_IDEA_GENERATION_DEADLINE_MS = 220 * 1000;
 const ASTRA_TWEET_WRITING_DEADLINE_MS = 120 * 1000;
 const STAGE_DEADLINES_MS: Partial<Record<GenerationModelCallTrace['stage'], number>> = {
   idea_generation: 75 * 1000,
@@ -4128,7 +4137,7 @@ async function generateIdeas({
   const astra = input.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK;
   // All independent approaches share this stage budget, leaving time for the
   // judges and writers. Completed responses remain usable when queued work ends.
-  const ideaDeadline = astra ? Math.min(Date.now() + ASTRA_IDEA_GENERATION_DEADLINE_MS,
+  const ideaDeadline = astra ? Math.min(Date.now() + (usesEfficientGeneration(input) && !input.jobSession ? EFFICIENT_ASTRA_IDEA_GENERATION_DEADLINE_MS : ASTRA_IDEA_GENERATION_DEADLINE_MS),
     generationRunDeadlines.get(calls) ?? Infinity) : Infinity;
   // A longer first-attempt allowance must not expand the correction budget.
   const retryDeadline = astra ? Math.min(Date.now() + ASTRA_IDEA_RETRY_DEADLINE_MS, ideaDeadline) : Infinity;
@@ -4814,7 +4823,11 @@ Score sharePotential for whether a relevant founder, investor, or operator would
   }
 
   const judgedEligible = eligible.filter((idea) => idea.status !== 'rejected');
-  const desired = Math.min(judgedEligible.length, 4, Math.max(input.count + 2, 4));
+  // Every selected idea funds a writer. The efficient policy funds only the
+  // best idea across its briefs, keeping one paid pipeline per run.
+  const desired = usesEfficientGeneration(input)
+    ? Math.min(judgedEligible.length, Math.max(1, input.count))
+    : Math.min(judgedEligible.length, 4, Math.max(input.count + 2, 4));
   const selected = selectRankedIdeaPortfolioV2({
     ranking,
     eligible: judgedEligible,
@@ -7604,7 +7617,9 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
     status: 'running',
     error: null,
   };
-  const runDeadlineAt = Date.parse(trace.startedAt) + GENERATION_RUN_DEADLINE_MS;
+  const runDeadlineAt = Date.parse(trace.startedAt)
+    // Durable job sessions run under a 300s worker and checkpoint instead.
+    + (usesEfficientGeneration(input) && !input.jobSession ? EFFICIENT_GENERATION_RUN_DEADLINE_MS : GENERATION_RUN_DEADLINE_MS);
   generationRunDeadlines.set(trace.modelCalls, runDeadlineAt);
   if (input.jobSession) generationJobSessions.set(trace.modelCalls,input.jobSession);
   generationSpendContexts.set(trace.modelCalls, { ...(input.spendContext || aiSpendContext(input.agentId, 'generation', runId, 3)), runId, runLimitUsd: 3, downstreamReserveUsd: Math.min(2,input.count)*1.1 });
@@ -7618,7 +7633,11 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
   };
   const publishTrace = async () => {
     if (usesEfficientGeneration(input) && input.mode !== 'preview' && ['quality_empty', 'completed'].includes(trace.outcomeCode || '') && !trace.modelCalls.some(call => !call.succeeded)) {
-      await recordBriefAttempts(input.agentId, runId, admittedBriefs.map(brief => ({ key: briefKeys.get(brief.id)!,
+      // A brief whose premise passed the judge but lost the funding slot did not fail.
+      const fundedBriefIds = new Set(observedIdeas.filter(idea => observedDrafts.some(draft => draft.ideaId === idea.id)).map(idea => idea.briefId));
+      const unfundedEligible = (brief: GenerationBriefV2) => !fundedBriefIds.has(brief.id)
+        && observedIdeas.some(idea => idea.briefId === brief.id && idea.status !== 'rejected');
+      await recordBriefAttempts(input.agentId, runId, admittedBriefs.filter(brief => !unfundedEligible(brief)).map(brief => ({ key: briefKeys.get(brief.id)!,
         outcome: observedDrafts.some(draft => trace.selectedDraftIds.includes(draft.id) && observedIdeas.some(idea => idea.id === draft.ideaId && idea.briefId === brief.id)) ? 'completed' : 'quality_empty' })), Date.now(), trace.generationPolicyVersion);
     }
     if (trace.status !== 'running') {
@@ -7747,7 +7766,9 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
       }
       briefs = briefs.filter(brief => !failed.has(briefKeys.get(brief.id)!));
       if (input.mode !== 'preview') briefs = prioritizeCurrentInterestBriefsV2(briefs, runId);
-      briefs = briefs.slice(0, Math.min(2, input.count));
+      // Ideation is the cheap stage: two briefs give the judge six premises, while
+      // selection below still funds only input.count writers.
+      briefs = briefs.slice(0, input.jobSession ? Math.min(2, input.count) : 2);
       if (input.mode !== 'preview') {
         const claimed = new Set(await claimGenerationBriefs(input.agentId, runId, briefs.map(brief => briefKeys.get(brief.id)!)));
         briefs = briefs.filter(brief => claimed.has(briefKeys.get(brief.id)!));
@@ -7772,7 +7793,9 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
       briefs.map((brief) => `${brief.id}:${brief.creativeSeed?.id || ''}:${(brief.verifiedEntityMentions || []).map((entry) => `${entry.entity}=@${entry.handle}`).join('|')}`).sort().join(','),
     );
     if (input.allowQualityRetry) trace.stageCounts.protectedQualityRetry = 1;
-    const qualityPauseUntil = input.allowQualityRetry || input.jobSession
+    // The efficient policy has its own empty-streak pause and per-brief
+    // cooldowns; stacking this fingerprint pause on top only silenced it twice.
+    const qualityPauseUntil = input.allowQualityRetry || input.jobSession || usesEfficientGeneration(input)
       ? null
       : getGenerationV2QualityPauseUntil(recentRuns, trace.inputFingerprint);
     if (qualityPauseUntil) {
