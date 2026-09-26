@@ -201,3 +201,19 @@ it('varies the sole efficient idea direction instead of always assigning the fir
  expect(efficientIdeaApproachIndex('run-1','same-brief')).toBe(efficientIdeaApproachIndex('run-1','same-brief'));
  expect(ASTRA_IDEA_GENERATION_SYSTEM_V2).toContain('Never write "X, not Y"');
 });
+
+
+it('gives ideation complete bounded operator examples without treating them as evidence', () => {
+  const anchors = [
+    { id: 'one', topic: 'capital', content: 'I would give the founder the board seat before the investor.' },
+    { id: 'oversize', topic: 'capital', content: 'long '.repeat(110) },
+    { id: 'two', topic: 'capital', content: 'My second independent operator judgment.' },
+    { id: 'three', topic: 'capital', content: 'My third independent operator judgment.' },
+    { id: 'four', topic: 'capital', content: 'Never included beyond the budget.' },
+  ];
+  const prompt = JSON.parse(buildAstraIdeaGenerationPromptV2([brief], geoffrey, [], undefined, [], anchors));
+  expect(prompt.accountStyleEvidence.operatorExamples.map((x: any) => x.id)).toEqual(['one', 'two', 'three']);
+  expect(prompt.accountStyleEvidence.operatorExamples[0].content).toBe(anchors[0].content);
+  expect(prompt.accountStyleEvidence.exampleBoundary).toContain('Never reuse their premise');
+  expect(prompt.briefs[0].allowedEvidenceIds).toEqual([]);
+});

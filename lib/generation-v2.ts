@@ -2796,6 +2796,11 @@ export function buildAstraIdeaGenerationPromptV2(...args: Parameters<typeof buil
       ...(briefs.some((brief) => brief.portfolioCompanyContext) ? { portfolio: `Use the exact supplied company and respect the supplied intent. ${geoffrey ? 'Make a positive or constructively ambitious company-specific judgment. constructive_conviction permits only OpenAI/Cognition; another company needs qualified live_development evidence. No criticism, shorting, or generic promotion.' : 'Use this account’s own voice and risk boundaries; no other account’s portfolio promotion priorities apply.'} Relationships/descriptions establish subject only: no ownership claims, private knowledge, invented meetings/product use, or company-plus-modal-affect template.` } : {}),
     },
     accountStyleEvidence: {
+      // Only provenance-filtered operator anchors reach this argument. Preserve
+      // complete examples so idea quality can learn judgment, not just syntax.
+      operatorExamples: anchors.filter(anchor => anchor.content.length <= 500).slice(0, 3)
+        .map(anchor => ({ id: anchor.id, content: anchor.content })),
+      exampleBoundary: 'These are historical operator writing, not evidence for a new post. Learn the strength and specificity of the judgment. Never reuse their premise, company substitutions, distinctive phrasing, personal experience, or numerical claim. Develop a new subject-specific belief with comparable conviction before polishing its wording.',
       nativePatterns,
       prefer: editorialLessons(learning?.doMore), avoid: editorialLessons(learning?.avoid),
       outcomePriors: learning ? { winningFormats: learning.winningFormats, commonHooks: learning.voiceMechanics.commonHooks,
