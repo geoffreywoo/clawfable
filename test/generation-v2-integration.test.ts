@@ -379,7 +379,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(critics[0].jsonSchema).toEqual(critics[1].jsonSchema);
     expect(critics.every(o=>o.modelStack==='publishing_v2_gpt_control'&&o.openAiReasoningEffort==='medium')).toBe(true);
     expect(traces.some(t=>t.generationPolicyVersion==='legacy-v2')).toBe(true);
-    expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-4')).toBe(true);
+    expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-5')).toBe(true);
   });
 
   it('compares three ideas in one call and funds only one writer per brief', async () => {
@@ -392,8 +392,13 @@ describe('generateTweetBatchV2 integration', () => {
     const calls=mocks.generateText.mock.calls.map(([options])=>options);
     expect(calls.filter(o=>o.task==='idea_generation')).toHaveLength(Math.min(2,briefs.length));
     expect(calls.filter(o=>o.task==='tweet_writing').length).toBeLessThanOrEqual(2);
+    for (const writer of calls.filter(o=>o.task==='tweet_writing')) {
+      expect(writer.system).toContain('retain one supplied reason');
+      expect(writer.system + writer.prompt).toContain('Brevity must not erase');
+      expect(writer.system + writer.prompt).not.toContain('this control variant is only the direct reaction');
+    }
     expect(calls.filter(o=>o.task==='idea_judgment'||o.task==='copy_judgment').every(o=>o.modelStack==='publishing_v2_gpt_control' && o.openAiReasoningEffort==='medium')).toBe(true);
-    expect(trace.generationPolicyVersion).toBe('geoffrey-autopost-per-dollar-4');
+    expect(trace.generationPolicyVersion).toBe('geoffrey-autopost-per-dollar-5');
     expect(trace.stageCounts.ideasGenerated).toBe(Math.min(2, briefs.length) * 3);
     expect(calls.filter(o=>o.task==='idea_generation').every(o=>JSON.parse(o.prompt).requirements.ideasPerBrief===3)).toBe(true);
     expect(trace.stageCounts.ideaRetryCalls).toBe(0);
