@@ -37,3 +37,10 @@ it('keeps a dispatched unknown-usage response reserved',async()=>{
 it('rejects missing attribution before a provider attempt',async()=>{
  const generate=await setup();await expect(generate({...options,spendContext:undefined})).rejects.toThrow('attribution_missing');expect(create).not.toHaveBeenCalled();
 });
+
+it('keeps the model task in the durable reservation so generation spend remains explainable', async () => {
+ const generate = await setup();
+ create.mockResolvedValue({status:'completed',output_text:'Ready',usage:{input_tokens:100,output_tokens:20}});
+ await generate({...options,task:'idea_generation'});
+ expect(reserve).toHaveBeenCalledWith(expect.objectContaining({operation:'generation',task:'idea_generation'}),expect.anything(),expect.any(Number),expect.any(Number));
+});

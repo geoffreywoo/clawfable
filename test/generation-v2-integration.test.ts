@@ -28,6 +28,8 @@ vi.mock('@/lib/ai', () => ({
 
 vi.mock('@/lib/kv-storage', () => ({
   getDynamicIdeaSeeds: async () => [],
+  getAiOperationalState: async () => null,
+  mutateAiOperationalState: async (_id: string, _namespace: string, mutate: any) => mutate(null).result,
   getGenerationRuns: mocks.getGenerationRuns,
   getIdeaCandidates: mocks.getIdeaCandidates,
   getSemanticBlocks: mocks.getSemanticBlocks,
@@ -394,6 +396,54 @@ describe('generateTweetBatchV2 integration', () => {
     expect(trace.generationPolicyVersion).toBe('geoffrey-autopost-per-dollar-1');
     expect(trace.stageCounts.ideaRetryCalls).toBe(0);
     expect(trace.stageCounts.rescueDraftsGenerated || 0).toBe(0);
+  });
+
+  it('finishes a live draft under the real $3 reservation gate instead of stranding paid ideas', async () => {
+    const { reserveAiSpendInLedger } = await import('@/lib/ai-budget');
+    const { estimateAiUsageCostUsd } = await import('@/lib/ai-pricing');
+    let ledger: any = null;
+    const provider = mocks.generateText.getMockImplementation()!;
+    let serial = 0;
+    mocks.generateText.mockImplementation(async (options: any) => {
+      const id = String(++serial);
+      // Same pessimistic byte/framing/output bound used by the real provider adapter.
+      const reservedUsd = estimateAiUsageCostUsd('gpt-6-astra', Buffer.byteLength(JSON.stringify({
+        system: options.system, messages: [{ role: 'user', content: options.prompt }], schema: options.jsonSchema,
+      })) + 16384, Math.max(options.maxTokens, 8192))!;
+      ledger = reserveAiSpendInLedger(ledger, options.spendContext, {
+        id, ...options.spendContext, provider: 'openai', model: 'gpt-6-astra', day: '2026-09-25',
+        reservedUsd, observedUsd: null, state: 'dispatched', createdAt: new Date().toISOString(),
+      }, '2026-09-25');
+      const response = await provider(options);
+      ledger.attempts[id] = { ...ledger.attempts[id], state: 'settled', observedUsd: 0.13 };
+      return response;
+    });
+    let trace: any;
+    const outputs = await generateTweetBatchV2({ ...input, modelStack: 'publishing_v2_astra', generationPolicy: 'budget_v1',
+      mode: 'live', persistArtifacts: false, onTrace: value => { trace = value; },
+    });
+    expect(trace.outcomeCode).not.toBe('budget_exhausted');
+    expect(mocks.generateText.mock.calls.filter(([o]) => o.task === 'idea_generation')).toHaveLength(1);
+    expect(mocks.generateText.mock.calls.some(([o]) => o.task === 'copy_judgment')).toBe(true);
+    expect(outputs).toHaveLength(1);
+    expect(trace.requestedCount).toBe(2);
+    expect(trace.stageCounts.budgetedCount).toBe(1);
+  });
+
+  it('pauses budget retries without evicting their diagnostic trace, and resumes after Pacific midnight', async () => {
+    const { getGenerationV2BudgetPauseUntil } = await import('@/lib/generation-v2');
+    const stop = { id: 'paid-run', mode: 'live', status: 'empty', outcomeCode: 'budget_exhausted',
+      error: 'budget_exhausted', startedAt: new Date().toISOString(), completedAt: new Date().toISOString() } as any;
+    mocks.getGenerationRuns.mockResolvedValue([stop]);
+    let trace: any;
+    expect(await generateTweetBatchV2({ ...input, onTrace: value => { trace = value; } })).toEqual([]);
+    expect(trace).toMatchObject({ error: 'budget_paused', outcomeCode: 'budget_exhausted' });
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.saveGenerationRun.mock.calls.filter(([, t]) => t.status !== 'running')).toHaveLength(0);
+    const beforeMidnight = { ...stop, startedAt: '2026-09-26T06:50:00Z', completedAt: '2026-09-26T06:51:00Z' };
+    expect(getGenerationV2BudgetPauseUntil([beforeMidnight], new Date('2026-09-26T06:59:00Z'))).not.toBeNull();
+    expect(getGenerationV2BudgetPauseUntil([beforeMidnight], new Date('2026-09-26T07:00:00Z'))).toBeNull();
+    expect(getGenerationV2BudgetPauseUntil([{ ...stop, completedAt: '2026-09-26T01:00:00Z' }], new Date('2026-09-26T02:01:00Z'))).toBeNull();
   });
 
   it('runs frozen Astra previews through the real gates without reading or writing account storage', async () => {

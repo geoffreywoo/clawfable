@@ -1566,12 +1566,16 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   }
 
   if (activeQueue.length === 0) {
+    const latestGeneration = (await getGenerationRuns(agentId, 1))[0];
+    const emptyQueueReason = latestGeneration?.outcomeCode === 'budget_exhausted'
+      ? 'AI generation budget limit reached. Queue refill is paused; existing spending limits remain in effect.'
+      : 'Queue empty after auto-repair and generation attempts';
     return {
       agentId,
       action: repliesSent > 0 ? 'replied' : 'skipped',
       reason: repliesSent > 0
         ? `Sent ${repliesSent} replies. No active queued tweet cleared posting filters.`
-        : 'Queue empty after auto-repair and generation attempts',
+        : emptyQueueReason,
       repliesSent,
     };
   }

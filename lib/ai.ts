@@ -681,7 +681,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
     const responseProgress: GenerationResponseProgress | undefined = target.provider === 'openai' && target.model === OPENAI_ASTRA_MODEL
       ? { responseId: null, providerModel: null, status: null, firstEventMs: null, firstOutputMs: null, lastEventMs: null, eventCount: 0 }
       : undefined;
-    const reservation = options.spendContext && (!IS_TEST_ENV || process.env.AI_BUDGET_TEST_ENFORCE === 'true') ? await reserveAiAttempt(options.spendContext, target,
+    const reservation = options.spendContext && (!IS_TEST_ENV || process.env.AI_BUDGET_TEST_ENFORCE === 'true') ? await reserveAiAttempt({ ...options.spendContext, task: options.task }, target,
       Buffer.byteLength(JSON.stringify({ system: options.system, messages: getInputMessages(options), schema: options.jsonSchema }), 'utf8'),
       target.model === OPENAI_ASTRA_MODEL ? Math.max(options.maxTokens, 8192)
         : target.model === ANTHROPIC_FABLE_MODEL ? Math.max(options.maxTokens, ANTHROPIC_FABLE_MIN_MAX_TOKENS) : options.maxTokens) : null;

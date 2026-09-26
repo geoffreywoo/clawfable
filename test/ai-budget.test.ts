@@ -97,3 +97,43 @@ describe('Anti Hunter account budget isolation', () => {
     expect(summarizeAiSpend(null, 0)).toMatchObject({ dailyLimitUsd: 0, remainingUsd: 0 });
   });
 });
+
+
+describe('publishing budget protection', () => {
+  it('protects a complete run from background spend without increasing either cap', async () => {
+    const { publishingBudgetReserve } = await import('@/lib/ai-budget');
+    const floor = publishingBudgetReserve('geoffwoo', 'seed-synthesis', 0, 5);
+    expect(floor).toBe(3);
+    const prior = reserveAiSpendInLedger(null, { ...context, runLimitUsd: 20 }, attempt('spent', 16.5), day);
+    expect(() => reserveAiSpendInLedger(prior, { ...context, runId: 'background' },
+      attempt('background', 0.6, 'background'), day, 20, floor)).toThrow('budget_exhausted');
+    // The same balance remains available to the publishing pipeline.
+    expect(reserveAiSpendInLedger(prior, { ...context, runId: 'post', downstreamReserveUsd: 1.1 },
+      attempt('post', 0.7, 'post'), day, 20).attempts.post).toBeDefined();
+    expect(publishingBudgetReserve('geoffwoo', 'generation', 0, 5)).toBe(0);
+    expect(publishingBudgetReserve('geoffwoo', 'performance', 5, 5)).toBe(0);
+    expect(publishingBudgetReserve('antihunterai', 'performance', 0, 5)).toBe(0);
+  });
+});
+
+it('applies the publishing floor through real account admission, not only the ledger helper', async () => {
+  const { createAgent } = await import('@/lib/kv-storage');
+  const { reserveAiAttempt } = await import('@/lib/ai-budget');
+  const agent = await createAgent({ handle: 'geoffwoo', name: 'Budget test', soulMd: '',
+    soulSummary: null, apiKey: null, apiSecret: null, accessToken: null, accessSecret: null,
+    isConnected: 0, xUserId: null, setupStep: 'ready',
+  });
+  const today = aiBudgetDay();
+  await mutateAiOperationalState<AiSpendLedger, void>(agent.id, 'spend', () => ({
+    value: { version: 'account-budget-1', day: today, attempts: {
+      prior: { ...attempt('prior', 17), day: today, state: 'settled', observedUsd: 17 },
+    } }, result: undefined,
+  }));
+  const target = { provider: 'openai', model: 'gpt-6-astra' };
+  await expect(reserveAiAttempt({ agentId: agent.id, operation: 'seed-synthesis', runId: 'background' },
+    target, 1000, 8192)).rejects.toThrow('budget_exhausted');
+  await expect(reserveAiAttempt({ agentId: agent.id, operation: 'generation', task: 'idea_generation',
+    runId: 'publisher', runLimitUsd: 3, downstreamReserveUsd: 1.1 }, target, 1000, 8192)).resolves.not.toBeNull();
+  const ledger = (await getAiOperationalState<AiSpendLedger>(agent.id, 'spend'))!;
+  expect(Object.values(ledger.attempts).some(a => a.task === 'idea_generation')).toBe(true);
+});

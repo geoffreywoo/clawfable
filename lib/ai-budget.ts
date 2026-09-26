@@ -1,14 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import { AI_PRICING_VERSION, getAiModelPricing, estimateAiUsageCostUsd } from './ai-pricing';
-import { getAgent, getAiOperationalState, mutateAiOperationalState } from './kv-storage';
+import { getAgent, getQueuedTweets, getProtocolSettings, getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 import { ANTIHUNTER_AGENT_ID, budgetPolicy, getOperatorGrowth } from './antihunter-operator-state';
 
 export const AI_BUDGET_VERSION = 'account-budget-1';
 export const GEOFFREY_DAILY_AI_LIMIT_USD = 20;
 export const GENERATION_RUN_LIMIT_USD = 3;
+const BACKGROUND_OPERATIONS = new Set([
+  'performance', 'research-pipeline', 'seed-synthesis', 'network-topic-intelligence', 'soul-evolution',
+]);
+
+export function publishingBudgetReserve(handle: string, operation: string, queueDepth: number, targetDepth: number): number {
+  return ['geoffwoo', 'geoffreywoo'].includes(handle.replace(/^@/, '').toLowerCase())
+    && BACKGROUND_OPERATIONS.has(operation) && queueDepth < Math.max(1, targetDepth)
+    ? GENERATION_RUN_LIMIT_USD : 0;
+}
 export interface AiSpendContext {
   agentId: string;
   operation: string;
+  task?: string;
   runId: string;
   runLimitUsd?: number;
   evaluation?: boolean;
@@ -26,6 +36,7 @@ export interface AiSpendAttempt {
   id: string;
   runId: string;
   operation: string;
+  task?: string;
   model: string;
   provider: string;
   reservedUsd: number;
@@ -71,7 +82,7 @@ export function summarizeAiSpend(ledger: AiSpendLedger | null, dailyLimitUsd = G
     unresolvedUsd: attempts.filter(a => a.state !== 'released' && a.observedUsd === null).reduce((n, a) => n + a.reservedUsd, 0),
     committedUsd: attempts.reduce((n, a) => n + committedAiSpend(a), 0), attempts: attempts.length };
 }
-export function reserveAiSpendInLedger(ledger: AiSpendLedger | null, context: AiSpendContext, attempt: AiSpendAttempt, day: string, dailyLimitUsd = GEOFFREY_DAILY_AI_LIMIT_USD): AiSpendLedger {
+export function reserveAiSpendInLedger(ledger: AiSpendLedger | null, context: AiSpendContext, attempt: AiSpendAttempt, day: string, dailyLimitUsd = GEOFFREY_DAILY_AI_LIMIT_USD, publishingReserveUsd = 0): AiSpendLedger {
   const value: AiSpendLedger = ledger || { version: AI_BUDGET_VERSION, day, attempts: {} };
   if (value.attempts[attempt.id]) return value;
   const attempts = Object.values(value.attempts);
@@ -81,7 +92,7 @@ export function reserveAiSpendInLedger(ledger: AiSpendLedger | null, context: Ai
   const otherHolds = Object.entries(value.completionHolds || {}).filter(([runId, hold]) => runId !== context.runId && hold.day === day).reduce((sum,[,hold])=>sum+hold.usd,0);
   const campaign = context.campaignId ? attempts.filter(a => a.campaignId === context.campaignId).reduce((n,a)=>n+committedAiSpend(a),0) : 0;
   if (context.campaignId && campaign + attempt.reservedUsd > (context.campaignLimitUsd ?? 12) + 1e-9) throw new AiBudgetError('budget_exhausted');
-  if (daily + otherHolds + attempt.reservedUsd + downstream > dailyLimitUsd + 1e-9
+  if (daily + otherHolds + attempt.reservedUsd + Math.max(downstream, publishingReserveUsd) > dailyLimitUsd + 1e-9
     || run + attempt.reservedUsd + downstream > (context.runLimitUsd ?? dailyLimitUsd) + 1e-9) throw new AiBudgetError('budget_exhausted');
   return { ...value, day, completionHolds: { ...value.completionHolds, [context.runId]: { day, usd: downstream } }, attempts: { ...value.attempts, [attempt.id]: attempt } };
 }
@@ -116,6 +127,17 @@ export async function reserveAiAttempt(context: AiSpendContext, target: { model:
     const dailyLimitUsd = await getAccountDailyAiLimit(context.agentId);
     if (dailyLimitUsd === null) return null;
     if (dailyLimitUsd <= 0) throw new AiBudgetError('budget_exhausted');
+    let publishingReserveUsd = 0;
+    if (BACKGROUND_OPERATIONS.has(context.operation)) {
+      const agent = await getAgent(context.agentId);
+      if (agent && ['geoffwoo', 'geoffreywoo'].includes(agent.handle.replace(/^@/, '').toLowerCase())) {
+        const [queue, settings] = await Promise.all([getQueuedTweets(context.agentId), getProtocolSettings(context.agentId)]);
+        // This floor is checked atomically with spend. Background work cannot
+        // consume the last complete publishing run while the queue needs drafts.
+        publishingReserveUsd = publishingBudgetReserve(agent.handle, context.operation,
+          queue.filter(tweet => !tweet.quarantinedAt).length, settings.minQueueSize);
+      }
+    }
     const reservedUsd = estimateAiUsageCostUsd(target.model, inputBytes + 16384, outputLimit);
     if (reservedUsd === null || !Number.isFinite(reservedUsd)) throw new AiBudgetError('budget_unavailable');
     const id = randomUUID();
@@ -132,8 +154,8 @@ export async function reserveAiAttempt(context: AiSpendContext, target: { model:
       // An async KV/account read must never carry yesterday's surge into a
       // reservation admitted after Pacific midnight. Retry on the new day.
       if (aiBudgetDay() !== day) throw new AiBudgetError('budget_unavailable');
-      return { value: reserveAiSpendInLedger(ledger, context, { id, ...target, operation: context.operation, runId: context.runId,
-        day, reservedUsd, pricingVersion: AI_PRICING_VERSION, pricingRates: getAiModelPricing(target.model)!, campaignId: context.campaignId, observedUsd: null, state: 'reserved', createdAt: new Date().toISOString() }, day, dailyLimitUsd), result: undefined,
+      return { value: reserveAiSpendInLedger(ledger, context, { id, ...target, operation: context.operation, task: context.task, runId: context.runId,
+        day, reservedUsd, pricingVersion: AI_PRICING_VERSION, pricingRates: getAiModelPricing(target.model)!, campaignId: context.campaignId, observedUsd: null, state: 'reserved', createdAt: new Date().toISOString() }, day, dailyLimitUsd, publishingReserveUsd), result: undefined,
       };
     });
     return { context, id, day };

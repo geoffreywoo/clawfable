@@ -46,8 +46,10 @@ async function harness() {
 }
 
 describe('frozen probation artifacts and isolation', () => {
-  it('matches pinned source and local/published-byte fixtures without a network request', async () => {
-    await verifyProbationEngine();
+  it('keeps the old engine frozen while validating local/published-byte fixtures without a network request', async () => {
+    // The shared budget/provider engine has changed since probation-v1 was
+    // frozen. Do not silently repin or authorize that historical experiment.
+    await expect(verifyProbationEngine()).rejects.toMatchObject({ code: 'source_changed' });
     const bundle = await bundlePromise;
     expect(bundle.cases).toHaveLength(10);
     expect(bundle.cases.every(row => probationInputBytes(bundle.system, row.input) <= 4096)).toBe(true);

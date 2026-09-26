@@ -1,6 +1,6 @@
 import { PUBLISHING_V2_GEOFFREY_AI_AMBITION } from './publishing-quality-policy';
 import { EFFICIENT_GENERATION_POLICY, REPAIR_DECISION_SCHEMA, parseRepairDecision, canRepairDraft, preservesRepairDecision, substantiveBriefDigest, claimGenerationBriefs, failedBriefKeys, recordBriefAttempts, qualityGenerationPauseUntil, type RepairDecision } from './generation-efficiency';
-import { releaseAiCompletionHold, aiSpendContext, AiBudgetError, type AiSpendContext } from './ai-budget';
+import { releaseAiCompletionHold, aiSpendContext, aiBudgetDay, AiBudgetError, type AiSpendContext } from './ai-budget';
 import type {
   AccountAnalysis,
   CandidateFeatureTags,
@@ -436,6 +436,16 @@ export function getGenerationV2CircuitPauseUntil(
   if (!Number.isFinite(lastFailureAt)) return null;
   const pauseUntil = lastFailureAt + SYSTEM_ERROR_PAUSE_MS;
   return pauseUntil > now.getTime() ? new Date(pauseUntil).toISOString() : null;
+}
+
+export function getGenerationV2BudgetPauseUntil(runs: GenerationRunTrace[], now = new Date()): string | null {
+  const last = [...runs].filter(run => run.mode !== 'preview' && run.error === 'budget_exhausted')
+    .sort((a, b) => Date.parse(b.completedAt || b.startedAt) - Date.parse(a.completedAt || a.startedAt))[0];
+  if (!last) return null;
+  const stoppedAt = new Date(last.completedAt || last.startedAt);
+  if (!Number.isFinite(stoppedAt.getTime()) || aiBudgetDay(stoppedAt) !== aiBudgetDay(now)) return null;
+  const until = stoppedAt.getTime() + 60 * 60 * 1000;
+  return until > now.getTime() ? new Date(until).toISOString() : null;
 }
 
 export function getGenerationV2QualityPauseUntil(
@@ -7302,6 +7312,12 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   if (input.previewContext && (input.mode !== 'preview' || input.persistArtifacts !== false)) {
     throw new Error('preview_context_requires_non_persisting_preview');
   }
+  const requestedCount = input.count;
+  // Two concurrent briefs plus their $2.20 completion hold can consume the
+  // entire $3 run allowance before judgment. Finish one paid pipeline first.
+  if (usesEfficientGeneration(input) && (input.mode || (input.persistArtifacts === false ? 'preview' : 'live')) !== 'preview') {
+    input = { ...input, count: Math.min(1, input.count) };
+  }
   const runId = `generation-v2-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   const persistArtifacts = input.persistArtifacts !== false;
   const policyVersions = getGenerationPolicyVersions(input.voiceProfile, input.surface || 'original');
@@ -7322,13 +7338,13 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     entitlement: input.entitlement || null,
     outcomeCode: null,
     inputFingerprint: null,
-    requestedCount: input.count,
+    requestedCount,
     sourceDocumentIds: [],
     storyClusterIds: [],
     ideaCandidateIds: [],
     draftCandidateIds: [],
     selectedDraftIds: [],
-    stageCounts: {},
+    stageCounts: { budgetedCount: input.count },
     rejectionCounts: {},
     modelCalls: [],
     totalInputTokens: 0,
@@ -7361,7 +7377,8 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
       if (spend) await releaseAiCompletionHold(spend.agentId, runId).catch(() => null);
     }
     input.onTrace?.(trace);
-    if (persistArtifacts) await saveGenerationRun(input.agentId, trace);
+    // Polling a budget pause must not evict the paid run that explains it.
+    if (persistArtifacts && trace.error !== 'budget_paused') await saveGenerationRun(input.agentId, trace);
   };
   const persistIdeas = async (candidates: IdeaCandidate[]) => {
     observedIdeas = candidates;
@@ -7373,8 +7390,6 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     publishArtifacts();
     if (persistArtifacts) await upsertDraftCandidates(input.agentId, candidates);
   };
-  await publishTrace();
-
   if (trace.mode !== 'preview' && input.entitlement?.eligible !== true) {
     trace.status = 'empty';
     trace.error = 'payment_required';
@@ -7389,6 +7404,15 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   const recentRuns = trace.mode === 'preview'
     ? []
     : await getGenerationRuns(input.agentId, 8);
+  const budgetPauseUntil = getGenerationV2BudgetPauseUntil(recentRuns);
+  if (budgetPauseUntil && !input.allowQualityRetry) {
+    trace.status = 'empty';
+    trace.error = 'budget_paused';
+    trace.outcomeCode = 'budget_exhausted';
+    trace = finalizeTrace(trace);
+    await publishTrace();
+    return [];
+  }
   const pauseUntil = getGenerationV2CircuitPauseUntil(recentRuns);
   if (pauseUntil) {
     trace.status = 'empty';
@@ -7408,6 +7432,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     return [];
   }
 
+  await publishTrace();
   let ideas: IdeaCandidate[] = [];
   let evaluations: DraftEvaluation[] = [];
   try {
