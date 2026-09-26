@@ -1,3 +1,5 @@
+import { repairTweetIndexes } from './kv-storage';
+import { durableGenerationEnabled, acknowledgeGenerationQueue, recordGenerationCanary } from './generation-job';
 import { recordEmptyQueueRun } from './generation-efficiency';
 import { recordAutopostReadyOutput } from './ai-budget';
 import { isOperatorManagedAgent, OPERATOR_MANAGED_AUTOPILOT_REASON } from './operator-management';
@@ -2876,9 +2878,11 @@ export async function refillQueue(
   agent: Agent,
   count: number,
   bias: { scheduledTopic?: string | null; momentumTopic?: string | null } = {},
-  options: { attemptId?: string | null } = {},
+  options: { attemptId?: string | null; generationWorker?: boolean } = {},
 ): Promise<number> {
   try {
+    const workerSettings = await getProtocolSettings(agent.id);
+    if (durableGenerationEnabled(agent.id,workerSettings) && !options.generationWorker) return 0;
     const entitlement = await assertAgentAutomationEntitlement(agent.id, { agent });
     let refillCount = Math.min(2, Math.max(0, count));
     if (refillCount <= 0) return 0;
@@ -2938,6 +2942,7 @@ export async function refillQueue(
           agentId: agent.id,
           count: organicCount,
           request: { surface: 'original', triggerId: refillTrigger },
+          durableGeneration: durableGenerationEnabled(agent.id,settings),
           voiceProfile,
           analysis,
           learnings,
@@ -3039,6 +3044,7 @@ export async function refillQueue(
         code: string,
         detail: string | null = null,
       ) => {
+        if (durableGenerationEnabled(agent.id,settings) && item.generationRunId) await acknowledgeGenerationQueue(agent.id,item.generationRunId,false);
         await Promise.allSettled([
           addPostLogEntry(agent.id, {
             agentId: agent.id,
@@ -3060,6 +3066,12 @@ export async function refillQueue(
         ]);
       };
       for (const item of items) {
+        const committed = allTweets.find(tweet=>tweet.draftCandidateId && tweet.draftCandidateId === item.draftCandidateId);
+        if (committed) {
+          if (durableGenerationEnabled(agent.id,settings)) await repairTweetIndexes(committed);
+          if (durableGenerationEnabled(agent.id,settings) && item.generationRunId) await acknowledgeGenerationQueue(agent.id,item.generationRunId,true);
+          continue;
+        }
         if (item.pipelineVersion !== 'v2' || !item.generationRunId || !item.ideaId || !item.draftCandidateId) {
           await rejectCandidate(item, 'missing_v2_provenance');
           continue;
@@ -3167,6 +3179,7 @@ export async function refillQueue(
             topic: item.targetTopic,
           });
           contentMixHistory.push(heldTweet);
+          if (durableGenerationEnabled(agent.id,settings) && item.generationRunId) await acknowledgeGenerationQueue(agent.id,item.generationRunId,true);
           recentContent.unshift(item.content);
           await Promise.allSettled([
             addPostLogEntry(agent.id, {
@@ -3198,6 +3211,8 @@ export async function refillQueue(
           topic: item.targetTopic,
         });
         contentMixHistory.push(persistedTweet);
+        if (durableGenerationEnabled(agent.id,settings)) await recordGenerationCanary(agent.id,{queuedId:persistedTweet.id});
+        if (durableGenerationEnabled(agent.id,settings) && item.generationRunId) await acknowledgeGenerationQueue(agent.id,item.generationRunId,true);
         if (isGeoffreyAccount(agent.handle)) await recordAutopostReadyOutput(agent.id, persistedTweet).catch(() => console.warn('[ai:yield] receipt pending', persistedTweet.id));
         await recordQueueDecision(item, 'persisted').catch(() => null);
         addedFromBatch++;

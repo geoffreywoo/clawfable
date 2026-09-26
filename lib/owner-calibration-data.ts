@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 const POSITIVE = new Set(['approved_without_edit','edited_before_queue','edited_before_post','taste_more_like_this','taste_calibration_edit']);
 const NEGATIVE = new Set(['taste_less_like_this','deleted_from_queue']);
 /** Only owner decisions are labels. Automatic posting and removal inference provide no supervision here. */
-export function collectOwnerCalibrationData(input: { signals: LearningSignal[]; feedback: FeedbackEntry[]; tweets: Tweet[]; drafts: DraftCandidate[]; ideas: IdeaCandidate[]; excludedTexts?: string[] }) {
+export function collectOwnerCalibrationData(input: { signals: LearningSignal[]; feedback: FeedbackEntry[]; tweets: Tweet[]; drafts: DraftCandidate[]; ideas: IdeaCandidate[]; excludedTexts?: string[]; judge?: { model: string; policyVersion: string } }) {
   const labels: Array<{id:string;content:string;tweetId?:string;label:QualityCalibrationExample['label'];labelSource:QualityCalibrationExample['labelSource']}> = [];
   for (const signal of input.signals) {
     if(signal.inferred || signal.metadata?.manualQualityEdit === true || signal.metadata?.qualityGate || ['autopilot','cron','mentions','engage'].includes(signal.surface)) continue;
@@ -33,7 +33,7 @@ export function collectOwnerCalibrationData(input: { signals: LearningSignal[]; 
     if(seen.has(`${label.label}:${textHash}`) || excluded.has(label.content)) continue;
     seen.add(`${label.label}:${textHash}`);
     eligibleLabels.push(label);
-    const draft=input.drafts.find(d=>d.content.trim()===label.content && d.judgeBreakdown && d.judgeModel==='gpt-5.6' && d.judgePolicyVersion==='budget-copy-judge-1');
+    const draft=input.drafts.find(d=>d.content.trim()===label.content && d.judgeBreakdown && d.judgeModel===(input.judge?.model || 'gpt-5.6') && d.judgePolicyVersion===(input.judge?.policyVersion || 'budget-copy-judge-1'));
     const score=draft?.judgeBreakdown;
     if(!draft || typeof score?.qualityMargin!=='number' || typeof score?.aiBullishness!=='number') { missingScores.push(label); continue; }
     const idea=input.ideas.find(i=>i.id===draft.ideaId);

@@ -1,6 +1,6 @@
 import type { FeedbackEntry, LearningSignal, Tweet } from './types';
 
-export const LEARNING_DERIVATION_VERSION = 'learning-2026-09-04-v3';
+export const LEARNING_DERIVATION_VERSION = 'learning-2026-09-26-v4';
 
 /** Historical timeline absence was recorded as a deletion without verification. */
 export function isUnverifiedRemovalSignal(signal: LearningSignal): boolean {
@@ -9,6 +9,11 @@ export function isUnverifiedRemovalSignal(signal: LearningSignal): boolean {
     && signal.metadata?.verifiedRemoval !== true;
 }
 
+export function isOperationalLearningSignal(signal: LearningSignal): boolean {
+  const metadata = signal.metadata || {};
+  return metadata.softArchive === true || metadata.qualityGate != null
+    || ['operational','model_criticism','selection'].includes(String(metadata.evidenceCategory || ''));
+}
 export function filterLearningEvidence(signals: LearningSignal[], feedback: FeedbackEntry[] = [], tweets: Tweet[] = []) {
   const uncertain = new Set(signals.filter(isUnverifiedRemovalSignal).map((signal) => String(signal.tweetId || '')));
   const verified = new Set(signals.filter((signal) => signal.signalType === 'deleted_from_x' && !isUnverifiedRemovalSignal(signal)).map((signal) => String(signal.tweetId || '')));
@@ -20,7 +25,7 @@ export function filterLearningEvidence(signals: LearningSignal[], feedback: Feed
     }
   }
   return {
-    signals: signals.filter((signal) => !isUnverifiedRemovalSignal(signal)),
+    signals: signals.filter((signal) => !isUnverifiedRemovalSignal(signal) && !isOperationalLearningSignal(signal)),
     feedback: feedback.filter((entry) => !(entry.tweetId && uncertain.has(String(entry.tweetId))
       && !verified.has(String(entry.tweetId)) && entry.rating === 'down'
       && entry.userProvidedReason === false && entry.source === 'queue_delete')),

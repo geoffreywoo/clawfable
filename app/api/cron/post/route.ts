@@ -1,3 +1,4 @@
+import { durableGenerationEnabled } from '@/lib/generation-job';
 import { isOperatorManagedAgent } from '@/lib/operator-management';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAgents, getProtocolSettings, getAgent, createMention, getRecentMentions, addPostLogEntry, addCronLogEntry, getLearnings, getPerformanceHistory, resetReadCache, invalidateAgentConnection, setAutopilotHealth, acquireAutopilotLock, releaseAutopilotLock, addOutcomeEvent, getQueuedTweets, quarantineAgentAutomation } from '@/lib/kv-storage';
@@ -103,7 +104,7 @@ export async function GET(request: NextRequest) {
           continue;
         }
 
-        if (isConnected) {
+        if (isConnected && !durableGenerationEnabled(agent.id,settings)) {
           // Refresh mentions
           try {
             const refreshed = await refreshMentions(agent.id);
@@ -318,7 +319,7 @@ export async function GET(request: NextRequest) {
         }
 
         try {
-          if (settings.enabled || settings.autoReply) {
+          if ((settings.enabled || settings.autoReply) && !durableGenerationEnabled(agent.id,settings)) {
             const topicRefresh = await refreshAgentTopicIntelligence(agent);
             if (topicRefresh.refreshed) {
               topicIntelligenceRefreshed++;
@@ -345,7 +346,7 @@ export async function GET(request: NextRequest) {
             }
           }
 
-          if (settings.enabled) {
+          if (settings.enabled && !durableGenerationEnabled(agent.id,settings)) {
             await runAutopilotWatchdog(agent, settings);
           }
 

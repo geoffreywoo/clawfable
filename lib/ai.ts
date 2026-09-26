@@ -1,3 +1,5 @@
+import { getAiOperationalState, getGenerationRuns } from './kv-storage';
+import type { AiSpendLedger } from './ai-budget';
 import Anthropic from '@anthropic-ai/sdk';
 import { jsonSchemaOutputFormat } from '@anthropic-ai/sdk/helpers/json-schema';
 import OpenAI from 'openai';
@@ -51,6 +53,7 @@ export interface GenerateTextOptions {
   openAiReasoningEffort?: OpenAiReasoningEffort;
   modelStack?: GenerationModelStackId;
   timeoutMs?: number;
+  onResponseId?: (id: string) => Promise<void>;
 }
 
 export interface GenerateTextResult {
@@ -458,7 +461,7 @@ async function generateWithOpenAi(
   const response = model === OPENAI_ASTRA_MODEL
     ? await consumeAstraResponseStream(
         await openai.responses.create(astraRequest!, { ...(signal ? { signal } : {}), maxRetries: 0 }),
-        progress!, startedAt, signal,
+        progress!, startedAt, signal, options.onResponseId,
       )
     : signal
       ? await openai.responses.create(request, { signal, maxRetries: 0 })
@@ -484,6 +487,7 @@ async function consumeAstraResponseStream(
   progress: GenerationResponseProgress,
   startedAt: number,
   signal?: AbortSignal,
+  onResponseId?: (id: string) => Promise<void>,
 ): Promise<OpenAI.Responses.Response> {
   // Responses events are documented full-response snapshots at terminal states.
   // Deltas measure progress only: never assemble or return partial copy.
@@ -494,7 +498,9 @@ async function consumeAstraResponseStream(
     progress.eventCount += 1;
     if (event.type === 'response.output_text.delta') progress.firstOutputMs ??= elapsed;
     if ('response' in event && event.response) {
+      const firstResponse = !progress.responseId;
       progress.responseId = event.response.id || progress.responseId;
+      if (firstResponse && progress.responseId && onResponseId) await onResponseId(progress.responseId);
       progress.providerModel = typeof event.response.model === 'string' ? event.response.model : progress.providerModel;
       progress.status = event.response.status || progress.status;
     }
@@ -648,6 +654,13 @@ function annotateGenerationFailure(
 
 export async function generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
   if ((!options.spendContext?.agentId || !options.spendContext?.runId || !options.spendContext?.operation) && (!IS_TEST_ENV || process.env.AI_BUDGET_TEST_ENFORCE === 'true')) throw new AiBudgetError('attribution_missing');
+  if (options.spendContext?.requestKey) {
+    const ledger = await getAiOperationalState<AiSpendLedger>(options.spendContext.agentId,'spend');
+    const attempts = Object.values(ledger?.attempts || {}).filter(a=>a.runId===options.spendContext!.runId && a.requestKey===options.spendContext!.requestKey);
+    const recovered = attempts.find(a=>a.recoveredResult);
+    if (recovered?.recoveredResult) return recovered.recoveredResult;
+    if (attempts.some(a=>a.state==='dispatched' && a.reconciliationState !== 'unavailable')) throw new Error('provider_pending');
+  }
   const callStartedAt = Date.now();
   const requestedChain = resolveModelChain(options);
   const modelChain = requestedChain;
@@ -696,7 +709,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
     paidAttempts++;
     try {
       const generation = target.provider === 'openai'
-        ? generateWithOpenAi(options, target.model, abortController?.signal, responseProgress, attemptStartedAt)
+        ? generateWithOpenAi({...options,onResponseId: async id=>{ await updateAiAttempt(reservation,{responseId:id}); await options.onResponseId?.(id); }}, target.model, abortController?.signal, responseProgress, attemptStartedAt)
         : generateWithAnthropic(options, target.model, abortController?.signal);
       const result = attemptTimeoutMs === null
         ? await generation
@@ -710,7 +723,8 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
       const observedUsd = estimateAiUsageCostUsd(target.model, result.inputTokens, result.outputTokens);
       await updateAiAttempt(reservation, { state: observedUsd === null ? 'dispatched' : 'settled', observedUsd,
         inputTokens: result.inputTokens, outputTokens: result.outputTokens, reasoningEffort: result.reasoningEffort, cachedInputTokens: result.cachedInputTokens, reasoningTokens: result.reasoningTokens, actualModel: result.providerModel || result.model,
-        latencyMs: Date.now() - attemptStartedAt, reason: incomplete ? 'incomplete' : index ? 'fallback' : null });
+        latencyMs: Date.now() - attemptStartedAt, reason: incomplete ? 'incomplete' : index ? 'fallback' : null,
+        ...(options.spendContext?.requestKey && !incomplete && result.text.trim() ? {recoveredResult:{...result,spendAttemptId:reservation?.id}} : {}) });
       if (!result.text.trim() || incomplete) {
         lastError = new Error(`${target.provider}:${target.model} returned ${incomplete ? 'incomplete' : 'empty'} text`);
         fallbackAttempts.push({
@@ -783,4 +797,35 @@ function recordAiCallAudit(options: GenerateTextOptions, result: GenerateTextRes
     unknownCostAttempts: costs.filter(cost => cost === null).length,
     attempts: attempts.map(({provider, model, reason, statusCode, errorType, durationMs}) => ({provider, model, reason, statusCode, errorType, durationMs})),
   }));
+}
+
+/** Read-only provider recovery plus atomic receipt settlement; unknown charges stay committed. */
+export async function reconcileAiProviderAttempts(agentId: string): Promise<{settled:number;unavailable:number}> {
+  const ledger = await getAiOperationalState<AiSpendLedger>(agentId,'spend');
+  const client = process.env.OPENAI_API_KEY ? new OpenAI({apiKey:process.env.OPENAI_API_KEY,maxRetries:0,timeout:15_000}) : null;
+  let settled=0,unavailable=0;
+  const traces = await getGenerationRuns(agentId,120);
+  for (const a of Object.values(ledger?.attempts || {}).filter(a=>a.state==='dispatched' && Date.now()-Date.parse(a.createdAt)>300_000 && a.reconciliationState!=='unavailable').slice(-8)) {
+    const reservation={context:{agentId,operation:a.operation,runId:a.runId},id:a.id,day:a.day};
+    if (!a.responseId && a.provider==='openai') {
+      const ids=[...new Set((traces.find(t=>t.id===a.runId)?.modelCalls || []).filter(c=>c.stage===a.task && (c.model===a.model || c.requestedModel===a.model)).flatMap(c=>c.responseProgress?.responseId ? [c.responseProgress.responseId] : []))];
+      if (ids.length===1) { a.responseId=ids[0];await updateAiAttempt(reservation,{responseId:a.responseId}); }
+    }
+    if (a.provider!=='openai' || !a.responseId || !client) {
+      await updateAiAttempt(reservation,{reconciliationState:'unavailable'}); unavailable++; continue;
+    }
+    try {
+      const response=await client.responses.retrieve(a.responseId);
+      if (['queued','in_progress'].includes(response.status || '')) continue;
+      const observedUsd=estimateAiUsageCostUsd(a.model,response.usage?.input_tokens,response.usage?.output_tokens);
+      if (observedUsd===null) { await updateAiAttempt(reservation,{reconciliationState:'unavailable'}); unavailable++; continue; }
+      const result:GenerateTextResult={text:extractOpenAiText(response),stopReason:getOpenAiStopReason(response),provider:'openai',model:a.model,providerModel:response.model,
+        inputTokens:response.usage?.input_tokens,outputTokens:response.usage?.output_tokens,spendAttemptId:a.id};
+      await updateAiAttempt(reservation,{state:'settled',observedUsd,inputTokens:result.inputTokens,outputTokens:result.outputTokens,reconciliationState:'settled',
+        ...(response.status==='completed' && result.text.trim() ? {recoveredResult:result}:{})}); settled++;
+    } catch(error) {
+      if ((error as {status?:number}).status===404) { await updateAiAttempt(reservation,{reconciliationState:'unavailable'}); unavailable++; }
+    }
+  }
+  return {settled,unavailable};
 }

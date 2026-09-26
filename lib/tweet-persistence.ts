@@ -25,6 +25,7 @@ export async function createTweetFromGeneratedCandidate(
   }
   const data: CreateTweetInput = {
     agentId,
+    assessmentReceipt:item.assessmentReceipt,
     content: item.content,
     type: options.type || 'original',
     status: options.status,

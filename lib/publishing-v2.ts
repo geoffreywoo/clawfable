@@ -567,7 +567,7 @@ async function replayIdempotentResult(
   input: GeneratePublishingBatchV2Input,
   idempotencyKey: string,
 ): Promise<RankedProtocolTweet[] | null> {
-  if (input.persistArtifacts === false) return null;
+  if (input.persistArtifacts === false || input.durableGeneration) return null;
   const run = (await getGenerationRuns(input.agentId, 100)).find((entry) => (
     entry.idempotencyKey === idempotencyKey
     && entry.status === 'completed'

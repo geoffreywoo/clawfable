@@ -1,3 +1,5 @@
+import { getGenerationJob, durableGenerationEnabled } from './generation-job';
+import { getAiBudgetSummary } from './ai-budget';
 import { unstable_cache } from 'next/cache';
 import { getAccessibleAgentCount, getAccessibleAgents } from './account-access';
 import { getBillingSummary } from './billing';
@@ -71,6 +73,7 @@ export interface ControlRoomSnapshot {
 }
 
 export interface ProtocolSnapshot {
+  generation?: { job: { id:string; stage:string; status:string; blocker:string|null; nextAttemptAt:number } | null; budget: Awaited<ReturnType<typeof getAiBudgetSummary>> };
   settings: ProtocolSettings;
   postLog: PostLogEntry[];
   billing: BillingSummary;
@@ -206,6 +209,7 @@ export async function getProtocolSnapshot(user: User, agentOrId: Agent | string)
 
   return {
     settings,
+    ...(durableGenerationEnabled(agentId,settings) ? {generation:{job:await getGenerationJob(agentId).then(j=>j?{id:j.id,stage:j.stage,status:j.status,blocker:j.blocker,nextAttemptAt:j.nextAttemptAt}:null),budget:await getAiBudgetSummary(agentId)}} : {}),
     postLog: healthPostLog.slice(0, 10),
     billing: getBillingSummary(user, agentCount),
     autopilotHealth: mergedAutopilotHealth,

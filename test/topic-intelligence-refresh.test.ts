@@ -55,7 +55,7 @@ const topic = {
   source: '@alice, @bob',
   relevanceScore: 91,
   category: 'solid-state transformer production',
-  timestamp: '2026-07-14T10:00:00.000Z',
+  timestamp: new Date().toISOString(),
   tweetCount: 2,
 };
 

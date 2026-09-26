@@ -22,6 +22,7 @@ import type {
 } from './types';
 
 export interface PublishingCandidate {
+  assessmentReceipt?: import('./types').Tweet['assessmentReceipt'];
   content: string;
   format: string;
   targetTopic: string;

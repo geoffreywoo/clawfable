@@ -496,6 +496,7 @@ export interface GenerationSelectionTrace {
 }
 
 export interface Tweet {
+  assessmentReceipt?: { contentHash: string; policyVersion: string; criticVersion: string; assessedAt: string } | null;
   id: string;
   agentId: string;
   content: string;
@@ -834,6 +835,8 @@ export interface ResearchAgenda {
 }
 
 export type GenerationCandidateStatus =
+  | 'reserve'
+  | 'pending_assessment'
   | 'generated'
   | 'selected'
   | 'rejected'
@@ -859,6 +862,8 @@ export interface IdeaJudgeBreakdown {
 }
 
 export interface IdeaCandidate {
+  diagnosticCodes?: string[];
+  contentMode?: 'observation' | 'opinion' | 'prediction' | 'factual_claim';
   schemaVersion: 2;
   id: string;
   agentId: string;
@@ -1197,6 +1202,8 @@ export interface FollowingProfile {
 // ─── Autopilot types ─────────────────────────────────────────────────────────
 
 export interface ProtocolSettings {
+  /** Account-scoped durable original generation rollout. */
+  durableGenerationEnabled?: boolean;
   enabled: boolean;
   postsPerDay: number;        // 1-24
   activeHoursStart: number;   // legacy, unused

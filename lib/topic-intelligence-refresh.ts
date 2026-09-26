@@ -21,6 +21,19 @@ export interface AgentTopicIntelligenceRefresh {
   error: unknown | null;
 }
 
+export function retainQualifiedTopicPackets(previous: TrendingTopic[], fresh: TrendingTopic[], now = Date.now()): TrendingTopic[] {
+  const current = (topic: TrendingTopic) => {
+    const observed = Date.parse(topic.observedAt || topic.timestamp || '');
+    return Number.isFinite(observed) && observed <= now + 300_000 && now-observed < 24*3600_000;
+  };
+  const qualified = (topic: TrendingTopic) => (topic.topicConfidence || 0) >= .65;
+  const key = (topic: TrendingTopic) => topic.category.trim().toLowerCase();
+  const incoming = fresh.filter(topic=>topic.discoveryMethod !== 'followed_network' || current(topic));
+  const retained = previous.filter(topic=>current(topic) && qualified(topic)
+    && !incoming.some(next=>key(next)===key(topic) && qualified(next)));
+  return [...retained,...incoming.filter(topic=>!retained.some(old=>key(old)===key(topic)))].slice(0,20);
+}
+
 function hasConnection(agent: Agent): boolean {
   return Boolean(
     agent.isConnected
@@ -57,7 +70,7 @@ export async function refreshAgentTopicIntelligence(
 
   if (!hasConnection(agent)) {
     return {
-      topics: snapshot?.isFresh ? cachedTopics : [],
+      topics: retainQualifiedTopicPackets(cachedTopics,[]),
       attempted: false,
       refreshed: false,
       busy: false,
@@ -71,7 +84,7 @@ export async function refreshAgentTopicIntelligence(
   const lock = await acquireTopicIntelligenceLock(agent.id);
   if (!lock.acquired) {
     return {
-      topics: snapshot?.isFresh ? cachedTopics : [],
+      topics: retainQualifiedTopicPackets(cachedTopics,[]),
       attempted: false,
       refreshed: false,
       busy: true,
@@ -97,7 +110,7 @@ export async function refreshAgentTopicIntelligence(
     if (discovery.networkRefreshed && discovery.networkState) {
       await saveTopicIntelligenceState(agent.id, discovery.networkState);
     }
-    const topics = discovery.topics;
+    const topics = retainQualifiedTopicPackets(cachedTopics,discovery.topics);
     if (!discovery.networkError) {
       await setTrendingCache(agent.id, topics);
     }
@@ -113,7 +126,7 @@ export async function refreshAgentTopicIntelligence(
     };
   } catch (error) {
     return {
-      topics: snapshot?.isFresh ? cachedTopics : [],
+      topics: retainQualifiedTopicPackets(cachedTopics,[]),
       attempted: true,
       refreshed: false,
       busy: false,

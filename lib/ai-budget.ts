@@ -25,8 +25,14 @@ export interface AiSpendContext {
   downstreamReserveUsd?: number;
   campaignId?: string;
   campaignLimitUsd?: number;
+  allocationPolicy?: boolean;
+  requestKey?: string;
 }
 export interface AiSpendAttempt {
+  requestKey?: string;
+  responseId?: string;
+  reconciliationState?: string;
+  recoveredResult?: import('./ai').GenerateTextResult;
   campaignId?: string;
   pricingVersion?: string;
   pricingRates?: { input: number; output: number };
@@ -112,6 +118,12 @@ export function reserveAiSpendInLedger(ledger: AiSpendLedger | null, context: Ai
   if (value.attempts[attempt.id]) return value;
   if (context.operation === 'generation') dailyLimitUsd += generationTopUpUsd(value, day);
   const attempts = Object.values(value.attempts);
+  if (context.allocationPolicy && context.operation !== 'generation') {
+    const research = new Set(['research-pipeline','network-topic-intelligence','seed-synthesis']);
+    const bucket = research.has(context.operation) ? 'research' : 'background';
+    const used = attempts.filter(a=>a.day===day && a.operation !== 'generation' && (research.has(a.operation)?'research':'background')===bucket).reduce((n,a)=>n+committedAiSpend(a),0);
+    if (used + attempt.reservedUsd > (bucket === 'research' ? 2 : 3) + 1e-9) throw new AiBudgetError('budget_exhausted');
+  }
   const daily = (value.openingBalance?.day === day ? value.openingBalance.unresolvedUsd : 0) + attempts.filter(a => a.day === day).reduce((n, a) => n + committedAiSpend(a), 0);
   const run = attempts.filter(a => a.runId === context.runId).reduce((n, a) => n + committedAiSpend(a), 0);
   const downstream = context.downstreamReserveUsd ?? value.completionHolds?.[context.runId]?.usd ?? 0;
@@ -150,6 +162,7 @@ export interface AiReservation { context: AiSpendContext; id: string; day: strin
 export async function reserveAiAttempt(context: AiSpendContext, target: { model: string; provider: string }, inputBytes: number, outputLimit: number): Promise<AiReservation | null> {
   try {
     const day = aiBudgetDay();
+    if (context.agentId === '13' && (await getProtocolSettings(context.agentId)).durableGenerationEnabled) context = {...context,allocationPolicy:true};
     const dailyLimitUsd = await getAccountDailyAiLimit(context.agentId);
     if (dailyLimitUsd === null) return null;
     if (dailyLimitUsd <= 0) throw new AiBudgetError('budget_exhausted');
@@ -180,7 +193,7 @@ export async function reserveAiAttempt(context: AiSpendContext, target: { model:
       // An async KV/account read must never carry yesterday's surge into a
       // reservation admitted after Pacific midnight. Retry on the new day.
       if (aiBudgetDay() !== day) throw new AiBudgetError('budget_unavailable');
-      return { value: reserveAiSpendInLedger(ledger, context, { id, ...target, operation: context.operation, task: context.task, runId: context.runId,
+      return { value: reserveAiSpendInLedger(ledger, context, { id, ...target, operation: context.operation, task: context.task, runId: context.runId, requestKey: context.requestKey,
         day, reservedUsd, pricingVersion: AI_PRICING_VERSION, pricingRates: getAiModelPricing(target.model)!, campaignId: context.campaignId, observedUsd: null, state: 'reserved', createdAt: new Date().toISOString() }, day, dailyLimitUsd, publishingReserveUsd), result: undefined,
       };
     });

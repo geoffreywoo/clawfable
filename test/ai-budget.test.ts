@@ -156,3 +156,14 @@ it('reloads only generation capacity for the authorized day without erasing usag
   expect(() => reserveAiSpendInLedger(ledger, { ...context, operation: 'seed-synthesis' }, next, today)).toThrow('budget_exhausted');
   expect(() => reserveAiSpendInLedger(ledger, context, { ...next, reservedUsd: 3.01 }, today)).toThrow('budget_exhausted');
 });
+
+it('enforces the research and background envelopes while generation can borrow unused capacity',()=>{
+ const allocated={...context,allocationPolicy:true,runLimitUsd:20};
+ const research={...allocated,operation:'network-topic-intelligence'};
+ const a={...attempt('research',2),operation:research.operation};
+ const ledger=reserveAiSpendInLedger(null,research,a,day);
+ expect(()=>reserveAiSpendInLedger(ledger,{...research,runId:'more'},{...attempt('more',.01,'more'),operation:research.operation},day)).toThrow('budget_exhausted');
+ expect(reserveAiSpendInLedger(ledger,allocated,attempt('generation',18),day).attempts.generation).toBeDefined();
+ const background={...allocated,operation:'performance'};
+ expect(()=>reserveAiSpendInLedger(null,background,{...attempt('bg',3.01),operation:'performance'},day)).toThrow('budget_exhausted');
+});

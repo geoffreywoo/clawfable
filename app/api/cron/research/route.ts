@@ -1,3 +1,6 @@
+import { durableGenerationEnabled } from '@/lib/generation-job';
+import { refreshAgentTopicIntelligence } from '@/lib/topic-intelligence-refresh';
+import { checkPerformance, buildLearnings } from '@/lib/performance';
 import { isOperatorManagedAgent } from '@/lib/operator-management';
 import { NextRequest, NextResponse } from 'next/server';
 import { PUBLISHING_V2_MODEL_STACK } from '@/lib/ai';
@@ -27,6 +30,11 @@ export async function GET(request: NextRequest) {
       if (!settings.enabled) continue;
       const entitlement = await getAgentAutomationEntitlement(agent.id, { agent });
       if (!entitlement.eligible) continue;
+      if (durableGenerationEnabled(agent.id,settings)) {
+        await refreshAgentTopicIntelligence(agent);
+        await checkPerformance(agent).catch(()=>null);
+        await buildLearnings(agent).catch(()=>null);
+      }
       const result = await refreshAgentResearch(agent, {
         modelStack: PUBLISHING_V2_MODEL_STACK,
       });

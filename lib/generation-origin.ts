@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Tweet } from './types';
 import {
   getPublishingV2FinalCriticVersion,
@@ -31,7 +32,7 @@ type GenerationOriginTweet = Pick<
   | 'finalCriticVerdict'
   | 'finalCriticScores'
   | 'finalCriticVersion'
-> & { type?: Tweet['type'] };
+> & { type?: Tweet['type']; content?: string; assessmentReceipt?: Tweet['assessmentReceipt'] };
 
 function hasGeneratedContentProvenance(tweet: GenerationOriginTweet): boolean {
   return Boolean(
@@ -47,6 +48,7 @@ export function getGeneratedPublishIssue(
   tweet: GenerationOriginTweet,
   options: { currentVoiceCorpusVersion?: string | null; accountHandle?: string | null } = {},
 ): string | null {
+  if (tweet.assessmentReceipt && (tweet.assessmentReceipt.contentHash !== createHash('sha256').update(JSON.stringify(tweet.content)).digest('hex') || tweet.assessmentReceipt.policyVersion !== tweet.qualityPolicyVersion || tweet.assessmentReceipt.criticVersion !== tweet.finalCriticVersion)) return 'Generated copy changed after assessment; reassessment is required.';
   if (tweet.pipelineVersion === 'v2') {
     const qualityPolicyVersion = getPublishingV2QualityPolicyVersion(
       tweet.generationSurface,

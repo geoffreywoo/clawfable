@@ -1080,6 +1080,7 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
     finalCriticModel: tweet.finalCriticModel ?? null,
     finalCriticVerdict: tweet.finalCriticVerdict ?? null,
     finalCriticScores: coerceNullableJson(tweet.finalCriticScores),
+    assessmentReceipt: coerceNullableJson(tweet.assessmentReceipt),
     finalCriticVersion: tweet.finalCriticVersion ?? null,
     sourceBrief: normalizeSourceBrief(tweet.sourceBrief),
     sourceEvidenceTexts: coerceNullableJson<string[]>(tweet.sourceEvidenceTexts),
@@ -1164,6 +1165,7 @@ function serializeTweetRecord(tweet: Tweet): Record<string, unknown> {
     generationSelection: tweet.generationSelection ? JSON.stringify(tweet.generationSelection) : null,
     judgeBreakdown: tweet.judgeBreakdown ? JSON.stringify(tweet.judgeBreakdown) : null,
     finalCriticScores: tweet.finalCriticScores ? JSON.stringify(tweet.finalCriticScores) : null,
+    assessmentReceipt: tweet.assessmentReceipt ? JSON.stringify(tweet.assessmentReceipt) : null,
     scoreProvenance: tweet.scoreProvenance ? JSON.stringify(tweet.scoreProvenance) : null,
     sourceEvidenceTexts: tweet.sourceEvidenceTexts ? JSON.stringify(tweet.sourceEvidenceTexts) : null,
     evidenceReferences: tweet.evidenceReferences ? JSON.stringify(tweet.evidenceReferences) : null,
@@ -1241,9 +1243,32 @@ export async function getQueuedTweets(agentId: string): Promise<Tweet[]> {
   return tweets.filter((t): t is Tweet => t !== null && t.status === 'queued').map(normalizeTweetRecord);
 }
 
+export async function repairTweetIndexes(tweet: Tweet): Promise<void> {
+  const ids = await kvLrange(KEYS.agentTweets(tweet.agentId),0,-1);
+  if (!ids.map(String).includes(tweet.id)) await kvLpush(KEYS.agentTweets(tweet.agentId),tweet.id);
+  if (tweet.status === 'queued') {
+    const queued = await kvLrange(KEYS.agentQueue(tweet.agentId),0,-1);
+    if (!queued.map(String).includes(tweet.id)) { await kvLpush(KEYS.agentQueue(tweet.agentId),tweet.id); await bumpQueueVersion(tweet.agentId); }
+  }
+}
+
 export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
+  if (!data.generationRunId?.startsWith('generation-job-') || !data.draftCandidateId) return createTweetRecord(data);
+  const key = `persist:${data.draftCandidateId}`;
+  const lease = await acquireGenerationRequestLock(data.agentId,key);
+  if (!lease.acquired) throw new Error('candidate_persistence_busy');
+  try { return await createTweetRecord(data); }
+  finally { await releaseGenerationRequestLock(data.agentId,key,lease.owner); }
+}
+
+async function createTweetRecord(data: CreateTweetInput): Promise<Tweet> {
   const counter = await kvIncr(KEYS.counterTweet());
-  const id = String(counter);
+  let id = String(counter);
+  if (data.generationRunId?.startsWith('generation-job-') && data.draftCandidateId) {
+    id = await mutateAiOperationalState<{id:string},string>(data.agentId,`candidate-tweet:${data.draftCandidateId}`,stored=>({value:stored || {id},result:stored?.id || id}));
+    const existing = await kvHgetall<Tweet>(KEYS.tweet(id));
+    if (existing) { await repairTweetIndexes(normalizeTweetRecord(existing)); return normalizeTweetRecord(existing); }
+  }
   const tweet: Tweet = {
     id,
     agentId: data.agentId,
@@ -1275,6 +1300,7 @@ export async function createTweet(data: CreateTweetInput): Promise<Tweet> {
     finalCriticModel: data.finalCriticModel ?? null,
     finalCriticVerdict: data.finalCriticVerdict ?? null,
     finalCriticScores: data.finalCriticScores ?? null,
+    assessmentReceipt: data.assessmentReceipt ?? null,
     finalCriticVersion: data.finalCriticVersion ?? null,
     sourceBrief: data.sourceBrief ?? null,
     sourceEvidenceTexts: data.sourceEvidenceTexts ?? null,

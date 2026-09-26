@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { founderBrief, founderDraft, founderIdea } from './fixtures/founder-critic-execution';
 
 const mocks = vi.hoisted(() => ({
+  durableState: new Map<string, any>(),
   generateText: vi.fn(),
   getGenerationRuns: vi.fn(),
   getIdeaCandidates: vi.fn(),
@@ -28,8 +29,8 @@ vi.mock('@/lib/ai', () => ({
 
 vi.mock('@/lib/kv-storage', () => ({
   getDynamicIdeaSeeds: async () => [],
-  getAiOperationalState: async () => null,
-  mutateAiOperationalState: async (_id: string, _namespace: string, mutate: any) => mutate(null).result,
+  getAiOperationalState: async (id: string, namespace:string) => id==='13' ? structuredClone(mocks.durableState.get(namespace) || null) : null,
+  mutateAiOperationalState: async (id: string, namespace: string, mutate: any) => { const change=mutate(id==='13' ? structuredClone(mocks.durableState.get(namespace) || null) : null); if(id==='13' && !change.skip)mocks.durableState.set(namespace,structuredClone(change.value)); return change.result; },
   getGenerationRuns: mocks.getGenerationRuns,
   getIdeaCandidates: mocks.getIdeaCandidates,
   getSemanticBlocks: mocks.getSemanticBlocks,
@@ -344,6 +345,7 @@ const storyClusters = researchTopics.map(([topic, entity, title, summary], index
 describe('generateTweetBatchV2 integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.durableState.clear();
     mocks.accountTasteOverride = null;
     mocks.accountTasteImplementation = null;
     mocks.geoffreyVoiceProfile = true;
@@ -362,6 +364,29 @@ describe('generateTweetBatchV2 integration', () => {
       if (options.task === 'copy_judgment') return rankingResponse(options.prompt, 'candidates');
       throw new Error(`Unexpected task ${options.task}`);
     });
+  });
+
+  it('resumes durable paid ideas after an unavailable judge without regenerating them', async()=>{
+    mocks.getStoryClusters.mockResolvedValue([]);
+    mocks.getSourceDocuments.mockResolvedValue([]);
+    mocks.generateText.mockImplementation(async(options:any)=>{
+      if(options.task==='idea_generation') {
+        const packet=JSON.parse(options.prompt);
+        return result(JSON.stringify({ideas:[{briefId:packet.subjects[0].id,publicMove:'Within a year, I expect a stock index fund to launch agent-led activist campaigns across its whole portfolio. Every holding gets a team pushing for changes.',contentMode:'prediction',evidenceIds:[],factualRisk:'low'}]}));
+      }
+      if(options.task==='idea_judgment') throw new Error('judge temporarily unavailable');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+    const durableInput={...input,agentId:'13',count:1,durableGeneration:true,modelStack:'publishing_v2_astra' as const,generationPolicy:'budget_v1' as const};
+    await generateTweetBatchV2(durableInput);
+    expect(mocks.durableState.get('generation-job').checkpoints.ideas_ready).toHaveLength(1);
+    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='idea_judgment')).toHaveLength(1);
+    const saved=mocks.durableState.get('generation-job');
+    mocks.durableState.set('generation-job',{...saved,nextAttemptAt:0,owner:null,leaseUntil:0});
+    await generateTweetBatchV2(durableInput);
+    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='idea_generation')).toHaveLength(1);
+    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='idea_judgment')).toHaveLength(2);
+    expect(mocks.durableState.get('generation-job').id).toBe(saved.id);
   });
 
   it('uses identical calibrated critic contracts while retaining different generation policies', async () => {
