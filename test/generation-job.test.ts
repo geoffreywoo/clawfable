@@ -65,6 +65,17 @@ describe('durable generation jobs',()=>{
   expect(session.job.status).toBe('deferred');
   expect(session.job.checkpoints.drafts_ready).toEqual(['paid draft']);
  });
+ it('reassesses compatible policy changes while preserving paid stage responses',async()=>{
+  const session=new GenerationJobSession('job-policy',(await claimGenerationJob('job-policy',{},'old'))!);
+  await session.checkpoint('call:tweet_writing:hash',async()=>({result:{text:'paid output'}}));
+  await session.checkpoint('drafts_ready:idea',async()=>['old interpretation']);
+  await session.finish([{id:'old assessment'}],'completed');
+  const next=await claimGenerationJob('job-policy',{},'new',Date.now()+301000,()=>true);
+  expect(next?.id).toBe(session.job.id);
+  expect(next?.result).toBeUndefined();
+  expect(next?.checkpoints['call:tweet_writing:hash']).toEqual({result:{text:'paid output'}});
+  expect(next?.checkpoints['drafts_ready:idea']).toBeUndefined();
+ });
  it('preserves real rejection alongside selection or operational codes',()=>{
   const item={status:'rejected',rejectionCodes:['idea_not_selected']} as any;
   expect(normalizeCandidateDisposition(item).status).toBe('reserve');

@@ -35,7 +35,7 @@ async function archiveGenerationJob(agentId:string, job:GenerationJob):Promise<v
 export function jobFingerprint(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
-export async function claimGenerationJob(agentId: string, input: unknown, policy: string, now = Date.now()): Promise<GenerationJob | null> {
+export async function claimGenerationJob(agentId: string, input: unknown, policy: string, now = Date.now(), compatiblePolicy?: (job:GenerationJob)=>boolean): Promise<GenerationJob | null> {
   const owner = randomUUID();
   const previous = await getGenerationJob(agentId);
   // Archive before replacing the active pointer. A crash or newer worker
@@ -45,13 +45,20 @@ export async function claimGenerationJob(agentId: string, input: unknown, policy
     if (current && current.leaseUntil > now && current.owner) return {value: current, result: null, skip: true};
     if (current && current.nextAttemptAt > now && current.policy === policy && current.expiresAt > now) return {value: current, result: null, skip: true};
     const hasReserve = current?.status === 'queued' && (current.checkpoints.reserveIdeas as string[] || []).length > 0;
-    const reusable = current && current.policy === policy && current.expiresAt > now && (hasReserve || !['queued','failed'].includes(current.status));
+    const reusable = current && (current.policy === policy || compatiblePolicy?.(current)) && current.expiresAt > now && (hasReserve || !['queued','failed'].includes(current.status));
     if (!reusable && current && (current.id !== previous?.id || (current.revision || 0) !== (previous?.revision || 0))) return {value:current,result:null,skip:true};
-    const value: GenerationJob = reusable ? {...current, owner, leaseUntil: now + 300_000, status: current.status === 'assessed' ? 'assessed' : 'running',...(hasReserve ? {result:undefined,blocker:null,stage:'ideas_ready'} : {})} : {
+    const value: GenerationJob = reusable ? {...current, policy, owner, leaseUntil: now + 300_000, status: current.status === 'assessed' ? 'assessed' : 'running',...(hasReserve ? {result:undefined,blocker:null,stage:'ideas_ready'} : {})} : {
       version: GENERATION_JOB_VERSION, id: `generation-job-${randomUUID()}`, policy, input,
       createdAt: now, expiresAt: now + 24*3600_000, owner, leaseUntil: now + 300_000,
       stage: 'subject_ready', status: 'running', blocker: null, nextAttemptAt: 0, failures: 0, checkpoints: {},
     };
+    if (reusable && current.policy !== policy) {
+      // Re-run deterministic normalization and assessment under the current
+      // policy. Preserve raw paid response checkpoints: identical stage
+      // contracts replay, changed prompts buy only that affected stage.
+      value.status='running';value.result=undefined;value.blocker=null;
+      value.checkpoints=Object.fromEntries(Object.entries(current.checkpoints).filter(([key])=>key!=='ideaNormalizationVersion' && !key.startsWith('drafts_ready')));
+    }
     value.revision = (reusable ? current.revision || 0 : 0) + 1;
     return {value, result: value};
   });

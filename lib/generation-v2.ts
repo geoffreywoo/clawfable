@@ -7537,7 +7537,14 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   if (canary?.status === 'active') input = {...input,spendContext:{...input.spendContext,...aiSpendContext(input.agentId,'generation'),campaignId:canary.id,campaignLimitUsd:canary.limitUsd}};
   const policy = jobFingerprint([GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,input.voiceProfile,input.learnings?.voiceCorpus?.snapshotId]);
   const snapshot = JSON.parse(JSON.stringify({...input,onTrace:undefined,onArtifacts:undefined,jobSession:undefined}));
-  const job = await claimGenerationJob(input.agentId,snapshot,policy);
+  const job = await claimGenerationJob(input.agentId,snapshot,policy,Date.now(),current=>{
+    const saved=current.input as GenerateTweetBatchV2Input;
+    // A change to the legacy efficient runner is not a reason to regenerate
+    // durable paid work. Reuse only the same author/model; claim invalidates
+    // derived assessments and exact call fingerprints guard paid stage reuse.
+    return current.version===GENERATION_JOB_VERSION
+      && jobFingerprint([saved.voiceProfile,saved.modelStack,saved.learnings?.voiceCorpus?.snapshotId])===jobFingerprint([input.voiceProfile,input.modelStack,input.learnings?.voiceCorpus?.snapshotId]);
+  });
   if (!job) return [];
   const session = new GenerationJobSession(input.agentId,job);
   if (job.status === 'assessed' && job.result?.length) { await session.finish(job.result,'completed'); return job.result as RankedProtocolTweet[]; }
