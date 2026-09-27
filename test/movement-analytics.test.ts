@@ -1,0 +1,7 @@
+import {expect,it} from 'vitest';
+import {combineSiteAnalytics} from '../lib/movement-analytics';
+import {analyticsControl,emptyGrowthState} from '../lib/antihunter-operator-state';
+import {GET} from '../app/api/public/antihunter/analytics-control/route';
+const now=new Date('2026-09-27T20:00:00Z');
+it('combines only required current-day sites and blocks stale or missing observations',()=>{const s=emptyGrowthState();s.analyticsRequiredSites=['antihunter','aimaxxi'];s.analytics['2026-09-27']={day:'2026-09-27',observedAt:now.toISOString(),events:1,spendUsd:.3,source:'test'};expect(analyticsControl(s,now).sampleRate).toBe(0);s.analyticsSites={aimaxxi:{'2026-09-27':{...s.analytics['2026-09-27'],spendUsd:.25}}};expect(analyticsControl(s,now).sampleRate).toBe(.1);expect(combineSiteAnalytics('2026-09-27',s.analytics,s.analyticsSites,s.analyticsRequiredSites)?.spendUsd).toBe(.55);expect(s.analytics['2026-09-27'].spendUsd).toBe(.3);expect(analyticsControl(s,new Date('2026-09-28T07:00:00Z')).sampleRate).toBe(0);});
+it('allows only the two authorized sites through CORS',async()=>{for(const origin of ['https://aimaxxi.com','https://www.aimaxxi.com','https://antihunter.com']){expect((await GET(new Request('https://clawfable.com/api/public/antihunter/analytics-control',{headers:{origin}}))).headers.get('access-control-allow-origin')).toBe(origin)}expect((await GET(new Request('https://clawfable.com/api/public/antihunter/analytics-control',{headers:{origin:'https://evil.example'}}))).headers.get('access-control-allow-origin')).toBeNull()});

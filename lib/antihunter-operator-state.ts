@@ -1,3 +1,4 @@
+import { combineSiteAnalytics } from './movement-analytics';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 
 export const ANTIHUNTER_AGENT_ID = '5';
@@ -57,6 +58,8 @@ export interface OperatorGrowthState {
   version: 1;
   campaigns: Record<string, CampaignMetadata & { registeredAt: string }>;
   analytics: Record<string, AnalyticsObservation>;
+  analyticsSites?: Record<string, Record<string, AnalyticsObservation>>;
+  analyticsRequiredSites?: string[];
   surges: Record<string, SurgeDecision>;
   xAttempts: Record<string, XSpendAttempt>;
   verificationHolds: Record<string, { day: string; usd: number }>;
@@ -131,7 +134,7 @@ export function budgetPolicy(state: OperatorGrowthState, now = new Date()) {
   const day = pacificDay(now);
   const surge = state.surges[day];
   const allocation = surge ? SURGE_ALLOCATION : NORMAL_ALLOCATION;
-  const analytics = state.analytics[day] || null;
+  const analytics = combineSiteAnalytics(day, state.analytics, state.analyticsSites, state.analyticsRequiredSites);
   // Analytics is a monitored estimate, not an invoice cap. Known excess uses
   // contingency first, then reduces discretionary AI admission.
   const analyticsExcess = Math.max(0, (analytics?.spendUsd || 0) - allocation.analytics - allocation.reserve);
@@ -177,7 +180,7 @@ export async function recordAnalytics(value: unknown, now = new Date()) {
 }
 export function analyticsControl(state: OperatorGrowthState, now = new Date()) {
   const day = pacificDay(now);
-  const observation = state.analytics[day];
+  const observation = combineSiteAnalytics(day, state.analytics, state.analyticsSites, state.analyticsRequiredSites);
   const expiry = observation ? Date.parse(observation.observedAt) + 90 * 60_000 : now.getTime();
   const valid = observation && expiry > now.getTime() && Date.parse(observation.observedAt) <= now.getTime() + 60_000;
   return { day, sampleRate: !valid || observation.spendUsd >= 0.8 ? 0 : observation.spendUsd >= 0.5 ? 0.1 : 1,
