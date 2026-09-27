@@ -152,3 +152,18 @@ describe('verified entity mentions', () => {
     ]);
   });
 });
+
+describe('applyVerifiedEntityTags', () => {
+  it('tags the first natural reference, never at the start, and leaves tagged or start-only posts alone', async () => {
+    const { applyVerifiedEntityTags, getMissingVerifiedEntityTagIssue } = await import('@/lib/entity-mentions');
+    const openai = [{ entity: 'OpenAI', handle: 'OpenAI', role: 'company' as const, source: 'curated' as const }] as any;
+    const mid = applyVerifiedEntityTags('honestly think OpenAI ships this before anyone. OpenAI again.', openai);
+    expect(mid).toEqual({ text: 'honestly think @OpenAI ships this before anyone. OpenAI again.', applied: ['OpenAI'] });
+    expect(getMissingVerifiedEntityTagIssue(mid.text, openai)).toBeNull();
+    const later = applyVerifiedEntityTags('OpenAI is early. still, OpenAI wins this.', openai);
+    expect(later.text).toBe('OpenAI is early. still, @OpenAI wins this.');
+    expect(applyVerifiedEntityTags('OpenAI is early here.', openai)).toEqual({ text: 'OpenAI is early here.', applied: [] });
+    expect(applyVerifiedEntityTags('bet on @OpenAI and OpenAI again', openai).applied).toEqual([]);
+    expect(applyVerifiedEntityTags('no names here', openai).applied).toEqual([]);
+  });
+});

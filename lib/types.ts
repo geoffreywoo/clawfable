@@ -903,6 +903,8 @@ export interface DraftCandidate {
   failureCategory?: IdeaCandidate['failureCategory'];
   judgePolicyVersion?: string;
   repairDecision?: import('./generation-efficiency').RepairDecision | null;
+  /** Mechanical edits applied before gating, e.g. `verified_entity_tag:@handle`. */
+  deterministicRepairs?: string[];
   schemaVersion: 2;
   id: string;
   agentId: string;

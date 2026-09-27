@@ -413,10 +413,10 @@ describe('generateTweetBatchV2 integration', () => {
     expect(critics[0].jsonSchema).toEqual(critics[1].jsonSchema);
     expect(critics.every(o=>o.modelStack==='publishing_v2_gpt_control'&&o.openAiReasoningEffort==='medium')).toBe(true);
     expect(traces.some(t=>t.generationPolicyVersion==='legacy-v2')).toBe(true);
-    expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-8')).toBe(true);
+    expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-9')).toBe(true);
   });
 
-  it('uses one checkpointed repair for a missing verified tag while retaining final judgment', async () => {
+  it('tags a missing verified handle deterministically instead of paying for a repair, while retaining final judgment', async () => {
     mocks.getStoryClusters.mockResolvedValue([]);
     mocks.getSourceDocuments.mockResolvedValue([]);
     const original="i think cognition can help teams build products they couldn't justify staffing. i'd rather see that than the same roadmap with fewer engineers.";
@@ -435,16 +435,19 @@ describe('generateTweetBatchV2 integration', () => {
     await generateTweetBatchV2(durableInput);
     const writers=mocks.generateText.mock.calls.map(([o])=>o).filter(o=>o.task==='tweet_writing');
     const repairs=writers.filter(o=>JSON.parse(o.prompt).failedAttempts?.length);
-    expect(writers,JSON.stringify(mocks.saveGenerationRun.mock.calls.at(-1)?.[1])).toHaveLength(2);
-    expect(repairs).toHaveLength(1);
-    expect(JSON.parse(repairs[0].prompt).verifiedEntityMentionPolicy.available).toEqual(expect.arrayContaining([expect.objectContaining({handle:'@cognition'})]));
-    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='copy_judgment'),JSON.stringify(mocks.saveGenerationRun.mock.calls.at(-1)?.[1])).toHaveLength(1);
+    expect(writers,JSON.stringify(mocks.saveGenerationRun.mock.calls.at(-1)?.[1])).toHaveLength(1);
+    expect(repairs).toHaveLength(0);
+    // The writer is told the handle policy up front.
+    expect(JSON.parse(writers[0].prompt).verifiedEntityMentionPolicy.available).toEqual(expect.arrayContaining([expect.objectContaining({handle:'@cognition'})]));
+    const judged=mocks.generateText.mock.calls.filter(([o])=>o.task==='copy_judgment');
+    expect(judged,JSON.stringify(mocks.saveGenerationRun.mock.calls.at(-1)?.[1])).toHaveLength(1);
+    expect(judged[0][0].prompt).toContain('@cognition');
     const saved=mocks.durableState.get('generation-job');
-    expect(Object.keys(saved.checkpoints).filter(k=>k.startsWith('repair:'))).toHaveLength(1);
+    expect(Object.keys(saved.checkpoints).filter(k=>k.startsWith('repair:'))).toHaveLength(0);
     expect(saved.status).toBe('deferred');
     mocks.durableState.set('generation-job',{...saved,nextAttemptAt:0,owner:null,leaseUntil:0});
     await generateTweetBatchV2(durableInput);
-    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='tweet_writing')).toHaveLength(2);
+    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='tweet_writing')).toHaveLength(1);
     expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='copy_judgment')).toHaveLength(2);
   });
 
@@ -465,7 +468,7 @@ describe('generateTweetBatchV2 integration', () => {
       expect(writer.system + writer.prompt).not.toContain('this control variant is only the direct reaction');
     }
     expect(calls.filter(o=>o.task==='idea_judgment'||o.task==='copy_judgment').every(o=>o.modelStack==='publishing_v2_gpt_control' && o.openAiReasoningEffort==='medium')).toBe(true);
-    expect(trace.generationPolicyVersion).toBe('geoffrey-autopost-per-dollar-8');
+    expect(trace.generationPolicyVersion).toBe('geoffrey-autopost-per-dollar-9');
     expect(trace.stageCounts.ideasGenerated).toBe(Math.min(2, briefs.length) * 3);
     expect(calls.filter(o=>o.task==='idea_generation').every(o=>JSON.parse(o.prompt).requirements.ideasPerBrief===3)).toBe(true);
     expect(trace.stageCounts.ideaRetryCalls).toBe(0);

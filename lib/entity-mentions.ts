@@ -322,6 +322,33 @@ export function getMissingVerifiedEntityTagIssue(
   return `Named X ${missing.length === 1 ? 'entity' : 'entities'} must use the verified handle: ${missing.map((entry) => `${entry.entity}=@${entry.handle}`).join(', ')}.`;
 }
 
+/**
+ * Deterministic form of the writer instruction: replace the first natural
+ * reference to a verified entity with its handle. A reference that opens the
+ * post is skipped (a post must not begin with @); if it is the only one, the
+ * draft is left for the gate. Returns the applied handles for auditing.
+ */
+export function applyVerifiedEntityTags(
+  text: string,
+  mentions: VerifiedEntityMention[],
+): { text: string; applied: string[] } {
+  let next = text;
+  const applied: string[] = [];
+  for (const mention of mentions) {
+    if (!textNamesEntity(next, mention.entity) || textMentionsHandle(next, mention.handle)) continue;
+    const escaped = escapeRegExp(mention.entity).replace(/\s+/g, '\\s+');
+    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}_@])(${escaped})(?=$|[^\\p{L}\\p{N}_])`, 'giu');
+    for (const match of next.matchAll(pattern)) {
+      const start = (match.index ?? 0) + match[1].length;
+      if (next.slice(0, start).trim().length === 0) continue;
+      next = `${next.slice(0, start)}@${mention.handle}${next.slice(start + match[2].length)}`;
+      applied.push(mention.handle);
+      break;
+    }
+  }
+  return { text: next, applied };
+}
+
 export function getCuratedEntityMentionPolicyIssue(text: string): string | null {
   return getDeprecatedCuratedEntityHandleIssue(text)
     || getMissingVerifiedEntityTagIssue(text, findCuratedVerifiedEntityMentions(text));
