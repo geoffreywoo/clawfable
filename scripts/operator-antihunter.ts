@@ -116,10 +116,14 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
       campaigns: Object.values(growth.campaigns).map(campaign => {
         const contributions = Object.values(growth.contributions || {}).filter(c => c.campaignId === campaign.campaignId);
         const episodeContributions = contributions.filter(c => c.episodeId === campaign.episodeId);
-        const authors = new Set(episodeContributions.map(c => c.xAuthorId));
+        const movement = Object.values(growth.movementContributions || {}).filter(c => c.campaignId === campaign.campaignId && c.episodeId === campaign.episodeId);
+        const authors = new Set(episodeContributions.map(c => `x:${c.xAuthorId}`).concat(movement.map(c => `${c.sourceType}:${c.authorId}`)));
+        const legacyAuthors = new Set(episodeContributions.map(c => c.xAuthorId));
         return { ...campaign,
-        verifiedContributors: episodeContributions.length ? authors.size : null,
-        returningContributors: episodeContributions.length ? [...authors].filter(author => new Set(contributions.filter(c => c.xAuthorId === author).map(c => c.episodeId)).size > 1).length : null,
+        verifiedContributors: episodeContributions.length || movement.length ? authors.size : null,
+        creatorIdentityScope: "Verified source-account identities, not deduplicated humans across platforms; review linked identities before person claims.",
+        movementContributions: movement, reviewedArtifactsByTrack: {build: movement.filter(c=>c.track === 'build').length, imagine: movement.filter(c=>c.track === 'imagine').length},
+        returningContributors: episodeContributions.length ? [...legacyAuthors].filter(author => new Set(contributions.filter(c => c.xAuthorId === author).map(c => c.episodeId)).size > 1).length : null,
         contributionCoverage: 'Manually reviewed public receipts; unobserved contributions are unknown.', contributions: episodeContributions,
         analytics: policy.analytics?.campaigns?.find(c => c.campaignId === campaign.campaignId && c.episodeId === campaign.episodeId) || null,
         posts: tweets.filter(tweet => { const c = parseOperatorBrief(tweet.sourceBrief)?.campaign; return c?.campaignId === campaign.campaignId && c.episodeId === campaign.episodeId; }).map(tweet => {
