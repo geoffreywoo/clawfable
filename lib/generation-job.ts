@@ -121,6 +121,11 @@ export interface GenerationCanary { id:string; limitUsd:number; emptyRuns:number
 }
 /** Identifies code; a version change alone is not evidence that a blocker is fixed. */
 export const canaryPolicyKey = () => `${GENERATION_JOB_VERSION}:${EFFICIENT_GENERATION_POLICY}`;
+export function generationCanaryAttemptId(canary:GenerationCanary | null, jobId:string, ideaIds:string[]):string {
+  const attempt=`${jobId}:${ideaIds.join(',') || 'ideas'}`;
+  const recovery=canary?.recoveries?.at(-1);
+  return recovery ? `${recovery.id}:${attempt}` : attempt;
+}
 /**
  * Called explicitly after reviewing the referenced offline evaluation. Worker
  * ticks never authorize recovery merely because a deployment changed policy.

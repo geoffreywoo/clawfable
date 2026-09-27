@@ -1,5 +1,5 @@
 import { buildSubjectPacket, type SubjectPacket } from './subject-packet';
-import { GenerationJobSession, claimGenerationJob, jobFingerprint, GENERATION_JOB_VERSION, getGenerationCanary, recordGenerationCanary } from './generation-job';
+import { GenerationJobSession, claimGenerationJob, jobFingerprint, GENERATION_JOB_VERSION, getGenerationCanary, recordGenerationCanary, generationCanaryAttemptId } from './generation-job';
 import { editorialRejectionCodes, normalizeCandidateDisposition } from './candidate-disposition';
 import { PUBLISHING_V2_GEOFFREY_AI_AMBITION } from './publishing-quality-policy';
 import { EFFICIENT_GENERATION_POLICY, REPAIR_DECISION_SCHEMA, parseRepairDecision, canRepairDraft, preservesRepairDecision, substantiveBriefDigest, claimGenerationBriefs, failedBriefKeys, recordBriefAttempts, qualityGenerationPauseUntil, type RepairDecision } from './generation-efficiency';
@@ -7594,7 +7594,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     await session.finish(result,outcome);
     // A completed editorial failure is empty even when a reserve remains.
     // Only unfinished operational stages are exempt from the canary stop.
-    if (!session.deferred && outcome==='quality_empty') await recordGenerationCanary(input.agentId,{empty:true,attemptId:`${job.id}:${(session.job.checkpoints.selectedIdeas as string[] || []).join(',') || 'ideas'}`});
+    if (!session.deferred && outcome==='quality_empty') await recordGenerationCanary(input.agentId,{empty:true,attemptId:generationCanaryAttemptId(canary,job.id,session.job.checkpoints.selectedIdeas as string[] || [])});
     return result;
   } catch (error) {
     await session.finish([],error instanceof Error ? error.message : 'provider_failure').catch(()=>null);
