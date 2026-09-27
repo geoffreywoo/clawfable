@@ -19,3 +19,28 @@ it('reports conversions once per durable original job, excluding legacy runs and
  expect(status.stageSample.ideaEligibilityRate).toBe(2/3);
  expect(status.stageSample.draftSelectionRate).toBe(1/3);
 });
+
+it('counts completed candidate assessments across resumes without counting pending judges or duplicates',()=>{
+ const run={id:'generation-job-1',surface:'original',stageCounts:{ideasGenerated:3,ideasEligible:3,draftsGenerated:1,copyJudgeCandidates:1}};
+ const idea={id:'idea-a',generationRunId:run.id,surface:'original',status:'reserve',judgeScore:.9,rejectionCodes:['idea_not_selected'],updatedAt:'2026-09-27T10:00:00Z'};
+ const draft={id:'a',ideaId:'idea-a',generationRunId:run.id,surface:'original',status:'rejected',judgeScore:.4,rejectionCodes:['copy_judge_low_quality'],updatedAt:'2026-09-27T10:00:00Z'};
+ const artifacts={ideas:[idea,{...idea,id:'idea-b',judgeScore:null,status:'pending_assessment',rejectionCodes:['idea_judge_unavailable']}],
+   drafts:[draft,draft,{...draft,id:'b',ideaId:'idea-b'}, {...draft,id:'c',ideaId:'idea-c',judgeScore:0},
+     {...draft,id:'pending',judgeScore:null,status:'pending_assessment'},
+     {...draft,id:'reply',surface:'reply'}, {...draft,id:'legacy',generationRunId:'legacy'}]} as any;
+ const status=summarizeOriginalDelivery([], [run] as any,null,'2026-09-27',artifacts);
+ expect(status.stageSample.counts).toEqual({jobs:1,ideas:2,eligibleIdeas:1,selectedIdeas:3,drafts:4,assessedDrafts:3,selectedDrafts:0});
+ expect(status.stageSample.draftAssessmentRate).toBe(.75);
+ expect(status.stageSample.scope).toContain('retained candidates');
+ expect(status.stageSample.retentionNote).toContain('not lifetime totals');
+});
+
+it('uses the newest artifact state and does not fill missing retained candidates with a misleading trace total',()=>{
+ const run={id:'generation-job-1',surface:'original',stageCounts:{draftsGenerated:20,copyJudgeCandidates:20}};
+ const older={id:'a',ideaId:'idea-a',generationRunId:run.id,surface:'original',judgeScore:null,status:'pending_assessment',updatedAt:'2026-09-27T09:00:00Z'};
+ const newer={...older,judgeScore:.95,status:'selected',updatedAt:'2026-09-27T10:00:00Z'};
+ const status=summarizeOriginalDelivery([], [run] as any,null,'2026-09-27',{ideas:[],drafts:[newer,older] as any});
+ expect(status.stageSample.counts.drafts).toBe(1);
+ expect(status.stageSample.counts.assessedDrafts).toBe(1);
+ expect(status.stageSample.counts.selectedDrafts).toBe(1);
+});
