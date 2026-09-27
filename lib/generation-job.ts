@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
+import { EFFICIENT_GENERATION_POLICY } from './generation-efficiency';
 
 export const GENERATION_JOB_VERSION = 'durable-original-2';
 export const GENERATION_JOB_NAMESPACE = 'generation-job';
@@ -109,7 +110,20 @@ export async function acknowledgeGenerationQueue(agentId: string, runId: string,
   });
 }
 
-export interface GenerationCanary { id:string; limitUsd:number; emptyRuns:number; emptyAttemptIds?:string[]; queuedIds:string[]; status:'active'|'passed'|'blocked'; }
+export interface GenerationCanary { id:string; limitUsd:number; emptyRuns:number; emptyAttemptIds?:string[]; queuedIds:string[]; status:'active'|'passed'|'blocked'; blockedPolicy?:string; resumedFromPolicy?:string; }
+/** Code-level generation policy. Bumping EFFICIENT_GENERATION_POLICY marks a shipped fix. */
+export const canaryPolicyKey = () => `${GENERATION_JOB_VERSION}:${EFFICIENT_GENERATION_POLICY}`;
+/**
+ * A blocked canary must not retry unchanged code, but a shipped generation fix
+ * deserves its own bounded canary (same dollar limit, same three-empty rule).
+ */
+export async function resumeGenerationCanaryIfPolicyChanged(agentId:string, policy = canaryPolicyKey()): Promise<GenerationCanary | null> {
+  return mutateAiOperationalState<GenerationCanary,GenerationCanary | null>(agentId,'generation-canary',state=>{
+    if (!state || state.status!=='blocked' || state.blockedPolicy===policy) return {value:state!,result:state || null,skip:true};
+    const value:GenerationCanary={...state,status:'active',emptyRuns:0,emptyAttemptIds:[],blockedPolicy:undefined,resumedFromPolicy:state.blockedPolicy || 'unrecorded'};
+    return {value,result:value};
+  });
+}
 export const getGenerationCanary = (agentId:string) => getAiOperationalState<GenerationCanary>(agentId,'generation-canary');
 export async function recordGenerationCanary(agentId:string, event:{queuedId?:string;empty?:boolean;attemptId?:string}) {
   return mutateAiOperationalState<GenerationCanary,void>(agentId,'generation-canary',state=>{
@@ -118,6 +132,7 @@ export async function recordGenerationCanary(agentId:string, event:{queuedId?:st
     const queuedIds=[...new Set([...state.queuedIds,...event.queuedId?[event.queuedId]:[]])];
     const emptyRuns=event.queuedId ? 0 : state.emptyRuns+(event.empty?1:0);
     const emptyAttemptIds=event.empty && event.attemptId ? [...state.emptyAttemptIds || [],event.attemptId] : state.emptyAttemptIds;
-    return {value:{...state,queuedIds,emptyRuns,emptyAttemptIds,status:queuedIds.length>=2?'passed':emptyRuns>=3?'blocked':'active'},result:undefined};
+    const status:GenerationCanary['status']=queuedIds.length>=2?'passed':emptyRuns>=3?'blocked':'active';
+    return {value:{...state,queuedIds,emptyRuns,emptyAttemptIds,status,...(status==='blocked'?{blockedPolicy:canaryPolicyKey()}:{})},result:undefined};
   });
 }

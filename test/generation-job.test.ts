@@ -106,3 +106,19 @@ it('counts an editorial empty attempt once even when reserve work remains',async
  await recordGenerationCanary('canary-reserve',{empty:true,attemptId:'job:idea-c'});
  expect((await getGenerationCanary('canary-reserve'))?.status).toBe('blocked');
 });
+
+describe('generation canary recovery',()=>{
+ it('stays blocked for unchanged code and resumes once for a shipped policy change',async()=>{
+  const { recordGenerationCanary,getGenerationCanary,resumeGenerationCanaryIfPolicyChanged,canaryPolicyKey } = await import('@/lib/generation-job');
+  const { mutateAiOperationalState } = await import('@/lib/kv-storage');
+  const id='canary-resume-'+Date.now();
+  await mutateAiOperationalState<any,void>(id,'generation-canary',()=>({value:{id:'c1',limitUsd:5,emptyRuns:0,queuedIds:[],status:'active'},result:undefined}));
+  for (const attemptId of ['a','b','c']) await recordGenerationCanary(id,{empty:true,attemptId});
+  expect(await getGenerationCanary(id)).toMatchObject({status:'blocked',blockedPolicy:canaryPolicyKey()});
+  expect((await resumeGenerationCanaryIfPolicyChanged(id))?.status).toBe('blocked');
+  const resumed=await resumeGenerationCanaryIfPolicyChanged(id,'next-policy');
+  expect(resumed).toMatchObject({status:'active',emptyRuns:0,emptyAttemptIds:[],limitUsd:5,resumedFromPolicy:canaryPolicyKey()});
+  for (const attemptId of ['d','e','f']) await recordGenerationCanary(id,{empty:true,attemptId});
+  expect((await getGenerationCanary(id))?.status).toBe('blocked');
+ });
+});

@@ -587,6 +587,13 @@ describe('Tweet Generation V2', () => {
     )).toBe('agent_built_unicorn_is_current_baseline');
   });
 
+  it('asks durable prompts for a mechanism only on technical subjects', async () => {
+    const { durableTechnicalContractFor } = await import('@/lib/generation-v2');
+    expect(durableTechnicalContractFor('rocket reuse and launch cadence')).toContain('mechanism, bottleneck, constraint');
+    expect(durableTechnicalContractFor('humanoid robot factories')).toContain('never invent events');
+    expect(durableTechnicalContractFor('markets activist investing')).toBe('');
+  });
+
   it('requires frontier lead and bullish trajectory conviction for Geoffrey AI ideas', () => {
     const geoffreyVoice = {
       ...voiceProfile,

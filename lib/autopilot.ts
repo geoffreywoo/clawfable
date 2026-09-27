@@ -1,5 +1,5 @@
 import { repairTweetIndexes } from './kv-storage';
-import { durableGenerationEnabled, acknowledgeGenerationQueue, recordGenerationCanary, getGenerationCanary, getGenerationJob } from './generation-job';
+import { durableGenerationEnabled, acknowledgeGenerationQueue, recordGenerationCanary, getGenerationCanary, getGenerationJob, resumeGenerationCanaryIfPolicyChanged } from './generation-job';
 import { originalQueueBlockerReason } from './original-queue-blocker';
 import { recordEmptyQueueRun } from './generation-efficiency';
 import { dispatchOriginalPost,reconcileOriginalPostDispatch,OriginalDispatchPendingError } from './original-post-dispatch';
@@ -2922,6 +2922,10 @@ export async function refillQueue(
   try {
     const workerSettings = await getProtocolSettings(agent.id);
     if (durableGenerationEnabled(agent.id,workerSettings) && !options.generationWorker) return 0;
+    if (durableGenerationEnabled(agent.id,workerSettings) && options.generationWorker) {
+      const resumed = await resumeGenerationCanaryIfPolicyChanged(agent.id).catch(() => null);
+      if (resumed?.resumedFromPolicy && resumed.status === 'active') console.info('[canary] resumed after policy change', JSON.stringify({ agentId: agent.id, from: resumed.resumedFromPolicy }));
+    }
     if (durableGenerationEnabled(agent.id,workerSettings) && (await getGenerationCanary(agent.id))?.status==='blocked') return 0;
     const entitlement = await assertAgentAutomationEntitlement(agent.id, { agent });
     let refillCount = Math.min(2, Math.max(0, count));
