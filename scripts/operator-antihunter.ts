@@ -1,5 +1,6 @@
 /** Trusted local adapter: shared Clawfable storage, writer, learning and budgets. */
 import fs from 'node:fs';
+import { reconcileInvalidRequest } from '../lib/antihunter-rejection-reconciliation';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -38,6 +39,13 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
   const ownerId = await getAgentOwnerId(AGENT_ID);
   const user = ownerId ? await getUser(String(ownerId)) : null;
   if (!user || String(user.id) !== X_USER_ID) throw new Error('Verified Anti Hunter ownership required.');
+  if (command === 'reconcile-invalid-request') {
+    const id = arg('--tweet-id');
+    const tweet = id ? await getTweet(id, { fresh: true }) : null;
+    if (!tweet) throw new Error('Existing --tweet-id required');
+    const [signals, log] = await Promise.all([getLearningSignals(AGENT_ID, 250), getPostLog(AGENT_ID, 250)]);
+    return mutateOperatorGrowth(state => reconcileInvalidRequest(state, tweet, signals, log));
+  }
   if (command === 'campaign') return registerCampaign(readFileInput().input);
   if (command === 'contribution') return recordContribution(readFileInput().input);
   if (command === 'surge') return recordSurge(readFileInput().input);
@@ -98,6 +106,7 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
     // reservation. The atomic dispatch claim below still rechecks for races.
     if (!(candidate.status === 'posted' && candidate.xTweetId)) {
       const [tweets, growth] = await Promise.all([getTweets(AGENT_ID), getOperatorGrowth()]);
+      if (growth.dispatches[candidate.id]?.rejectionResolution?.retryAllowed === false) throw new Error('Reconciled rejected draft remains held; no retry authorized.');
       if (candidate.type === 'reply') {
         const reply = reviewedOperatorReply(candidate);
         assertOperatorReplyPolicy(growth, reply.targetAuthorId);
@@ -230,6 +239,7 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
     await reserveVerification(id);
     const fingerprint = dispatchFingerprint(tweet);
     await mutateOperatorGrowth(state => {
+      if (state.dispatches[id]?.rejectionResolution?.retryAllowed === false) throw new Error('Reconciled rejected draft remains held; no retry authorized.');
       if (state.dispatches[id] && !(state.dispatches[id].state === 'rejected' && args.includes('--retry-rejected'))) throw new Error('Existing dispatch receipt: reconcile it before any retry.');
       assertOperatorCadence(tweets, state);
       if (reply) {

@@ -88,6 +88,7 @@ export interface DispatchReceipt {
   state: 'pending' | 'posted' | 'uncertain' | 'reconciled' | 'rejected'; at: string; fingerprint: string;
   xTweetId?: string; verifiedAt?: string; result?: { status: number; persistenceWarning?: string };
   type?: 'original' | 'reply';
+  rejectionResolution?: { at: string; signalId: string; signalSha256: string; providerStatus: 400; retryAllowed: false };
   targetTweetId?: string;
   targetAuthorId?: string;
   conversationId?: string;
