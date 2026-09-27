@@ -1,3 +1,4 @@
+import { combineSiteAnalytics } from './movement-analytics';
 import type { OperatorXFailure } from './antihunter-x-diagnostics';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 
@@ -18,6 +19,7 @@ export interface CampaignMetadata {
   hypothesis: string;
   audience: string;
   landingPath: string;
+  landingOrigin?: 'https://antihunter.com' | 'https://aimaxxi.com';
   primaryMetric: string;
 }
 export interface ExperimentMetadata {
@@ -57,12 +59,13 @@ export interface OperatorSourceBrief {
   reply?: OperatorReplyContext;
 }
 export interface AnalyticsObservation {
+  site?: 'antihunter' | 'aimaxxi';
   day: string;
   observedAt: string;
   spendUsd: number;
   events: number;
   source: string;
-  campaigns?: Array<{ campaignId: string; episodeId: string; experience_view: number; experience_complete: number; share_intent: number; token_info_view: number }>;
+  campaigns?: Array<{ campaignId: string; episodeId: string; experience_view: number; experience_complete: number; share_intent: number; token_info_view: number; kit_download_intent?: number; submission_intent?: number }>;
   range?: { since: string; until: string };
   coverage?: { aggregateRead: 'available' | 'unavailable'; qaExcludedEvents: number; notes?: string };
   traffic?: {
@@ -97,6 +100,9 @@ export interface OperatorGrowthState {
   version: 1;
   campaigns: Record<string, CampaignMetadata & { registeredAt: string }>;
   analytics: Record<string, AnalyticsObservation>;
+  analyticsSites?: Record<string, Record<string, AnalyticsObservation>>;
+  analyticsRequiredSites?: Array<'antihunter' | 'aimaxxi'>;
+  movementContributions?: Record<string, MovementContribution>;
   /** Recorded control-policy projections, not server readback or client event coverage. */
   analyticsControlHistory?: AnalyticsControlObservation[];
   surges: Record<string, SurgeDecision>;
@@ -137,7 +143,9 @@ export function validateCampaign(value: unknown): CampaignMetadata {
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(input[field])) throw new Error(`Invalid ${field}`);
   }
   if (typeof input.landingPath !== 'string' || !/^\/[a-z0-9/_-]*$/.test(input.landingPath) || input.landingPath.startsWith('//')) throw new Error('Invalid landingPath');
+  if (input.landingOrigin !== undefined && !['https://antihunter.com', 'https://aimaxxi.com'].includes(input.landingOrigin)) throw new Error('Invalid landingOrigin');
   return { campaignId: input.campaignId, episodeId: input.episodeId, landingPath: input.landingPath,
+    ...(input.landingOrigin ? { landingOrigin: input.landingOrigin } : {}),
     hypothesis: requiredString(input.hypothesis, 'hypothesis'), audience: requiredString(input.audience, 'audience', 300),
     primaryMetric: requiredString(input.primaryMetric, 'primaryMetric', 100) };
 }
@@ -166,7 +174,7 @@ export async function registerCampaign(value: unknown) {
   return mutateOperatorGrowth(state => {
     const key = `${campaign.campaignId}:${campaign.episodeId}`;
     const prior = state.campaigns[key];
-    if (prior && (Object.keys(campaign) as Array<keyof CampaignMetadata>).some(key => prior[key] !== campaign[key])) throw new Error('Campaign episode is immutable; choose a new episode ID');
+    if (prior && (Object.keys(campaign) as Array<keyof CampaignMetadata>).some(key => (key === 'landingOrigin' ? (prior[key] || 'https://antihunter.com') !== (campaign[key] || 'https://antihunter.com') : prior[key] !== campaign[key]))) throw new Error('Campaign episode is immutable; choose a new episode ID');
     return state.campaigns[key] ||= { ...campaign, registeredAt: new Date().toISOString() };
   });
 }
@@ -194,7 +202,7 @@ export function budgetPolicy(state: OperatorGrowthState, now = new Date()) {
   const day = pacificDay(now);
   const surge = state.surges[day];
   const allocation = surge ? SURGE_ALLOCATION : NORMAL_ALLOCATION;
-  const analytics = state.analytics[day] || null;
+  const analytics = combinedAnalytics(state, now);
   // Analytics is a monitored estimate, not an invoice cap. Known excess uses
   // contingency first, then reduces discretionary AI admission.
   const analyticsExcess = Math.max(0, (analytics?.spendUsd || 0) - allocation.analytics - allocation.reserve);
@@ -217,13 +225,15 @@ export function validateAnalytics(value: unknown, now = new Date()): AnalyticsOb
   const checked = Date.parse(input.observedAt);
   if (!Number.isFinite(checked) || checked > now.getTime() + 60_000 || pacificDay(new Date(checked)) < input.day) throw new Error('Invalid observedAt');
   for (const key of ['spendUsd', 'events'] as const) if (!Number.isFinite(input[key]) || input[key] < 0 || (key === 'events' && !Number.isInteger(input[key]))) throw new Error(`Invalid ${key}`);
+  if (input.site !== undefined && !['antihunter', 'aimaxxi'].includes(input.site)) throw new Error('Invalid analytics site');
   const source = requiredString(input.source, 'source', 300);
   const campaigns = input.campaigns?.map(row => {
     for (const id of [row.campaignId, row.episodeId]) if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)) throw new Error('Invalid analytics campaign identifier');
     for (const field of ['experience_view', 'experience_complete', 'share_intent', 'token_info_view'] as const) {
       if (!Number.isInteger(row[field]) || row[field] < 0) throw new Error(`Invalid ${field}`);
     }
-    return { campaignId: row.campaignId, episodeId: row.episodeId, experience_view: row.experience_view,
+    for (const field of ['kit_download_intent', 'submission_intent'] as const) if (row[field] !== undefined && (!Number.isSafeInteger(row[field]) || row[field]! < 0)) throw new Error('Invalid intent count');
+    return { ...(row.kit_download_intent !== undefined ? { kit_download_intent: row.kit_download_intent } : {}), ...(row.submission_intent !== undefined ? { submission_intent: row.submission_intent } : {}), campaignId: row.campaignId, episodeId: row.episodeId, experience_view: row.experience_view,
       experience_complete: row.experience_complete, share_intent: row.share_intent, token_info_view: row.token_info_view };
   });
   let range: AnalyticsObservation['range'];
@@ -263,7 +273,7 @@ export function validateAnalytics(value: unknown, now = new Date()): AnalyticsOb
     if ((availability.landingPaths === 'unavailable' && traffic.landingPaths.length)
       || (availability.referrers === 'unavailable' && traffic.referrers.length)) throw new Error('Unavailable traffic must not contain counts');
   }
-  return { day: input.day, observedAt: new Date(checked).toISOString(), spendUsd: input.spendUsd, events: input.events, source,
+  return { ...(input.site ? { site: input.site } : {}), day: input.day, observedAt: new Date(checked).toISOString(), spendUsd: input.spendUsd, events: input.events, source,
     ...(campaigns ? { campaigns } : {}), ...(range ? { range } : {}), ...(coverage ? { coverage } : {}), ...(traffic ? { traffic } : {}) };
 }
 function analyticsDayBounds(day: string) {
@@ -286,9 +296,11 @@ export function recentAnalyticsDays(now = new Date()): string[] {
   // Calendar arithmetic rather than elapsed 24h handles both DST boundaries.
   return [0, 1, 2].map(offset => new Date(Date.parse(`${day}T12:00:00Z`) - offset * 86_400_000).toISOString().slice(0, 10));
 }
-export function getAnalyticsState(state: OperatorGrowthState, now = new Date()) {
+export function getAnalyticsState(state: OperatorGrowthState, now = new Date(), site = 'antihunter') {
+  if (!['antihunter','aimaxxi'].includes(site)) throw new Error('Invalid analytics site');
+  const observations = site === 'antihunter' ? state.analytics : state.analyticsSites?.[site] || {};
   const days = recentAnalyticsDays(now);
-  return { currentDay: days[0], days: Object.fromEntries(days.map(day => [day, state.analytics[day] || null])),
+  return { currentDay: days[0], days: Object.fromEntries(days.map(day => [day, observations[day] || null])),
     controlHistory: (state.analyticsControlHistory || []).filter(row => days.includes(row.day)),
     controlHistoryMeaning: 'Recorded control-policy projections only, not server readback or client delivery; gaps are not zero events.' };
 }
@@ -298,10 +310,13 @@ export async function recordAnalytics(value: unknown, now = new Date()) {
   // control compatible: its prior successful observation expires naturally.
   if (observation.coverage?.aggregateRead === 'unavailable') throw new Error('Unavailable aggregates cannot refresh analytics observations');
   return mutateOperatorGrowth(state => {
-    const prior = state.analytics[observation.day];
+    const site = observation.site || 'antihunter';
+    state.analyticsSites ||= {};
+    const observations = site === 'antihunter' ? state.analytics : (state.analyticsSites[site] ||= {});
+    const prior = observations[observation.day];
     // Do not erase an already observed cost on a late/corrected provider report.
     const latest = prior && Date.parse(prior.observedAt) >= Date.parse(observation.observedAt) ? prior : observation;
-    state.analytics[observation.day] = { ...latest, spendUsd: Math.max(prior?.spendUsd || 0, observation.spendUsd) };
+    observations[observation.day] = { ...latest, spendUsd: Math.max(prior?.spendUsd || 0, observation.spendUsd) };
     if (observation.day === pacificDay(now)) {
       const control = analyticsControl(state, now);
       const item = { ...control, at: now.toISOString() };
@@ -310,12 +325,12 @@ export async function recordAnalytics(value: unknown, now = new Date()) {
       if (!previous || JSON.stringify(previous) !== JSON.stringify(item)) state.analyticsControlHistory.push(item);
       state.analyticsControlHistory = state.analyticsControlHistory.slice(-5000);
     }
-    return state.analytics[observation.day];
+    return observations[observation.day];
   });
 }
 export function analyticsControl(state: OperatorGrowthState, now = new Date()) {
   const day = pacificDay(now);
-  const observation = state.analytics[day];
+  const observation = combinedAnalytics(state, now);
   const expiry = observation ? Date.parse(observation.observedAt) + 90 * 60_000 : now.getTime();
   const valid = observation && expiry > now.getTime() && Date.parse(observation.observedAt) <= now.getTime() + 60_000;
   return { day, sampleRate: !valid || observation.spendUsd >= 0.8 ? 0 : observation.spendUsd >= 0.5 ? 0.1 : 1,
@@ -346,5 +361,39 @@ export async function recordContribution(input: NonNullable<OperatorGrowthState[
     const prior = state.contributions[input.xPostId];
     if (prior && JSON.stringify(prior) !== JSON.stringify(contribution)) throw new Error('Contribution receipt already exists; no double counting');
     return state.contributions[input.xPostId] ||= contribution;
+  });
+}
+
+/** Combined accounting only; source observations remain separate and unmodified. */
+export function combinedAnalytics(state: OperatorGrowthState, now = new Date()): AnalyticsObservation | null {
+  return combineSiteAnalytics(pacificDay(now),state.analytics,state.analyticsSites,state.analyticsRequiredSites);
+}
+export interface MovementContribution {
+  campaignId: string; episodeId: string; sourceType: 'x' | 'github'; sourceId: string; authorId: string;
+  sourceUrl: string; artifactUrl: string; track: 'build' | 'imagine'; assessment: string;
+  permission: 'link-only' | 'feature-approved'; observedAt: string;
+}
+export function validateMovementContribution(input: MovementContribution): MovementContribution {
+  validateCampaign({campaignId: input.campaignId, episodeId: input.episodeId, landingPath: '/', hypothesis: 'receipt', audience: 'public', primaryMetric: 'contributions'});
+  if (!['x','github'].includes(input.sourceType) || !['build','imagine'].includes(input.track) || !['link-only','feature-approved'].includes(input.permission)) throw new Error('Invalid contribution classification');
+  if (!/^\d+$/.test(input.sourceId) || !/^\d+$/.test(input.authorId)) throw new Error('Numeric source and author identity required');
+  const source = new URL(input.sourceUrl), artifact = new URL(input.artifactUrl);
+  const validSource = input.sourceType === 'github' ? source.hostname === 'github.com' && source.pathname === `/geoffreywoo/aimaxxi/issues/${input.sourceId}` : ['x.com','twitter.com'].includes(source.hostname) && new RegExp(`/status/${input.sourceId}$`).test(source.pathname);
+  if (!validSource || source.protocol !== 'https:' || source.search || source.hash || source.username || source.password || artifact.protocol !== 'https:' || artifact.username || artifact.password) throw new Error('Invalid contribution source or artifact');
+  if (!Number.isFinite(Date.parse(input.observedAt)) || Date.parse(input.observedAt) > Date.now()+60000) throw new Error('Invalid contribution observation');
+  artifact.hash = ''; for (const key of [...artifact.searchParams.keys()]) if (key.startsWith('utm_') || key === 's') artifact.searchParams.delete(key);
+  return {...input, sourceUrl: source.href, artifactUrl: artifact.href, assessment: requiredString(input.assessment,'assessment'), observedAt: new Date(input.observedAt).toISOString()};
+}
+export async function recordMovementContribution(input: MovementContribution) {
+  const receipt = validateMovementContribution(input);
+  return mutateOperatorGrowth(state => {
+    if (!state.campaigns[`${receipt.campaignId}:${receipt.episodeId}`]) throw new Error('Register campaign first');
+    state.movementContributions ||= {};
+    const existing = Object.values(state.movementContributions).find(row => row.campaignId === receipt.campaignId && row.episodeId === receipt.episodeId && row.artifactUrl === receipt.artifactUrl);
+    if (existing) return {duplicate: true, receipt: existing};
+    const key = `${receipt.campaignId}:${receipt.episodeId}:${receipt.sourceType}:${receipt.sourceId}`;
+    if (state.movementContributions[key]) throw new Error('Source already recorded; review existing receipt');
+    state.movementContributions[key] = receipt;
+    return {duplicate: false, receipt};
   });
 }

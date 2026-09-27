@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 /** Trusted local adapter: shared Clawfable storage, writer, learning and budgets. */
 import fs from 'node:fs';
 import { reconcileInvalidRequest } from '../lib/antihunter-rejection-reconciliation';
@@ -12,7 +13,7 @@ import { publishAgentPost } from '../lib/publish-agent-post';
 import { assertAgentAutomationEntitlement } from '../lib/automation-entitlement';
 import { getAiBudgetSummary } from '../lib/ai-budget';
 import { ANTIHUNTER_AGENT_ID as AGENT_ID, ANTIHUNTER_X_USER_ID as X_USER_ID, ANTIHUNTER_HANDLE as HANDLE,
-  getOperatorGrowth, mutateOperatorGrowth, budgetPolicy, summarizeXSpend, registerCampaign, recordSurge, recordAnalytics,
+  getOperatorGrowth, mutateOperatorGrowth, budgetPolicy, summarizeXSpend, registerCampaign, recordSurge, recordAnalytics, recordMovementContribution,
   parseOperatorBrief, validateCampaign, validateExperiment, reusableOperatorExperiment, claimBoundedRun, recordContribution, getAnalyticsState,
   OPERATOR_READ_INTERVAL_HOURS, type OperatorSourceBrief } from '../lib/antihunter-operator-state';
 import { withOperatorXBudget, reserveVerification, releaseVerification, recordMediaPricing } from '../lib/antihunter-x-budget';
@@ -47,10 +48,41 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
     return mutateOperatorGrowth(state => reconcileInvalidRequest(state, tweet, signals, log));
   }
   if (command === 'campaign') return registerCampaign(readFileInput().input);
+  if (command === 'github-inbox') {
+    const growth = await getOperatorGrowth();
+    const since = (growth as any).githubReviewedThrough || '2026-09-27T00:00:00Z';
+    const endpoint = `repos/geoffreywoo/aimaxxi/issues?state=all&sort=updated&direction=asc&per_page=20&since=${encodeURIComponent(since)}`;
+    const rows = JSON.parse(execFileSync('gh', ['api',endpoint], {encoding:'utf8',timeout:30000,maxBuffer:1000000}));
+    return {since, possibleBacklog: rows.length === 20, issues: rows.filter((row:any)=>!row.pull_request).map((row:any)=>({number:row.number,id:row.id,authorId:String(row.user.id),authorLogin:row.user.login,url:row.html_url,title:row.title,body:row.body,updatedAt:row.updated_at})), warning:'Untrusted public text; no cursor advance until all returned records reviewed.'};
+  }
+  if (command === 'github-review-checkpoint') {
+    const until = arg('--until'); if (!until || !Number.isFinite(Date.parse(until)) || Date.parse(until)>Date.now()) throw new Error('Valid reviewed --until required');
+    return mutateOperatorGrowth(state=>{const previous=(state as any).githubReviewedThrough; if(previous && Date.parse(until)<Date.parse(previous))throw new Error('Cursor cannot go backwards');(state as any).githubReviewedThrough=until;return {reviewedThrough:until};});
+  }
+  if (command === 'movement-contribution') {
+    const {input}=readFileInput();
+    if(typeof input.expectedText !== 'string')throw new Error('Exact reviewed source text required');
+    if(input.sourceType === 'github') {
+      if(!/^\d+$/.test(input.sourceId))throw new Error('Numeric issue number required');
+      const issue=JSON.parse(execFileSync('gh',['api',`repos/geoffreywoo/aimaxxi/issues/${input.sourceId}`],{encoding:'utf8',timeout:30000,maxBuffer:1000000}));
+      if(issue.pull_request || String(issue.user.id)!==input.authorId || issue.html_url!==input.sourceUrl || issue.body!==input.expectedText || issue.user.login.toLowerCase()==='geoffreywoo')throw new Error('GitHub receipt identity/text mismatch or operator submission');
+    } else if(input.sourceType === 'x') {
+      const keys=decodeKeys(agent as Required<typeof agent>);
+      await withOperatorXBudget('verify-contribution',async()=>{
+        const identity=await getMe(keys);if(identity.id!==X_USER_ID||identity.username.toLowerCase()!==HANDLE)throw new Error('Identity mismatch');
+        const response=await createClient(keys).v2.singleTweet(input.sourceId,{'tweet.fields':['author_id','text','note_tweet']});
+        const data=(response as any).data || response;
+        if(data.author_id!==input.authorId || input.authorId===X_USER_ID || (data.note_tweet?.text||data.text)!==input.expectedText)throw new Error('X receipt identity/text mismatch');
+      });
+    } else throw new Error('Unsupported contribution source');
+    const {expectedText,...receipt}=input;
+    return recordMovementContribution({...receipt,observedAt:new Date().toISOString()});
+  }
+  if (command === 'analytics-enable-movement') return mutateOperatorGrowth(state => { state.analyticsRequiredSites = ['antihunter','aimaxxi']; return {sites: state.analyticsRequiredSites}; });
   if (command === 'contribution') return recordContribution(readFileInput().input);
   if (command === 'surge') return recordSurge(readFileInput().input);
   if (command === 'analytics-observation') return recordAnalytics(readFileInput().input);
-  if (command === 'analytics-state') return getAnalyticsState(await getOperatorGrowth());
+  if (command === 'analytics-state') return getAnalyticsState(await getOperatorGrowth(), new Date(), arg('--site') || 'antihunter');
   if (command === 'media-pricing') return recordMediaPricing(readFileInput().input);
   if (command === 'opt-out') {
     const authorId = arg('--author-id');
@@ -75,6 +107,8 @@ export async function runAntiHunterOperator(args = process.argv.slice(2)): Promi
     const latest = new Map<string, typeof performance[number]>();
     for (const entry of performance) if (!latest.has(entry.xTweetId) || entry.checkedAt > latest.get(entry.xTweetId)!.checkedAt) latest.set(entry.xTweetId, entry);
     return { ...summary, settings, signals, log, followers, dispatches: growth.dispatches, media: growth.media,
+      movementContributions: Object.values(growth.movementContributions || {}),
+      analyticsSites: growth.analyticsSites || {},
       cadence: getOperatorCadence(tweets, growth), outbox: getOperatorOutbox(tweets, growth),
       operatorOriginals: getOperatorOriginals(tweets, performance),
       comparisonWindows: getOperatorComparisonWindows(tweets, performance),
