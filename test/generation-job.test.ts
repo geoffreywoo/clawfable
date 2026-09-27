@@ -108,17 +108,25 @@ it('counts an editorial empty attempt once even when reserve work remains',async
 });
 
 describe('generation canary recovery',()=>{
- it('stays blocked for unchanged code and resumes once for a shipped policy change',async()=>{
-  const { recordGenerationCanary,getGenerationCanary,resumeGenerationCanaryIfPolicyChanged,canaryPolicyKey } = await import('@/lib/generation-job');
+ it('requires evaluation evidence, preserves history and cannot reuse a recovery receipt',async()=>{
+  const { recordGenerationCanary,getGenerationCanary,resumeGenerationCanaryWithEvidence,canaryPolicyKey } = await import('@/lib/generation-job');
   const { mutateAiOperationalState } = await import('@/lib/kv-storage');
   const id='canary-resume-'+Date.now();
   await mutateAiOperationalState<any,void>(id,'generation-canary',()=>({value:{id:'c1',limitUsd:5,emptyRuns:0,queuedIds:[],status:'active'},result:undefined}));
   for (const attemptId of ['a','b','c']) await recordGenerationCanary(id,{empty:true,attemptId});
   expect(await getGenerationCanary(id)).toMatchObject({status:'blocked',blockedPolicy:canaryPolicyKey()});
-  expect((await resumeGenerationCanaryIfPolicyChanged(id))?.status).toBe('blocked');
-  const resumed=await resumeGenerationCanaryIfPolicyChanged(id,'next-policy');
-  expect(resumed).toMatchObject({status:'active',emptyRuns:0,emptyAttemptIds:[],limitUsd:5,resumedFromPolicy:canaryPolicyKey()});
+  await expect(resumeGenerationCanaryWithEvidence(id,undefined as any)).rejects.toThrow('canary_recovery_evidence_required');
+  const evidence={id:'offline-fix-1',policy:canaryPolicyKey(),evidenceRef:'private-evaluation.json',evidenceHash:'a'.repeat(64)};
+  await expect(resumeGenerationCanaryWithEvidence(id,{...evidence,policy:'different-policy'})).rejects.toThrow('canary_recovery_evidence_required');
+  expect((await getGenerationCanary(id))?.status).toBe('blocked');
+  const resumed=await resumeGenerationCanaryWithEvidence(id,evidence);
+  expect(resumed).toMatchObject({id:'c1',status:'active',emptyRuns:0,emptyAttemptIds:['a','b','c'],limitUsd:5,resumedFromPolicy:canaryPolicyKey()});
+  expect(resumed?.recoveries?.[0]).toMatchObject({...evidence,previousEmptyRuns:3,previousEmptyAttemptIds:['a','b','c']});
+  await recordGenerationCanary(id,{empty:true,attemptId:'a'});
+  expect((await getGenerationCanary(id))?.emptyRuns).toBe(0);
   for (const attemptId of ['d','e','f']) await recordGenerationCanary(id,{empty:true,attemptId});
   expect((await getGenerationCanary(id))?.status).toBe('blocked');
+  expect((await resumeGenerationCanaryWithEvidence(id,evidence))?.status).toBe('blocked');
+  expect((await resumeGenerationCanaryWithEvidence(id,{...evidence,id:'renamed-same-evidence'}))?.status).toBe('blocked');
  });
 });

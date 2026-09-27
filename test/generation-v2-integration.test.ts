@@ -416,6 +416,38 @@ describe('generateTweetBatchV2 integration', () => {
     expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-8')).toBe(true);
   });
 
+  it('uses one checkpointed repair for a missing verified tag while retaining final judgment', async () => {
+    mocks.getStoryClusters.mockResolvedValue([]);
+    mocks.getSourceDocuments.mockResolvedValue([]);
+    const original="i think cognition can help teams build products they couldn't justify staffing. i'd rather see that than the same roadmap with fewer engineers.";
+    const repaired="i think @cognition can help teams build products they couldn't justify staffing. i'd rather see that than the same roadmap with fewer engineers.";
+    mocks.generateText.mockImplementation(async (options:any) => {
+      const packet=JSON.parse(options.prompt);
+      if(options.task==='idea_generation') return result(JSON.stringify({ideas:[{briefId:packet.subjects[0].id,publicMove:original,contentMode:'opinion',evidenceIds:[],factualRisk:'low'}]}));
+      if(options.task==='idea_judgment') return rankingResponse(options.prompt,'ideas');
+      if(options.task==='tweet_writing') return result(JSON.stringify({drafts:[{content:packet.failedAttempts?.length ? repaired : original,format:'observation',posture:'opinion'}]}));
+      if(options.task==='copy_judgment') throw new Error('judge temporarily unavailable');
+      throw new Error(`Unexpected task ${options.task}`);
+    });
+    const durableInput={...input,agentId:'13',count:1,requestedTopic:'Cognition',
+      voiceProfile:{...input.voiceProfile,topics:['Cognition']},analysis:{...input.analysis,engagementPatterns:{topTopics:['Cognition']}},
+      durableGeneration:true,modelStack:'publishing_v2_astra' as const,generationPolicy:'budget_v1' as const};
+    await generateTweetBatchV2(durableInput);
+    const writers=mocks.generateText.mock.calls.map(([o])=>o).filter(o=>o.task==='tweet_writing');
+    const repairs=writers.filter(o=>JSON.parse(o.prompt).failedAttempts?.length);
+    expect(writers,JSON.stringify(mocks.saveGenerationRun.mock.calls.at(-1)?.[1])).toHaveLength(2);
+    expect(repairs).toHaveLength(1);
+    expect(JSON.parse(repairs[0].prompt).verifiedEntityMentionPolicy.available).toEqual(expect.arrayContaining([expect.objectContaining({handle:'@cognition'})]));
+    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='copy_judgment'),JSON.stringify(mocks.saveGenerationRun.mock.calls.at(-1)?.[1])).toHaveLength(1);
+    const saved=mocks.durableState.get('generation-job');
+    expect(Object.keys(saved.checkpoints).filter(k=>k.startsWith('repair:'))).toHaveLength(1);
+    expect(saved.status).toBe('deferred');
+    mocks.durableState.set('generation-job',{...saved,nextAttemptAt:0,owner:null,leaseUntil:0});
+    await generateTweetBatchV2(durableInput);
+    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='tweet_writing')).toHaveLength(2);
+    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='copy_judgment')).toHaveLength(2);
+  });
+
   it('compares three ideas in one call and funds one variant-set writer per brief', async () => {
     const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date('2026-08-02T02:00:00Z') });
     let trace: any;

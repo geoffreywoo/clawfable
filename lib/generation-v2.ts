@@ -7069,19 +7069,19 @@ const V2_PREFLIGHT_REWRITEABLE_RESCUE_CODES = new Set([
   'final_quality_margin',
 ]);
 
-const DURABLE_EXPRESSION_REPAIR_CODES = new Set(['generated_writing_pattern','final_native_voice_below_floor','final_casual_startup_below_floor','final_cringe_risk','final_stiffness_risk','final_generated_pattern_risk','final_voice_drift','final_technical_credibility_below_floor']);
+const DURABLE_EXPRESSION_REPAIR_CODES = new Set(['missing_verified_entity_tag','generated_writing_pattern','final_native_voice_below_floor','final_casual_startup_below_floor','final_cringe_risk','final_stiffness_risk','final_generated_pattern_risk','final_voice_drift','final_technical_credibility_below_floor']);
 export function canRepairDurableExpression(idea:IdeaCandidate,draft:DraftCandidate):boolean {
   return (idea.judgeBreakdown?.evidenceFidelity || 0)>=0.8
     && draft.rejectionCodes.length>0 && draft.rejectionCodes.every(code=>DURABLE_EXPRESSION_REPAIR_CODES.has(code));
 }
 
-function preflightRescueTargetsV2(evaluations: DraftEvaluation[], limit: number): DraftEvaluation[] {
+function preflightRescueTargetsV2(evaluations: DraftEvaluation[], limit: number, durable = false): DraftEvaluation[] {
   const ranked = evaluations
     .filter((entry) => (
       entry.draft.status === 'rejected'
       && entry.draft.judgeScore == null
       && entry.draft.rejectionCodes.length > 0
-      && entry.draft.rejectionCodes.every((code) => V2_PREFLIGHT_REWRITEABLE_RESCUE_CODES.has(code))
+      && entry.draft.rejectionCodes.every((code) => V2_PREFLIGHT_REWRITEABLE_RESCUE_CODES.has(code) || (durable && code === 'missing_verified_entity_tag'))
     ))
     .sort((left, right) => (
       left.draft.rejectionCodes.length - right.draft.rejectionCodes.length
@@ -7421,7 +7421,15 @@ async function generateRescueDraftEvaluations({
           input,
           blocks,
         });
-        if (usesEfficientGeneration(input) && !preservesRepairDecision(draft.content, target.draft.repairDecision)) {
+        // Preflight repairs precede the critic and therefore have no critic
+        // span contract. They still pass preflight and final judgment. When
+        // a critic contract exists, preserve and enforce it on the child.
+        const deterministicRepair = Boolean(input.jobSession)
+          && target.draft.judgeScore == null
+          && !target.draft.repairDecision
+          && canRepairDurableExpression(target.idea,target.draft);
+        if (target.draft.repairDecision) draft.repairDecision=target.draft.repairDecision;
+        if (usesEfficientGeneration(input) && !deterministicRepair && !preservesRepairDecision(draft.content, target.draft.repairDecision)) {
           evaluation.draft.status = 'rejected';
           evaluation.draft.rejectionCodes = uniqueStrings([...evaluation.draft.rejectionCodes, 'repair_changed_preserved_span']);
         }
@@ -7947,6 +7955,7 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
       const preflightCandidates = preflightRescueTargetsV2(
         evaluations.filter((entry) => !eligibleIdeaIds.has(entry.idea.id)),
         input.count - Math.min(input.count, eligibleIdeaIds.size),
+        Boolean(input.jobSession),
       );
       const targets = input.jobSession ? preflightCandidates.filter(entry=>canRepairDurableExpression(entry.idea,entry.draft)).slice(0,1)
         : isGeoffreyVoiceProfile(input.voiceProfile) || usesEfficientGeneration(input) ? [] : preflightCandidates;

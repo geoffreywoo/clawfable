@@ -48,6 +48,8 @@ it('excludes operational feedback paired with a model rejection while keeping ow
 it('repairs expression only when the premise is sound, never factual or duplicate failures',()=>{
  const idea={judgeBreakdown:{evidenceFidelity:.95}} as any;
  expect(canRepairDurableExpression(idea,{rejectionCodes:['final_technical_credibility_below_floor']} as any)).toBe(true);
+ expect(canRepairDurableExpression(idea,{rejectionCodes:['missing_verified_entity_tag']} as any)).toBe(true);
+ expect(canRepairDurableExpression(idea,{rejectionCodes:['missing_verified_entity_tag','claim_evidence']} as any)).toBe(false);
  expect(canRepairDurableExpression(idea,{rejectionCodes:['claim_evidence']} as any)).toBe(false);
  expect(canRepairDurableExpression(idea,{rejectionCodes:['recent_copy_duplicate']} as any)).toBe(false);
  expect(canRepairDurableExpression({judgeBreakdown:{evidenceFidelity:.4}} as any,{rejectionCodes:['final_stiffness_risk']} as any)).toBe(false);

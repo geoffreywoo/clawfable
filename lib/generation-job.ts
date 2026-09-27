@@ -110,17 +110,31 @@ export async function acknowledgeGenerationQueue(agentId: string, runId: string,
   });
 }
 
-export interface GenerationCanary { id:string; limitUsd:number; emptyRuns:number; emptyAttemptIds?:string[]; queuedIds:string[]; status:'active'|'passed'|'blocked'; blockedPolicy?:string; resumedFromPolicy?:string; }
-/** Code-level generation policy. Bumping EFFICIENT_GENERATION_POLICY marks a shipped fix. */
+export interface CanaryRecoveryEvidence {
+  id: string;
+  policy: string;
+  evidenceRef: string;
+  evidenceHash: string;
+}
+export interface GenerationCanary { id:string; limitUsd:number; emptyRuns:number; emptyAttemptIds?:string[]; queuedIds:string[]; status:'active'|'passed'|'blocked'; blockedPolicy?:string; resumedFromPolicy?:string;
+  recoveries?: Array<CanaryRecoveryEvidence & { resumedAt:string; previousEmptyRuns:number; previousEmptyAttemptIds:string[]; previousPolicy:string }>;
+}
+/** Identifies code; a version change alone is not evidence that a blocker is fixed. */
 export const canaryPolicyKey = () => `${GENERATION_JOB_VERSION}:${EFFICIENT_GENERATION_POLICY}`;
 /**
- * A blocked canary must not retry unchanged code, but a shipped generation fix
- * deserves its own bounded canary (same dollar limit, same three-empty rule).
+ * Called explicitly after reviewing the referenced offline evaluation. Worker
+ * ticks never authorize recovery merely because a deployment changed policy.
+ * Keep campaign spending and all attempt identities across recovery windows.
  */
-export async function resumeGenerationCanaryIfPolicyChanged(agentId:string, policy = canaryPolicyKey()): Promise<GenerationCanary | null> {
+export async function resumeGenerationCanaryWithEvidence(agentId:string, evidence:CanaryRecoveryEvidence): Promise<GenerationCanary | null> {
+  if (!evidence?.id?.trim() || evidence.policy !== canaryPolicyKey() || !evidence.evidenceRef?.trim() || !/^[a-f0-9]{64}$/i.test(evidence.evidenceHash || '')) {
+    throw new Error('canary_recovery_evidence_required');
+  }
   return mutateAiOperationalState<GenerationCanary,GenerationCanary | null>(agentId,'generation-canary',state=>{
-    if (!state || state.status!=='blocked' || state.blockedPolicy===policy) return {value:state!,result:state || null,skip:true};
-    const value:GenerationCanary={...state,status:'active',emptyRuns:0,emptyAttemptIds:[],blockedPolicy:undefined,resumedFromPolicy:state.blockedPolicy || 'unrecorded'};
+    if (!state || state.status!=='blocked' || state.recoveries?.some(r=>r.id===evidence.id || r.evidenceHash===evidence.evidenceHash)) return {value:state!,result:state || null,skip:true};
+    const previousPolicy=state.blockedPolicy || 'unrecorded';
+    const recovery={...evidence,resumedAt:new Date().toISOString(),previousEmptyRuns:state.emptyRuns,previousEmptyAttemptIds:[...state.emptyAttemptIds || []],previousPolicy};
+    const value:GenerationCanary={...state,status:'active',emptyRuns:0,blockedPolicy:undefined,resumedFromPolicy:previousPolicy,recoveries:[...state.recoveries || [],recovery]};
     return {value,result:value};
   });
 }
