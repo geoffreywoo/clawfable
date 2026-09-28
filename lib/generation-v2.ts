@@ -5683,6 +5683,40 @@ function sourceEvidenceSupport(documents: SourceDocument[]): string[] {
 const ATTRIBUTED_SOURCE_CLAIM = /\b(?:author|founder|company|team|report|filing)\s+(?:says?|claims?|reports?|states?)\b|\baccording\s+to\b/i;
 const GENERIC_COPY_ATTRIBUTION = /\b(?:according\s+to|self[- ]reported|company[- ]reported|reported\s+by|(?:(?:the|its|their)\s+|[\p{L}\p{N}@._'-]+['’]s\s+)(?:author|founder|company|team|report|filing)\s+(?:says?|claims?|reports?|states?))\b/iu;
 const NAMED_COPY_ATTRIBUTION = /(?:^|[^\p{L}\p{N}@])(@?[\p{L}\p{N}][\p{L}\p{N}@._'-]{1,63})\s+(?:says?|claims?|reports?|states?)\b/giu;
+export const SOURCE_ATTRIBUTION_DETECTOR_VERSION = 'source-attribution-2';
+
+/** Recognize bounded attribution syntax for a primary-X publisher's own communication. */
+function hasAdjacentPublisherAttribution(content: string, documents: SourceDocument[]): boolean {
+  const publishers = new Set(documents.filter(document => document.sourceType === 'x' && document.isPrimary)
+    .map(document => document.publisher?.trim().toLowerCase()).filter(publisher => /^@[a-z0-9_]{1,15}$/.test(publisher || '')));
+  if (!publishers.size) return false;
+  for (const paragraph of content.split(/\n\s*\n/u)) {
+    // A decimal or a dot inside a name is not a sentence boundary.
+    const sentences = paragraph.trim().split(/(?<=[.!?])\s+/u);
+    for (let index = 1; index < sentences.length; index++) {
+      const previous = sentences[index - 1], reporting = sentences[index];
+      if (!/^it\s+(?:says|claims|reports|states)\s+(?!(?:nothing|little|no|not|whether|if)\b)\S/iu.test(reporting)
+        || reporting.includes('?') || !previous.endsWith('.') || /["“”]|['’]\.$/u.test(previous)
+        || /\b(?:if|suppose|imagine|hypothetical|might|may|could|would|should|not|never|quoted?|cited?|shared?|reposted?|retweeted?|forwarded?|competitor|analyst|reporter|another|subsidiary|and|while|but)\b|n['’]t\b/iu.test(previous)) continue;
+      const handles = [...new Set((previous.match(/@[a-z0-9_]+/giu) || []).map(handle => handle.toLowerCase()))];
+      if (handles.length !== 1 || !publishers.has(handles[0])) continue;
+      const publisher = handles[0];
+      // Bound the inference to the publisher's own communication. A company
+      // buying a subsidiary, or backing a startup, does not resolve "it".
+      const direct = new RegExp(`^${publisher}\\s+(?:posted|published|released)\\s+(?:an?|its|the)\\s+(?:update|post|announcement|report|statement)(?:\\s+(?:today|yesterday|tonight))?\\.$`, 'iu');
+      const reaction = new RegExp(`^(?:[\\p{L}]+\\s+){0,3}(?:move|call|decision)\\s+by\\s+${publisher}\\s+to\\s+[\\p{L}]+\\s+its\\s+(?:[\\p{L}]+\\s+){0,2}(?:update|post|announcement|report|statement)(?:\\s+(?:a|an)\\s+(?:[\\p{L}]+\\s+){0,2}(?:showcase|update|announcement|report|statement))?\\.$`, 'iu');
+      if (!direct.test(previous) && !reaction.test(previous)) continue;
+      const competingEntity = documents.flatMap(document => document.entities || []).some(entity => {
+        const name = entity.trim().replace(/^@/, '').toLowerCase();
+        if (name.length < 3 || name === publisher.slice(1)) return false;
+        const literal = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`(?:^|[^\\p{L}\\p{N}_])${literal}(?=$|[^\\p{L}\\p{N}_])`, 'iu').test(previous);
+      });
+      if (!competingEntity) return true;
+    }
+  }
+  return false;
+}
 
 function sourceAttributionTokens(documents: SourceDocument[]): Set<string> {
   const ignored = new Set(['author', 'company', 'founder', 'report', 'team', 'the']);
@@ -5706,6 +5740,7 @@ export function getSourceAttributionIssueV2(
     sourceTokens.has((match[1] || '').replace(/^@/, '').toLocaleLowerCase())
   ));
   if (namedAttribution) return null;
+  if (primaryClaimsRequireAttribution && hasAdjacentPublisherAttribution(content, documents)) return null;
   return 'Source attribution was dropped from an attributed or self-reported claim.';
 }
 
@@ -7642,7 +7677,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   const canary = await getGenerationCanary(input.agentId);
   if (canary?.status === 'blocked') return [];
   if (canary?.status === 'active') input = {...input,spendContext:{...input.spendContext,...aiSpendContext(input.agentId,'generation'),campaignId:canary.id,campaignLimitUsd:canary.limitUsd}};
-  const policy = jobFingerprint(['simple-original-1',ORIGINAL_EDITORIAL_CONTEXT_VERSION,ORIGINAL_PROMPT_VERSION,ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,input.voiceProfile,input.learnings?.voiceCorpus?.snapshotId]);
+  const policy = jobFingerprint(['simple-original-1',ORIGINAL_EDITORIAL_CONTEXT_VERSION,ORIGINAL_PROMPT_VERSION,ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,SOURCE_ATTRIBUTION_DETECTOR_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,input.voiceProfile,input.learnings?.voiceCorpus?.snapshotId]);
   const snapshot = JSON.parse(JSON.stringify({...input,onTrace:undefined,onArtifacts:undefined,jobSession:undefined,originalModelCall:undefined}));
   const job = await claimGenerationJob(input.agentId,snapshot,policy,Date.now(),current=>{
     const saved=current.input as GenerateTweetBatchV2Input;
