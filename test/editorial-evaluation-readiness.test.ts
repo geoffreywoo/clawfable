@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { inspectEditorialEvaluationReadiness, editorialReadinessInputHash, type EditorialReadinessEntry, type EditorialSafetyInput } from '@/lib/editorial-evaluation-readiness';
-import { freezeEditorialManifest, REQUIRED_EDITORIAL_SAFETY_CASES } from '@/lib/editorial-calibration';
+import { freezeEditorialManifest } from '@/lib/editorial-calibration';
 import { editorialHash, type EditorialContext } from '@/lib/editorial-contract';
 import { buildOriginalEditorialContext } from '@/lib/original-editorial-context';
 import type { EditorialReviewBundle } from '@/lib/editorial-review-bundle';
+import { getEditorialSafetyFixtures } from '@/lib/editorial-safety-fixtures';
 
 const now = Date.parse('2026-09-28T17:00:00Z');
 const baseline = { model: 'judge', promptVersion: 'prompt', policyVersion: 'policy' };
@@ -22,9 +23,7 @@ function fixture() {
     { id: 'human', content: 'a separate human example', group: 'human', label: 'approved', labelSource: 'owner_self_written' },
   ] }, new Date(now));
   const bundle: EditorialReviewBundle = { manifest, rows: [], safety: [] };
-  const safetyCases: EditorialSafetyInput[] = REQUIRED_EDITORIAL_SAFETY_CASES.map(caseName => ({ case: caseName, id: `safety:${caseName}`,
-    content: `Frozen safety example for ${caseName}`, contentHash: editorialHash(`Frozen safety example for ${caseName}`), context,
-    contextHash: editorialHash(context) }));
+  const safetyCases: EditorialSafetyInput[] = getEditorialSafetyFixtures().negativeCases;
   return { entry, entries: [entry], bundle, options: { now, safetyCases, activeBaseline: baseline } };
 }
 function quoted(value: ReturnType<typeof fixture>, remainingUsd = 2, maximumCommitmentUsd = 1) {

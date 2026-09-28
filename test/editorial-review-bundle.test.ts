@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { EDITORIAL_EVALUATOR_VERSION, compareEditorialReviewBundle, composeEditorialReviewBundle, validateEditorialSupplement, type EditorialHoldoutSupplement, type EditorialReviewBundle } from '@/lib/editorial-review-bundle';
 import { REQUIRED_EDITORIAL_SAFETY_CASES, type EditorialManifest, type FrozenOwnerReview } from '@/lib/editorial-calibration';
-import { CANDIDATE_EDITORIAL_VERSION, EDITORIAL_DIMENSIONS, editorialHash, type EditorialAssessment } from '@/lib/editorial-contract';
+import { CANDIDATE_EDITORIAL_VERSION, EDITORIAL_DIMENSIONS, editorialHash, editorialPrompt, type EditorialAssessment } from '@/lib/editorial-contract';
+import { getEditorialSafetyFixtures } from '@/lib/editorial-safety-fixtures';
 
 const baseline = { model: 'active-judge', promptVersion: 'frozen-prompt', policyVersion: 'frozen-policy' };
 const frozenAt = '2026-09-28T15:55:37.044Z';
@@ -43,6 +44,11 @@ function addScores(bundle: EditorialReviewBundle) {
     baseline: { ...baseline, accepted: false, rejectionCodes: ['final_quality_margin'] },
     candidate: assessment(example.label === 'approved' ? .9 : .2), deterministicBlockers: [], spendAttemptIds: ['original-receipt'] }));
   bundle.safety = REQUIRED_EDITORIAL_SAFETY_CASES.map(caseName => ({ case: caseName, candidateAccepted: false }));
+  const suite = getEditorialSafetyFixtures();
+  bundle.safetyEvaluations = suite.negativeCases.map(input => ({ id: input.id, suiteHash: suite.hash,
+    contentHash: input.contentHash, contextHash: input.contextHash, candidateVersion: suite.candidateVersion,
+    model: baseline.model, requestKey: editorialHash([editorialPrompt('final', input.context), [{ id: input.id, content: input.content }], baseline.model]), spendAttemptIds: [`receipt:${input.id}`],
+    assessment: { ...assessment(.9), hardBlockers: [input.case] } }));
   return bundle;
 }
 function resealSupplement(bundle: EditorialReviewBundle) {
@@ -176,10 +182,18 @@ describe('frozen editorial review bundle', () => {
     const input = addScores(fixture()); input.rows.pop();
     expect(compareEditorialReviewBundle(input).reason).toBe('incomplete_scoring');
     expect(compareEditorialReviewBundle(input, { ...baseline, policyVersion: 'changed' }).reason).toBe('active_policy_changed');
-    addScores(input); input.safety[0].candidateAccepted = true;
+    addScores(input); input.safetyEvaluations![0].assessment!.hardBlockers = [];
     expect(compareEditorialReviewBundle(input).eligibleForActivation).toBe(false);
     addScores(input); input.rows.find(r => r.id === 'supplement-5')!.candidate.editorialScore = 1;
     expect(compareEditorialReviewBundle(input).eligibleForActivation).toBe(false);
+  });
+
+  it('cannot activate from legacy hand-entered safety booleans without exact scored fixtures', () => {
+    const input = addScores(fixture()); delete input.safetyEvaluations;
+    const report = compareEditorialReviewBundle(input);
+    expect(report.eligibleForActivation).toBe(false);
+    expect(report.reason).toBe('factual_safety_unverified_or_regressed');
+    expect(report.safetyValidation.complete).toBe(false);
   });
 
   it('rejects string truthiness in supplied baseline and safety decisions', () => {

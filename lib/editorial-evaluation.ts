@@ -42,12 +42,16 @@ export async function evaluateEditorialVariants(input: { agentId: string; stage:
   variants: Array<{ id: string; content: string }>; model: string; spendContext: AiSpendContext }) {
   const spendContext = editorialEvaluationSpendContext(input.agentId, input.spendContext);
   const prompt = editorialPrompt(input.stage, input.context);
-  const key = editorialHash([prompt, input.variants, input.model]);
+  // Structural typing permits fixture metadata on variants. Keep answer keys
+  // out of both the request and its cache identity. Existing {id, content}
+  // requests keep their keys; previously contaminated requests are not reused.
+  const variants = input.variants.map(({ id, content }) => ({ id, content }));
+  const key = editorialHash([prompt, variants, input.model]);
   const cached = await cachedAiValue(input.agentId, 'editorial-candidate-evaluation', key, async () => {
     const result = await generateText({
       task: 'copy_judgment', modelChain: [{ provider: 'openai', model: input.model }], maxTokens: 2200, timeoutMs: 90000,
       spendContext: { ...spendContext, requestKey: key },
-      system: prompt.system, prompt: JSON.stringify({ context: prompt.context, candidates: input.variants }),
+      system: prompt.system, prompt: JSON.stringify({ context: prompt.context, candidates: variants }),
       jsonSchema: { type: 'object', additionalProperties: false, required: ['assessments'], properties: {
         assessments: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'assessment'],
           properties: { id: { type: 'string' }, assessment: EDITORIAL_ASSESSMENT_SCHEMA } } },
@@ -57,10 +61,10 @@ export async function evaluateEditorialVariants(input: { agentId: string; stage:
     let parsed: unknown;
     try { parsed = JSON.parse(result.text); } catch { parsed = null; }
     const rows = (parsed as { assessments?: Array<{ id: string; assessment: unknown }> })?.assessments;
-    const complete = Array.isArray(rows) && rows.length === input.variants.length
-      && input.variants.every(v => rows.filter(r => r.id === v.id).length === 1);
+    const complete = Array.isArray(rows) && rows.length === variants.length
+      && variants.every(v => rows.filter(r => r.id === v.id).length === 1);
     return { result, requestKey: key, contextHash: editorialHash(input.context), contractVersion: CANDIDATE_EDITORIAL_VERSION,
-      assessments: input.variants.map(v => ({ id: v.id, assessment: complete ? parseEditorialAssessment(rows.find(r => r.id === v.id)?.assessment) : null })) };
+      assessments: variants.map(v => ({ id: v.id, assessment: complete ? parseEditorialAssessment(rows.find(r => r.id === v.id)?.assessment) : null })) };
   });
   // Legacy cached responses may predate requestKey receipts. This identity is
   // derived from the exact same cache material, never from an unkeyed ledger row.

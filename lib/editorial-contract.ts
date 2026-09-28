@@ -38,7 +38,7 @@ export interface EditorialAssessment {
 export function parseEditorialAssessment(value: unknown): EditorialAssessment | null {
   const x = value as EditorialAssessment;
   const score = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
-  if (!x || !score(x.editorialScore) || !x.explanation?.trim() || !Array.isArray(x.hardBlockers)
+  if (!x || !score(x.editorialScore) || typeof x.explanation !== 'string' || !x.explanation.trim() || !Array.isArray(x.hardBlockers)
     || !x.hardBlockers.every(b => EDITORIAL_HARD_BLOCKERS.includes(b)) || !Array.isArray(x.diagnostics)
     || !x.diagnostics.every(d => typeof d === 'string')
     || !EDITORIAL_DIMENSIONS.every(d => score(x.dimensions?.[d]?.score) && typeof x.dimensions?.[d]?.explanation === 'string')) return null;

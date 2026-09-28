@@ -1,5 +1,6 @@
 import {beforeEach, expect, it, vi} from 'vitest';
-import {editorialHash} from '@/lib/editorial-contract';
+import {editorialHash, editorialPrompt} from '@/lib/editorial-contract';
+import {getEditorialSafetyFixtures} from '@/lib/editorial-safety-fixtures';
 const state=vi.hoisted(()=>({calls:[] as any[],baseline:[] as any[],store:new Map<string,any>(),manifest:null as any,pending:false,legacyCandidateCache:false,preparationBlocked:false}));
 vi.mock('@/lib/ai',()=>({getModelChainForTask:()=>[{provider:'openai',model:'test-judge'}],generateText:vi.fn(async (options:any)=>{
  state.calls.push(options);
@@ -46,6 +47,29 @@ it('preserves the campaign and caller run across writing and assessment, includi
  expect(state.calls).toHaveLength(2);
  for(const call of state.calls)expect(call.spendContext).toMatchObject(spendContext);
  expect(editorialEvaluationSpendContext('13',{...budget,runLimitUsd:10}).runLimitUsd).toBe(3);
+});
+it('projects safety variants before hashing and sending actual provider options, without leaking their answer key',async()=>{
+ const suite=getEditorialSafetyFixtures();
+ for(const fixture of suite.negativeCases){
+  const expectation=suite.expectations.find(row=>row.id===fixture.id)!;
+  const annotated={...fixture,...expectation}, before=structuredClone(annotated);
+  const clean={id:fixture.id,content:fixture.content};
+  const args={agentId:'13',stage:'final' as const,context:fixture.context,model:'test-judge',spendContext:budget};
+  const projected=await evaluateEditorialVariants({...args,variants:[annotated]});
+  const captured=state.calls.at(-1), payload=JSON.parse(captured.prompt);
+  expect(payload.candidates).toEqual([clean]);
+  expect(captured.prompt).not.toMatch(/"(?:case|expectedHardBlocker|pairedId|rationale|contentHash|contextHash)"/);
+  expect(captured.prompt).not.toContain(expectation.rationale);
+  expect(captured.prompt).not.toContain(fixture.case);
+  const expectedKey=editorialHash([editorialPrompt('final',fixture.context),[clean],args.model]);
+  expect(projected.requestKey).toBe(expectedKey);
+  expect(captured.spendContext.requestKey).toBe(expectedKey);
+  expect(projected.requestKey).not.toBe(editorialHash([editorialPrompt('final',fixture.context),[annotated],args.model]));
+  const plain=await evaluateEditorialVariants({...args,variants:[clean]});
+  expect(plain.requestKey).toBe(projected.requestKey);
+  expect(state.calls.at(-1).prompt).toBe(captured.prompt);
+  expect(annotated).toEqual(before);
+ }
 });
 it('shares one bounded run across both policy arms and multiple frozen rows',async()=>{
  const examples=['first','second'].map(id=>({id,content:`opinion ${id}`,contentHash:editorialHash(`opinion ${id}`),label:'approved',labelSource:'owner_approval'}));

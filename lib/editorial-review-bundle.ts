@@ -1,5 +1,6 @@
 import { compareEditorialPolicies, resolveFrozenOwnerReview, type EditorialBaseline, type EditorialEvaluationRow, type EditorialManifest, type FrozenOwnerReview } from './editorial-calibration';
 import { EDITORIAL_HARD_BLOCKERS, editorialHash, type EditorialContext } from './editorial-contract';
+import { inspectEditorialSafetyResults, type EditorialSafetyEvaluation } from './editorial-safety-results';
 
 export const EDITORIAL_EVALUATOR_VERSION = 'durable-original-2';
 
@@ -34,7 +35,9 @@ export interface EditorialReviewBundle {
   supplements?: EditorialHoldoutSupplement[];
   supplementReviews?: FrozenOwnerReview[];
   rows: Array<EditorialEvaluationRow & { contextHash?: string; evaluatorVersion?: string }>;
+  /** Legacy summaries remain readable but cannot establish safety for activation. */
   safety: Array<{ case: string; candidateAccepted: boolean }>;
+  safetyEvaluations?: EditorialSafetyEvaluation[];
 }
 
 const nonempty = (value: unknown): value is string => typeof value === 'string' && Boolean(value.trim());
@@ -134,15 +137,17 @@ export function compareEditorialReviewBundle(input: EditorialReviewBundle, activ
   // remain in provenance; source manifests, review records and scores are untouched.
   const projection = { ...input.manifest, hash: view.evaluationViewHash, examples: view.examples };
   const rows = input.rows.map(row => ({ ...row, manifestHash: view.evaluationViewHash }));
-  const report = compareEditorialPolicies(projection, rows, input.safety, activeBaseline);
+  const safetyValidation = inspectEditorialSafetyResults(input.safetyEvaluations ?? [], activeBaseline.model, input.manifest.candidateVersion);
+  const report = compareEditorialPolicies(projection, rows, safetyValidation.outcomes, activeBaseline);
   const labelMinimumMet = Object.values(view.labels).every(count => count.approved >= 2 && count.rejected >= 3);
   const supplementalIds = new Set(input.supplements?.flatMap(s => s.examples.map(e => e.id)) ?? []);
   const supplementReviewsComplete = view.examples.every(e => !supplementalIds.has(e.id) || e.label !== null);
   return { ...report, manifestHash: input.manifest.hash, evaluationViewHash: view.evaluationViewHash, evaluationOnly: true,
-    eligibleForActivation: report.eligibleForActivation && supplementReviewsComplete,
+    eligibleForActivation: report.eligibleForActivation && supplementReviewsComplete && safetyValidation.passed,
     reason: !supplementReviewsComplete && report.reason !== 'active_policy_changed' ? 'incomplete_supplement_reviews'
-      : report.reason === 'insufficient_generated_owner_labels' && labelMinimumMet ? 'incomplete_scoring' : report.reason,
-    labelMinimumMet, supplementReviewsComplete, labels: view.labels, provenance: view.provenance };
+      : report.reason === 'insufficient_generated_owner_labels' && labelMinimumMet ? 'incomplete_scoring'
+      : report.eligibleForActivation && !safetyValidation.passed ? 'factual_safety_unverified_or_regressed' : report.reason,
+    labelMinimumMet, supplementReviewsComplete, labels: view.labels, safetyValidation, provenance: view.provenance };
 }
 
 /** Validate a retained supplement before selecting a row for offline rescoring. */

@@ -5,8 +5,9 @@ import { composeEditorialReviewBundle, type EditorialReviewBundle } from './edit
 import type { assessExistingDraftUnderProductionPolicy, GenerateTweetBatchV2Input } from './generation-v2';
 import { ORIGINAL_EDITORIAL_CONTEXT_VERSION, type OriginalEditorialContext } from './original-editorial-context';
 import { isCurrentSourceEvidence } from './source-validity';
+import { getEditorialSafetyFixtures } from './editorial-safety-fixtures';
 
-export const EDITORIAL_READINESS_VERSION = 'editorial-evaluation-readiness-1';
+export const EDITORIAL_READINESS_VERSION = 'editorial-evaluation-readiness-2';
 export interface EditorialReadinessEntry {
   id: string;
   input: GenerateTweetBatchV2Input;
@@ -101,12 +102,14 @@ export function inspectEditorialEvaluationReadiness(bundle: EditorialReviewBundl
       inputHash: entry ? editorialReadinessInputHash(entry) : null, ready: rowBlockers.length === 0, blockers: [...new Set(rowBlockers)] };
   });
   const safetyCases = options.safetyCases ?? [];
+  const requiredSafetyInputs = getEditorialSafetyFixtures().negativeCases;
   const missingCases = REQUIRED_EDITORIAL_SAFETY_CASES.filter(caseName => !safetyCases.some(row => row.case === caseName));
   const invalidSafety = safetyCases.some(row => !REQUIRED_EDITORIAL_SAFETY_CASES.includes(row.case) || !nonempty(row.id) || !nonempty(row.content)
     || row.contentHash !== editorialHash(row.content) || !validContext(row.context) || row.contextHash !== editorialHash(row.context));
   if (missingCases.length) blockers.push('missing_safety_inputs');
   if (invalidSafety || new Set(safetyCases.map(row => row.case)).size !== safetyCases.length
-    || new Set(safetyCases.map(row => row.id)).size !== safetyCases.length) blockers.push('invalid_safety_inputs');
+    || new Set(safetyCases.map(row => row.id)).size !== safetyCases.length
+    || safetyCases.some(row => !requiredSafetyInputs.some(expected => editorialHash(row) === editorialHash(expected)))) blockers.push('invalid_safety_inputs');
   const preparationHash = editorialHash({ version: EDITORIAL_READINESS_VERSION, bundleHash: view.evaluationViewHash,
     entries: entries.map(entry => [entry.id, editorialReadinessInputHash(entry)]).sort(([a], [b]) => a.localeCompare(b)),
     safetyCases, activeBaseline: options.activeBaseline ?? null });
