@@ -3,6 +3,7 @@ import type { LearningSignal, PortfolioCompanyGenerationContext, Tweet } from '.
 export const ANTIFUND_PORTFOLIO_SOURCE_URL = 'https://antifund.com/#portfolio';
 export const ANTIFUND_PORTFOLIO_SNAPSHOT_VERSION = 'antifund-portfolio-2026-08-21';
 export const ANTIFUND_PORTFOLIO_POLICY_VERSION = 'antifund-portfolio-alignment-3';
+export const ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION = 'antifund-portfolio-conviction-detector-2';
 export const ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION = 'antifund-priority-promotion-2';
 export const ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT = '2026-11-19T00:00:00.000Z';
 
@@ -344,6 +345,21 @@ const AD_COPY_PATTERN = /\b(?:sign\s+up|join\s+the\s+waitlist|book\s+a\s+demo|us
 const CONSTRUCTIVE_CONVICTION_PATTERN = /\b(?:i\s+(?:think|believe|want|love)|i(?:'d|\s+would)\s+(?:now\s+)?(?:back|bet|buy|choose|expect|favor|give|make|pick|prefer|put|rank|take|use|watch)|deserves?|worth|winner|special|underestimated|undervalued|impressive|insane|huge|great|best|ahead|faster|early|cheap|dominant|breakout|real|congrats|congratulations|endorsement|unusually\s+(?:concrete|convincing|credible)|earn(?:s|ed)?\s+(?:the\s+right|attention|credibility|weight)|gets?\s+(?:there|to|it|this|that|better|faster|cheaper|stronger|bigger|interesting)|(?:can|could|will|should)\s+(?:build|become|compound|create|capture|expand|grow|improve|lead|lower|own|prove|reduce|scale|ship|unlock|win))\b/i;
 const NATURAL_COMPANY_PROMOTION_PATTERN = /(?:\bi\s+(?:think|believe|want|love)\s+Natural(?:\.co)?\b)|(?:\b(?:back|bet(?:ting)?|bullish|buy(?:ing)?|invest(?:ed|ing)?|long)\s+(?:in\s+|on\s+)?Natural(?:\.co)?\b)|(?:\bNatural(?:\.co)?\b\s+(?:can|could|will|should|is|gets|deserves|builds?|launch(?:es|ed|ing)?|owns?|rais(?:e|es|ed|ing)|wins?)\b)/;
 
+/** Additional positive constructions; neither a bare expectation nor negated praise qualifies. */
+function hasAdditionalConstructiveConviction(content: string, company: AntiFundPortfolioCompany | null): boolean {
+  if (!company) return false;
+  const text = content.trim();
+  // These new matches are deliberately conservative. Existing safety gates and
+  // the final editor still assess the complete post, not just its positive opening.
+  if (/[?]/.test(text) || /\b(?:not(?!\s+just\b)|never|no|hardly|barely|wrong|mistake|collapse|fail|declin\w*|shrink\w*|stall\w*|decreas\w*|disappear\w*|less|fewer|worse)\b|n['’]t\b/i.test(text)) return false;
+  const subject = `(?:${[...company.aliases, ...company.officialXHandles.map(handle => `@${handle}`)].map(regexLiteral).join('|')})`;
+  if (new RegExp(`^smart\\s+move\\s+by\\s+${subject}\\b`, 'i').test(text)) return true;
+  // An expectation needs a positive growth/expansion direction in the same
+  // sentence. "I expect" alone establishes no constructive company stance.
+  const expectation = new RegExp(`^i\\s+expect\\s+${subject}\\b(?:['’]s)?\\s+([^.!?\\n]+)`, 'i').exec(text)?.[1];
+  return Boolean(expectation && /\b(?:grow(?:s|ing|th)?|expand(?:s|ing)?|expansion|(?:more|increased|increasing)\s+(?:work|customers|revenue|demand|adoption)|(?:work|revenue|demand|adoption)\s+(?:to\s+)?increase)\b/i.test(expectation));
+}
+
 export function getAntiFundPortfolioPolicyIssues(
   content: string,
   context: PortfolioCompanyGenerationContext | null | undefined = null,
@@ -383,7 +399,7 @@ export function getAntiFundPortfolioPolicyIssues(
   }
   if (context && INVENTED_ACCESS_PATTERN.test(content)) issues.push('portfolio_invented_access');
   if (context && AD_COPY_PATTERN.test(content)) issues.push('portfolio_ad_copy');
-  if (context && !CONSTRUCTIVE_CONVICTION_PATTERN.test(content)) issues.push('portfolio_constructive_conviction_missing');
+  if (context && !CONSTRUCTIVE_CONVICTION_PATTERN.test(content) && !hasAdditionalConstructiveConviction(content, company)) issues.push('portfolio_constructive_conviction_missing');
   return [...new Set(issues)];
 }
 

@@ -146,6 +146,7 @@ import {
   PUBLISHING_V2_QUALITY_POLICY_VERSION,
 } from './publishing-quality-policy';
 import {
+  ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
   ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
   ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT,
@@ -7641,7 +7642,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   const canary = await getGenerationCanary(input.agentId);
   if (canary?.status === 'blocked') return [];
   if (canary?.status === 'active') input = {...input,spendContext:{...input.spendContext,...aiSpendContext(input.agentId,'generation'),campaignId:canary.id,campaignLimitUsd:canary.limitUsd}};
-  const policy = jobFingerprint(['simple-original-1',ORIGINAL_EDITORIAL_CONTEXT_VERSION,ORIGINAL_PROMPT_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,input.voiceProfile,input.learnings?.voiceCorpus?.snapshotId]);
+  const policy = jobFingerprint(['simple-original-1',ORIGINAL_EDITORIAL_CONTEXT_VERSION,ORIGINAL_PROMPT_VERSION,ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,input.voiceProfile,input.learnings?.voiceCorpus?.snapshotId]);
   const snapshot = JSON.parse(JSON.stringify({...input,onTrace:undefined,onArtifacts:undefined,jobSession:undefined,originalModelCall:undefined}));
   const job = await claimGenerationJob(input.agentId,snapshot,policy,Date.now(),current=>{
     const saved=current.input as GenerateTweetBatchV2Input;

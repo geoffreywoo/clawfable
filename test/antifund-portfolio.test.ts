@@ -3,6 +3,7 @@ import {
   ANTIFUND_AUTONOMOUS_PROMOTION_COMPANIES,
   ANTIFUND_PORTFOLIO_COMPANIES,
   ANTIFUND_PORTFOLIO_POLICY_VERSION,
+  ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,
   ANTIFUND_PORTFOLIO_PROMOTION_POLICY_VERSION,
   ANTIFUND_PORTFOLIO_SNAPSHOT_EXPIRES_AT,
   ANTIFUND_PROMOTION_COMPANIES,
@@ -172,6 +173,58 @@ describe('Anti Fund portfolio generation policy', () => {
       ANTIFUND_PORTFOLIO_COMPANIES.find((company) => company.id === 'openai')!,
       'constructive_conviction',
     ))).toContain('portfolio_disparagement');
+  });
+
+  it('recognizes the saved positive Cognition ideas without approving the neutral milestone', () => {
+    const cognition = ANTIFUND_PORTFOLIO_COMPANIES.find(company => company.id === 'cognition')!;
+    const positive = [
+      'smart move by @cognition to make its milestone post a customer showcase. making your customer look like a genius is a better pitch than making your product look like one.',
+      'i expect @cognition’s next big growth story to be customers giving devin more work, not just more customers signing up.',
+    ];
+    positive.push(
+      'i expect @cognition to grow as customers assign it more work.',
+      'i expect Cognition to expand into additional teams.',
+      'i expect @cognition revenue to increase.',
+      'i expect Cognition’s customers to give it more work.',
+    );
+    const neutral = 'the @cognition update is a business milestone, not a benchmark flex. the company says it’s crossed $1b in annualized revenue run rate.';
+    for (const intent of ['live_development', 'constructive_conviction'] as const) {
+      const context = buildAntiFundPortfolioContext(cognition, intent);
+      for (const content of positive) expect(getAntiFundPortfolioPolicyIssues(content, context)).toEqual([]);
+      expect(getAntiFundPortfolioPolicyIssues(neutral, context)).toContain('portfolio_constructive_conviction_missing');
+      expect(context.policyVersion).toBe('antifund-portfolio-alignment-3');
+    }
+    expect(ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION).toBe('antifund-portfolio-conviction-detector-2');
+  });
+
+  it('does not turn negated praise, another company, or arbitrary expectations into constructive conviction', () => {
+    const context = buildAntiFundPortfolioContext(ANTIFUND_PORTFOLIO_COMPANIES.find(company => company.id === 'cognition')!, 'live_development');
+    for (const content of [
+      'not a smart move by @cognition to announce this.',
+      'hardly a smart move by @cognition to announce this.',
+      'smart move by @cognition? no.',
+      'smart move by @cognition to stop listening. that was a mistake.',
+      'smart move by @etched. @cognition also announced a milestone.',
+      'i expect @cognition to collapse.',
+      'i expect @cognition to announce something tomorrow.',
+      'i expect @cognition growth to stall.',
+      'i expect @cognition revenue to decrease.',
+      'i expect @cognition to announce something tomorrow. demand will increase.',
+      'i expect @cognition’s next big growth story to disappear.',
+      'i expect @cognition’s next big growth story to be customers giving devin less work.',
+      'i expect @cognition’s next big growth story not to be customers giving devin more work.',
+      'i expect @cognition’s next big growth story to be customers giving devin more work. i was wrong.',
+      'i expect @etched’s next big growth story to be customers giving its chip more work. @cognition is mentioned too.',
+    ]) expect(getAntiFundPortfolioPolicyIssues(content, context), content).toContain('portfolio_constructive_conviction_missing');
+  });
+
+  it('retains company, disparagement, access and advertising guards when the new praise form matches', () => {
+    const context = buildAntiFundPortfolioContext(ANTIFUND_PORTFOLIO_COMPANIES.find(company => company.id === 'cognition')!, 'live_development');
+    const praise = 'smart move by @cognition to put its customers first.';
+    expect(getAntiFundPortfolioPolicyIssues(`${praise} @cognition is trash.`, context)).toContain('portfolio_disparagement');
+    expect(getAntiFundPortfolioPolicyIssues(`${praise} we met the team yesterday.`, context)).toContain('portfolio_invented_access');
+    expect(getAntiFundPortfolioPolicyIssues(`${praise} sign up now.`, context)).toContain('portfolio_ad_copy');
+    expect(getAntiFundPortfolioPolicyIssues('smart move by that company to put customers first.', context)).toContain('portfolio_company_dropped');
   });
 
   it('rejects stale or forged context and rebuilds operator edits from the canonical registry', () => {
