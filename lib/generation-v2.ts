@@ -7,7 +7,7 @@ import { runOriginalModelStage } from './original-model-stage';
 import { EDITORIAL_PRINCIPLES as DURABLE_EDITORIAL_CONTRACT } from './editorial-contract';
 import { buildSubjectPacket, type SubjectPacket } from './subject-packet';
 import { attributedSourceClaim, isCurrentSourceEvidence } from './source-validity';
-import { GenerationJobSession, claimGenerationJob, jobFingerprint, GENERATION_JOB_VERSION, getGenerationCanary, recordGenerationCanary, generationCanaryAttemptId } from './generation-job';
+import { GenerationJobSession, claimGenerationJob, jobFingerprint, GENERATION_JOB_VERSION, getGenerationCanary, getGenerationJob, recordGenerationCanary, generationCanaryAttemptId, reconcileGenerationCanaryAssessments } from './generation-job';
 import { editorialRejectionCodes, normalizeCandidateDisposition } from './candidate-disposition';
 import { PUBLISHING_V2_GEOFFREY_AI_AMBITION } from './publishing-quality-policy';
 import { EFFICIENT_GENERATION_POLICY, REPAIR_DECISION_SCHEMA, parseRepairDecision, canRepairDraft, preservesRepairDecision, substantiveBriefDigest, claimGenerationBriefs, failedBriefKeys, recordBriefAttempts, qualityGenerationPauseUntil, type RepairDecision } from './generation-efficiency';
@@ -7707,10 +7707,13 @@ export async function assessExistingDraftUnderProductionPolicy(input: GenerateTw
 
 export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Promise<RankedProtocolTweet[]> {
   if (!input.durableGeneration || input.agentId !== '13' || input.mode === 'preview' || input.persistArtifacts === false) return generateTweetBatchV2Internal(input);
-  const canary = await getGenerationCanary(input.agentId);
+  let canary = await getGenerationCanary(input.agentId);
+  if (canary?.status === 'blocked') return [];
+  const previousJob = await getGenerationJob(input.agentId);
+  if (previousJob) canary = await reconcileGenerationCanaryAssessments(input.agentId, previousJob);
   if (canary?.status === 'blocked') return [];
   if (canary?.status === 'active') input = {...input,spendContext:{...input.spendContext,...aiSpendContext(input.agentId,'generation'),campaignId:canary.id,campaignLimitUsd:canary.limitUsd}};
-  const policy = jobFingerprint(['simple-original-2',SOURCE_COPY_ASSESSMENT_VERSION,ORIGINAL_EDITORIAL_CONTEXT_VERSION,ORIGINAL_PROMPT_VERSION,ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,SOURCE_ATTRIBUTION_DETECTOR_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,input.voiceProfile,input.learnings?.voiceCorpus?.snapshotId]);
+  const policy = jobFingerprint(['simple-original-3',SOURCE_COPY_ASSESSMENT_VERSION,ORIGINAL_EDITORIAL_CONTEXT_VERSION,ORIGINAL_PROMPT_VERSION,ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,SOURCE_ATTRIBUTION_DETECTOR_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,input.voiceProfile,input.learnings?.voiceCorpus?.snapshotId]);
   const snapshot = JSON.parse(JSON.stringify({...input,onTrace:undefined,onArtifacts:undefined,jobSession:undefined,originalModelCall:undefined,originalEditorialContext:undefined}));
   const job = await claimGenerationJob(input.agentId,snapshot,policy,Date.now(),current=>{
     const saved=current.input as GenerateTweetBatchV2Input;
@@ -7722,12 +7725,20 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   });
   if (!job) return [];
   const session = new GenerationJobSession(input.agentId,job);
+  if ((await reconcileGenerationCanaryAssessments(input.agentId, job))?.status === 'blocked') {
+    await session.finish([], 'canary_empty_limit');
+    return [];
+  }
   if (job.status === 'assessed' && job.result?.length) { await session.finish(job.result,'completed'); return job.result as RankedProtocolTweet[]; }
   let outcome = 'provider_failure';
   try {
     // New jobs use the small sequential engine. Finish already-paid legacy jobs
     // on their existing checkpoints instead of silently discarding their work.
     const simple = session.job.checkpoints.originalProductionVersion || Object.keys(session.job.checkpoints).length === 0;
+    await session.write(current => ({ ...current, checkpoints: { ...current.checkpoints,
+      canaryAttemptPrefix: canary?.status === 'active'
+        ? (canary.recoveries?.at(-1) ? `${canary.recoveries.at(-1)!.id}:${job.id}` : job.id) : undefined,
+    } }));
     const runInput = {...job.input as GenerateTweetBatchV2Input,jobSession:session,
       entitlement:input.entitlement,onArtifacts:input.onArtifacts,onTrace:(trace:GenerationRunTrace)=>{outcome=trace.outcomeCode || 'provider_failure'; input.onTrace?.(trace);}};
     let result = simple
@@ -7744,6 +7755,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
         evidence:savedDocuments.filter(d=>brief?.sourceDocumentIds.includes(d.id)).map(d=>({sourceDocumentId:d.id,contentHash:d.contentHash})),
       })};
     });
+    await reconcileGenerationCanaryAssessments(input.agentId, session.job);
     await session.finish(result,outcome);
     // A completed editorial failure is empty even when a reserve remains.
     // Only unfinished operational stages are exempt from the canary stop.

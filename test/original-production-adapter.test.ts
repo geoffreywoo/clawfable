@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateOriginalProduction, validateOriginalSubjects } from '@/lib/original-production-adapter';
-import { claimGenerationJob, GenerationJobSession, getGenerationJob } from '@/lib/generation-job';
-import { getGenerationRuns, getDraftCandidates, getLearningSignals } from '@/lib/kv-storage';
+import { acknowledgeGenerationQueue, claimGenerationJob, GenerationJobSession, getGenerationJob } from '@/lib/generation-job';
+import { createTweet, getGenerationRuns, getDraftCandidates, getLearningSignals, upsertDraftCandidates, upsertSourceDocuments } from '@/lib/kv-storage';
+import { ORIGINAL_PAID_RECOVERY_KEY, type OriginalPaidRecovery } from '@/lib/original-paid-recovery';
+import { ORIGINAL_EDITORIAL_CONTEXT_VERSION } from '@/lib/original-editorial-context';
 import { editorialRejectionCodes } from '@/lib/candidate-disposition';
 import { getGeneratedPublishIssue } from '@/lib/generation-origin';
 import { getPublishingV2AutopostQualityMargin, getPublishingV2FinalCriticVersion, getPublishingV2QualityPolicyVersion } from '@/lib/publishing-quality-policy';
@@ -11,6 +13,8 @@ import type { SourceDocument } from '@/lib/types';
 
 const harness = vi.hoisted(() => ({
   generate: vi.fn(), finalOverall: .99, malformed: false, copyVerdict: 'clear', firstCopyUncertain: false,
+  rejectAllPreflight: false, preflightCalls: [] as any[], normalizationCalls: [] as any[], changePublicMove: false,
+  normalizedIdPrefix: 'idea',
   anchors: [
     { id: 'anchor-a', content: 'coffee outside. walking home.', topic: 'health' },
     { id: 'anchor-b', content: 'the little kitchen table is plenty.', topic: 'health' },
@@ -41,20 +45,30 @@ vi.mock('@/lib/generation-v2', async importOriginal => {
       evidenceScore: 1, freshnessScore: 1 }],
     prioritizeCurrentInterestBriefsV2: (briefs: unknown[]) => briefs,
     collectOperatorAnchors: () => harness.anchors,
-    normalizeIdeaCandidatesV2: ({ raw, agentId, runId, now }: any) => raw.map((row: any, index: number) => ({
-      ...row, schemaVersion: 2, id: `idea-${index}`, agentId, generationRunId: runId,
+    normalizeIdeaCandidatesV2: (options: any) => {
+      harness.normalizationCalls.push(options);
+      const { raw, agentId, runId, now } = options;
+      return raw.map((row: any, index: number) => ({
+      ...row, schemaVersion: 2, id: `${harness.normalizedIdPrefix}-${index}`, agentId, generationRunId: runId,
+      publicMove: row.publicMove + (harness.changePublicMove ? ' changed premise' : ''),
       topic: 'health', storyClusterId: null, claim: row.publicMove, tension: '', implication: '',
       authorReason: 'A worthwhile preference.', factualRisk: 'low', semanticKey: `idea-${index}`,
       noveltyScore: .99, evidenceScore: 1, identityScore: .99, judgeScore: null,
       status: 'generated', rejectionCodes: [], createdAt: now, updatedAt: now,
-    })),
-    preflightDraft: ({ draft, idea, brief, documents, anchors }: any) => ({ draft, idea, brief, sourceDocuments: documents, anchors }),
+    })); },
+    preflightDraft: ({ draft, idea, brief, documents, anchors, input, blocks }: any) => {
+      harness.preflightCalls.push({ draft: structuredClone(draft), allTweets: input.allTweets, blocks });
+      if (harness.rejectAllPreflight) { draft.status = 'rejected'; draft.rejectionCodes = ['final_source_copy_risk']; }
+      return { draft, idea, brief, sourceDocuments: documents, anchors };
+    },
     // qualifyOriginalDrafts deliberately remains the real production implementation.
   };
 });
 
 beforeEach(() => {
   harness.generate.mockReset(); harness.finalOverall = .99; harness.malformed = false; harness.copyVerdict = 'clear'; harness.firstCopyUncertain = false;
+  harness.rejectAllPreflight = false; harness.preflightCalls = []; harness.normalizationCalls = []; harness.changePublicMove = false;
+  harness.normalizedIdPrefix = 'idea';
   harness.generate.mockImplementation(async (options: GenerateTextOptions) => {
     const payload = JSON.parse(options.prompt);
     let text: string;
@@ -105,6 +119,34 @@ async function setup(): Promise<GenerateTweetBatchV2Input> {
     entitlement: { eligible: true, source: 'agent_exemption' } as any,
     jobSession: new GenerationJobSession(agentId, (await claimGenerationJob(agentId, {}, 'adapter-test-policy'))!),
   };
+}
+
+async function setupPaidRecovery(keepReserves = true) {
+  const input = await setup();
+  input.spendContext = { agentId: input.agentId, operation: 'generation', runId: input.jobSession!.job.id,
+    campaignId: 'original-campaign', campaignLimitUsd: 6 };
+  harness.rejectAllPreflight = true;
+  expect(await generateOriginalProduction(input)).toEqual([]);
+  expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['idea_generation', 'tweet_writing']);
+  await input.jobSession!.finish([], 'quality_empty');
+  const originalJob = structuredClone(input.jobSession!.job);
+  const reclaimed = (await claimGenerationJob(input.agentId, {}, 'fixed-preflight-policy', Date.now(), () => true))!;
+  input.jobSession = new GenerationJobSession(input.agentId, reclaimed);
+  if (!keepReserves) await input.jobSession.write(job => {
+    const recovery = job.checkpoints[ORIGINAL_PAID_RECOVERY_KEY] as OriginalPaidRecovery;
+    return { ...job, checkpoints: { ...job.checkpoints, [ORIGINAL_PAID_RECOVERY_KEY]: {
+      ...recovery, ideas: recovery.ideas.filter(idea => recovery.entries.some(entry => entry.idea.id === idea.id)),
+    } } };
+  });
+  const recovery = input.jobSession.job.checkpoints[ORIGINAL_PAID_RECOVERY_KEY] as OriginalPaidRecovery;
+  harness.rejectAllPreflight = false; harness.generate.mockClear(); harness.preflightCalls = []; harness.normalizationCalls = [];
+  return { input, originalJob, recovery };
+}
+
+async function persistRecoveryFixture(input: GenerateTweetBatchV2Input, recovery: OriginalPaidRecovery) {
+  const frozenContext = structuredClone(input.jobSession!.job.checkpoints.context);
+  await input.jobSession!.write(job => ({ ...job, checkpoints: { ...job.checkpoints,
+    context: frozenContext, [ORIGINAL_PAID_RECOVERY_KEY]: structuredClone(recovery) } }));
 }
 
 describe('production original adapter', () => {
@@ -230,6 +272,144 @@ describe('production original adapter', () => {
     expect(stored.every(draft => draft.rejectionCodes.includes('copy_judge_low_quality'))).toBe(true);
     expect(stored.every(draft => draft.rejectionCodes.includes('final_quality_margin'))).toBe(true);
     expect((await getGenerationRuns(input.agentId, 1))[0].outcomeCode).toBe('quality_empty');
+  });
+});
+
+describe('paid-original recovery through the standard adapter', () => {
+  it('buys only current judgment, preserving paid copy, IDs, original evidence clocks and unwritten reserves', async () => {
+    const { input, originalJob, recovery } = await setupPaidRecovery();
+    const originalPacket = structuredClone(recovery.subjects[0].subjectPacket);
+    recovery.subjects[0].editorialContext!.contextVersion = 'obsolete-context' as any;
+    await persistRecoveryFixture(input, recovery);
+    harness.normalizedIdPrefix = 'new-parser-id';
+    const saved = recovery.entries[0].drafts.map(row => ({ id: row.draft.id, content: row.draft.content }));
+    const unrelated = await createTweet({ agentId: input.agentId, content: 'A different current draft in the queue.',
+      type: 'original', status: 'draft', ideaId: 'unrelated-idea' } as any);
+    const result = await generateOriginalProduction(input);
+    expect(result).toHaveLength(1);
+    expect(result[0].ideaId).toBe('idea-0');
+    expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['copy_judgment']);
+    expect(saved).toContainEqual({ id: result[0].draftCandidateId, content: result[0].content });
+    const checkpoints = input.jobSession!.job.checkpoints;
+    expect(checkpoints.paidRecoveryPolicy).toBe(input.jobSession!.job.policy);
+    expect(checkpoints.paidRecoveryIdeaIds).toEqual(['idea-0']);
+    expect(checkpoints.attemptedIdeas).toEqual(originalJob.checkpoints.attemptedIdeas);
+    expect(checkpoints.reserveIdeas).toEqual(['idea-1', 'idea-2']);
+    expect((checkpoints.subjects_ready as any[])[0].subjectPacket).toEqual(originalPacket);
+    expect((checkpoints.subjects_ready as any[])[0].editorialContext.contextVersion).toBe(ORIGINAL_EDITORIAL_CONTEXT_VERSION);
+    expect(harness.normalizationCalls[0]).toMatchObject({ simpleContract: true });
+    expect(harness.preflightCalls.every(call => call.draft.status === 'generated' && call.draft.rejectionCodes.length === 0)).toBe(true);
+    expect(harness.preflightCalls[0].allTweets.map((tweet: any) => tweet.id)).toContain(unrelated.id);
+    expect(harness.generate.mock.calls[0][0].spendContext).toMatchObject({ runId: originalJob.id,
+      runLimitUsd: 3, campaignId: 'original-campaign', campaignLimitUsd: 6 });
+    const preflightCount = harness.preflightCalls.length;
+    expect(await generateOriginalProduction(input)).toEqual(result);
+    expect(harness.generate).toHaveBeenCalledTimes(1);
+    expect(harness.preflightCalls).toHaveLength(preflightCount);
+  });
+
+  it('uses an unwritten paid reserve after recovered copy is queued, without another ideation call', async () => {
+    const { input } = await setupPaidRecovery();
+    const recovered = await generateOriginalProduction(input);
+    await input.jobSession!.finish(recovered, 'completed');
+    await acknowledgeGenerationQueue(input.agentId, input.jobSession!.job.id, true);
+    input.jobSession = new GenerationJobSession(input.agentId,
+      (await claimGenerationJob(input.agentId, {}, 'fixed-preflight-policy'))!);
+    expect(await generateOriginalProduction(input)).toHaveLength(1);
+    expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['copy_judgment', 'tweet_writing', 'copy_judgment']);
+    expect(input.jobSession.job.checkpoints.selectedIdeas).toEqual(['idea-1']);
+    expect(input.jobSession.job.checkpoints.queuedIdeas).toEqual(['idea-0']);
+  });
+
+  it('retains pending recovery after a provider failure and retries only the missing judge', async () => {
+    const { input } = await setupPaidRecovery();
+    harness.generate.mockRejectedValueOnce(new Error('provider_pending'));
+    await expect(generateOriginalProduction(input)).rejects.toThrow('provider_pending');
+    expect(input.jobSession!.job.checkpoints['drafts_ready:idea-0']).toBeDefined();
+    expect(input.jobSession!.job.checkpoints['assessed:idea-0']).toBeUndefined();
+    expect(await generateOriginalProduction(input)).toHaveLength(1);
+    expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['copy_judgment', 'copy_judgment']);
+    expect(harness.preflightCalls).toHaveLength(3);
+  });
+
+  it('does not repurchase malformed paid judgments or treat them as empty editorial attempts', async () => {
+    const { input } = await setupPaidRecovery(); harness.malformed = true;
+    await expect(generateOriginalProduction(input)).rejects.toThrow('malformed_output');
+    const attempted = structuredClone(input.jobSession!.job.checkpoints.attemptedIdeas);
+    harness.malformed = false;
+    await expect(generateOriginalProduction(input)).rejects.toThrow('malformed_output');
+    expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['copy_judgment']);
+    expect(input.jobSession!.job.checkpoints['assessed:idea-0']).toBeUndefined();
+    expect(input.jobSession!.job.checkpoints.attemptedIdeas).toEqual(attempted);
+  });
+
+  it.each(['queued', 'posted', 'deleted_from_x', 'draft'] as const)(
+    'excludes an existing %s Tweet by draft identity even without its ideaId', async status => {
+      const { input, recovery } = await setupPaidRecovery(false);
+      await createTweet({ agentId: input.agentId, content: 'A previously handled original.', type: 'original',
+        status, draftCandidateId: recovery.entries[0].drafts[0].draft.id } as any);
+      expect(await generateOriginalProduction(input)).toEqual([]);
+      expect(harness.generate).not.toHaveBeenCalled();
+      expect(input.jobSession!.job.checkpoints.paidRecoveryIdeaIds).toEqual([]);
+      expect((input.jobSession!.job.checkpoints[ORIGINAL_PAID_RECOVERY_KEY] as OriginalPaidRecovery).excludedIdeaIds).toContain('idea-0');
+    },
+  );
+
+  it('excludes queued idea history and independently persisted real model rejections', async () => {
+    for (const proof of ['queued-history', 'stored-model-rejection']) {
+      const { input, recovery } = await setupPaidRecovery(false);
+      if (proof === 'queued-history') await input.jobSession!.write(job => ({ ...job,
+        checkpoints: { ...job.checkpoints, queuedIdeas: ['idea-0'] } }));
+      else await upsertDraftCandidates(input.agentId, [{ ...recovery.entries[0].drafts[0].draft,
+        judgeModel: 'old-judge', judgeProvider: 'openai', judgeScore: .59, status: 'rejected' }]);
+      expect(await generateOriginalProduction(input)).toEqual([]);
+      expect(harness.generate).not.toHaveBeenCalled();
+      expect((input.jobSession!.job.checkpoints[ORIGINAL_PAID_RECOVERY_KEY] as OriginalPaidRecovery).excludedIdeaIds).toContain('idea-0');
+    }
+  });
+
+  it.each(['expired-packet', 'withdrawn-source', 'changed-source', 'missing-story'])(
+    'does not purchase recovery against %s', async reason => {
+      const { input, recovery } = await setupPaidRecovery(false);
+      const subject = recovery.subjects[0];
+      if (reason === 'expired-packet') subject.subjectPacket!.expiresAt = new Date(Date.now() - 1).toISOString();
+      if (reason === 'missing-story') subject.storyClusterId = 'missing-current-story';
+      if (reason === 'withdrawn-source' || reason === 'changed-source') {
+        const source = { id: 'source-recovery', agentId: input.agentId, contentHash: 'paid-original-hash',
+          fetchedAt: new Date().toISOString(), metadata: {}, claims: [] } as SourceDocument;
+        subject.sourceDocumentIds = [source.id];
+        (input.jobSession!.job.checkpoints.context as any[])[0] = [source];
+        await upsertSourceDocuments(input.agentId, [{ ...source, contentHash: reason === 'changed-source' ? 'changed' : source.contentHash,
+          metadata: reason === 'withdrawn-source' ? { withdrawn: true } : {} }]);
+      }
+      await persistRecoveryFixture(input, recovery);
+      expect(await generateOriginalProduction(input)).toEqual([]);
+      expect(harness.generate).not.toHaveBeenCalled();
+      expect(input.jobSession!.job.checkpoints.subjects_ready).toEqual([]);
+    },
+  );
+
+  it('does not let an expired unused subject discard valid paid writing', async () => {
+    const { input, recovery } = await setupPaidRecovery();
+    const expired = structuredClone(recovery.subjects[0]); expired.id = 'expired-unused';
+    expired.subjectPacket!.expiresAt = new Date(Date.now() - 1).toISOString();
+    recovery.subjects.push(expired); recovery.ideas[2].briefId = expired.id;
+    await persistRecoveryFixture(input, recovery);
+    expect(await generateOriginalProduction(input)).toHaveLength(1);
+    expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['copy_judgment']);
+    expect((input.jobSession!.job.checkpoints.ideas_ready as any[]).map(idea => idea.id)).toEqual(['idea-0', 'idea-1']);
+  });
+
+  it('does not override current preflight blockers or attach an old ID to a changed premise', async () => {
+    for (const failure of ['preflight', 'changed-premise']) {
+      const { input } = await setupPaidRecovery(false);
+      if (failure === 'preflight') harness.rejectAllPreflight = true;
+      else harness.changePublicMove = true;
+      expect(await generateOriginalProduction(input)).toEqual([]);
+      expect(harness.generate).not.toHaveBeenCalled();
+      expect(input.jobSession!.job.checkpoints.paidRecoveryIdeaIds).toEqual([]);
+      harness.rejectAllPreflight = false; harness.changePublicMove = false;
+    }
   });
 });
 

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 import { EFFICIENT_GENERATION_POLICY } from './generation-efficiency';
+import { captureOriginalPaidRecovery, ORIGINAL_PAID_RECOVERY_KEY } from './original-paid-recovery';
 
 export const GENERATION_JOB_VERSION = 'durable-original-2';
 export const GENERATION_JOB_NAMESPACE = 'generation-job';
@@ -57,8 +58,10 @@ export async function claimGenerationJob(agentId: string, input: unknown, policy
       // Re-run deterministic normalization and assessment under the current
       // policy. Preserve raw paid response checkpoints: identical stage
       // contracts replay, changed prompts buy only that affected stage.
+      const paidRecovery = captureOriginalPaidRecovery(current);
       value.status='running';value.result=undefined;value.blocker=null;value.nextAttemptAt=0;
       value.checkpoints=Object.fromEntries(Object.entries(current.checkpoints).filter(([key])=>!['ideaNormalizationVersion','ideas_ready','subjects_ready','briefs'].includes(key) && !key.startsWith('assessed:') && !key.startsWith('drafts_ready') && !key.startsWith('repair:')));
+      if (paidRecovery) value.checkpoints[ORIGINAL_PAID_RECOVERY_KEY] = paidRecovery;
     }
     value.revision = (reusable ? current.revision || 0 : 0) + 1;
     return {value, result: value};
@@ -108,7 +111,9 @@ export async function acknowledgeGenerationQueue(agentId: string, runId: string,
     if (!current || current.id !== runId) return {value:current!,result:undefined,skip:true};
     const attemptedIdeas=[...new Set([...current.checkpoints.attemptedIdeas as string[] || [],...current.checkpoints.selectedIdeas as string[] || []])];
     return {value:{...current,status:queued?'queued':'failed',owner:null,leaseUntil:0,stage:queued?'queued':current.stage,blocker:queued?null:'queue_rejected',nextAttemptAt:queued?0:Date.now()+30*60_000,revision:(current.revision || 0)+1,
-      checkpoints:{...current.checkpoints,attemptedIdeas}},result:undefined};
+      checkpoints:{...current.checkpoints,attemptedIdeas,...(queued ? {
+        queuedIdeas:[...new Set([...current.checkpoints.queuedIdeas as string[] || [],...current.checkpoints.selectedIdeas as string[] || []])],
+      } : {})}},result:undefined};
   });
 }
 
@@ -146,6 +151,21 @@ export async function resumeGenerationCanaryWithEvidence(agentId:string, evidenc
   });
 }
 export const getGenerationCanary = (agentId:string) => getAiOperationalState<GenerationCanary>(agentId,'generation-canary');
+/** Reconcile completed decisions before another paid stage, including crashes before finish. */
+export async function reconcileGenerationCanaryAssessments(agentId: string, job: GenerationJob): Promise<GenerationCanary | null> {
+  const canary = await getGenerationCanary(agentId);
+  if (canary?.status !== 'active') return canary;
+  for (const [key, value] of Object.entries(job.checkpoints)) {
+    if (!key.startsWith('assessed:')) continue;
+    const assessment = value as { canaryAttemptId?: string; selected?: unknown[]; drafts?: Array<{ draft?: { status?: string } }> };
+    const attemptId = generationCanaryAttemptId(canary, job.id, [key.slice('assessed:'.length)]);
+    if (!Array.isArray(assessment?.selected) || assessment.selected.length || !assessment.drafts?.length
+      || assessment.canaryAttemptId !== attemptId
+      || !assessment.drafts.every(row => row.draft?.status === 'rejected')) continue;
+    await recordGenerationCanary(agentId, { empty: true, attemptId });
+  }
+  return getGenerationCanary(agentId);
+}
 export async function recordGenerationCanary(agentId:string, event:{queuedId?:string;empty?:boolean;attemptId?:string}) {
   return mutateAiOperationalState<GenerationCanary,void>(agentId,'generation-canary',state=>{
     if (!state || state.status!=='active') return {value:state!,result:undefined,skip:true};

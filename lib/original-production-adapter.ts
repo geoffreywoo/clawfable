@@ -6,6 +6,7 @@ import {
 } from './generation-v2';
 import { runOriginalProduction } from './original-production';
 import { runOriginalModelStage, type OriginalModelOptions } from './original-model-stage';
+import { hasOriginalModelJudgment, ORIGINAL_PAID_RECOVERY_KEY, type OriginalPaidRecovery } from './original-paid-recovery';
 import { buildOriginalEditorialContext, contextForOriginalMode, type OriginalEditorialContext } from './original-editorial-context';
 import { buildOriginalIdeationPrompt, buildOriginalWritingPrompt } from './original-prompts';
 import { buildSubjectPacket } from './subject-packet';
@@ -13,7 +14,7 @@ import { isCurrentSourceEvidence } from './source-validity';
 import { getOwnerAuthorshipAttestation, normalizedAuthorshipText } from './owner-authorship';
 import {
   getSourceDocuments, getStoryClusters, getSemanticBlocks, getIdeaCandidates, getDynamicIdeaSeeds,
-  getDraftCandidates, saveGenerationRun, upsertIdeaCandidates, upsertDraftCandidates,
+  getDraftCandidates, getTweets, saveGenerationRun, upsertIdeaCandidates, upsertDraftCandidates,
 } from './kv-storage';
 import { aiSpendContext, releaseAiCompletionHold } from './ai-budget';
 import { normalizeCandidateDisposition } from './candidate-disposition';
@@ -22,7 +23,7 @@ import { stableResearchId } from './research-utils';
 import type { DraftCandidate, IdeaCandidate, GenerationModelCallTrace, GenerationRunTrace, SourceDocument } from './types';
 import type { RankedPublishingCandidate } from './publishing-candidate';
 
-export const ORIGINAL_PRODUCTION_VERSION = 'simple-original-2';
+export const ORIGINAL_PRODUCTION_VERSION = 'simple-original-3';
 type Subject = GenerationBriefV2 & { editorialContext: OriginalEditorialContext };
 function parseArray(text: string, field: string): Array<Record<string, any>> {
   try {
@@ -96,16 +97,23 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
       getSourceDocuments(input.agentId, 300), getStoryClusters(input.agentId, 200), getSemanticBlocks(input.agentId),
       getIdeaCandidates(input.agentId, 300), getDynamicIdeaSeeds(input.agentId),
     ]));
-    const [documents, stories, blocks, recentIdeas, dynamicIdeaSeeds] = context;
+    const [documents, stories, , recentIdeas, dynamicIdeaSeeds] = context;
+    const [currentTweets, blocks, knownDrafts] = await Promise.all([
+      getTweets(input.agentId), getSemanticBlocks(input.agentId), getDraftCandidates(input.agentId, 1000),
+    ]);
+    input = { ...input, allTweets: currentTweets, recentPosts: [...new Set([
+      ...currentTweets.filter(tweet => tweet.status === 'posted' || tweet.status === 'deleted_from_x').map(tweet => tweet.content),
+      ...input.recentPosts,
+    ])] };
+    assessmentInput.allTweets = input.allTweets; assessmentInput.recentPosts = input.recentPosts;
     const validate = async (subjects: Subject[], selectedIdea?: IdeaCandidate) => {
       validateOriginalSubjects(subjects, documents, await getSourceDocuments(input.agentId, 300), Date.now(), selectedIdea);
       const required = selectedIdea ? subjects.filter(subject => subject.id === selectedIdea.briefId) : subjects;
       const liveStories = await getStoryClusters(input.agentId, 200);
       if (required.some(subject => subject.storyClusterId && !liveStories.some(story => story.id === subject.storyClusterId && isStoryEditoriallyQualifiedV2(story) && !story.blockReason))) throw new Error('stale_evidence');
     };
-    const result = await runOriginalProduction<Subject, DraftEvaluation>({ session, deps: {
-      loadSubjects: async () => {
-        const [attestation, knownDrafts] = await Promise.all([getOwnerAuthorshipAttestation(input.agentId), getDraftCandidates(input.agentId, 1000)]);
+    const prepareSubjects = async (briefs: GenerationBriefV2[], preservePackets = false): Promise<Subject[]> => {
+        const attestation = await getOwnerAuthorshipAttestation(input.agentId);
         const anchors = collectOperatorAnchors(input);
         const references = input.learnings?.operatorVoiceReference;
         const referenceRows = [...references?.pinnedExamples || [], ...references?.startupRegisterExamples || [], ...references?.bestPerformers || []];
@@ -116,15 +124,9 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
           return [{ id: anchor.id, content: anchor.content, provenance: row.authorshipProvenance || 'unknown' as const,
             dispositions: row.voiceCorpusDispositions || [], authorshipAttestationId: attestation?.id }];
         });
-        const built = buildGenerationBriefsV2({ count: 1, requestedTopic: input.requestedTopic, stories, documents,
-          voiceProfile: input.voiceProfile, analysis: input.analysis, learnings: input.learnings, style: input.style,
-          trending: input.trending, allTweets: input.allTweets, signals: input.signals, blocks, recentIdeas,
-          seedRotationKey: runId, dynamicIdeaSeeds, durable: true });
-        const qualified = built.filter(b => b.evidenceMode === 'operator_opinion'
-          ? b.sourceLane === 'manual_core_exploit' && b.identityScore >= .68
-          : b.sourceDocumentIds.length > 0 && b.qualifiedClaimIds.length > 0);
-        const subjects = prioritizeCurrentInterestBriefsV2(qualified, runId, true).slice(0, 2).map(brief => {
-          const subjectPacket = buildSubjectPacket(brief, documents, session.job.createdAt);
+        return briefs.map(brief => {
+          const subjectPacket = preservePackets ? structuredClone(brief.subjectPacket) : buildSubjectPacket(brief, documents, session.job.createdAt);
+          if (!subjectPacket) throw new Error('stale_evidence');
           const editorialContext = buildOriginalEditorialContext({ voiceProfile: input.voiceProfile, subject: subjectPacket,
             contentMode: brief.evidenceMode === 'operator_opinion' ? 'opinion' : 'observation', voiceExamples: examples,
             previousPremises: input.recentPosts, portfolioCompanyContext: brief.portfolioCompanyContext,
@@ -132,6 +134,75 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
           if (editorialContext.voiceExamples.length < Math.max(1, Math.min(3, input.learnings?.voiceCorpus?.minimumAnchorCount || 3))) throw new Error('voice_not_ready');
           return { ...brief, subjectPacket, editorialContext };
         });
+    };
+    const preflight = (draft: DraftCandidate, idea: IdeaCandidate, subject: Subject) => {
+      const brief = briefForIdea(subject, idea)!;
+      return preflightDraft({ draft, idea, brief, documents: sourceDocumentsForBrief(brief, documents),
+        anchors: subject.editorialContext.exampleRefs.map((e, i) => ({ id: e.id, content: subject.editorialContext.voiceExamples[i], topic: idea.topic })),
+        input: assessmentInput, blocks });
+    };
+    const recovery = session.job.checkpoints[ORIGINAL_PAID_RECOVERY_KEY] as OriginalPaidRecovery | undefined;
+    if (recovery?.version === 1 && session.job.checkpoints.paidRecoveryPolicy !== session.job.policy
+      && !session.job.checkpoints.ideas_ready && !session.job.checkpoints.subjects_ready) {
+      const subjects: Subject[] = [];
+      for (const frozen of recovery.subjects) {
+        try {
+          // Preserve original evidence clocks; one stale runner-up cannot discard
+          // still-valid paid work on another subject.
+          await validate([frozen as Subject]);
+          subjects.push(...await prepareSubjects([frozen], true));
+        } catch (error) {
+          if (!['stale_evidence', 'subject_expired'].includes(error instanceof Error ? error.message : '')) throw error;
+        }
+      }
+      const persisted = currentTweets.filter(tweet => ['queued', 'posted', 'deleted_from_x', 'draft'].includes(tweet.status));
+      const persistedDraftIds = new Set(persisted.map(tweet => tweet.draftCandidateId).filter(Boolean));
+      const excluded = new Set([...recovery.excludedIdeaIds, ...(session.job.checkpoints.queuedIdeas as string[] || []),
+        ...persisted.map(tweet => tweet.ideaId).filter(Boolean),
+        ...knownDrafts.filter(draft => ['rejected', 'selected', 'reserve'].includes(draft.status)
+          && hasOriginalModelJudgment(draft)).map(draft => draft.ideaId)]);
+      for (const entry of recovery.entries) {
+        if (entry.drafts.some(row => persistedDraftIds.has(row.draft.id) || hasOriginalModelJudgment(row.draft))
+          || entry.assessment?.drafts.some(row => hasOriginalModelJudgment(row.draft))) excluded.add(entry.idea.id);
+      }
+      const retained = recovery.ideas.filter(idea => !excluded.has(idea.id) && subjects.some(subject => subject.id === idea.briefId));
+      const normalized = normalizeIdeaCandidatesV2({ raw: retained.map(idea => ({ ...idea })), agentId: input.agentId, runId, briefs: subjects,
+        voiceProfile: input.voiceProfile, recentPosts: input.recentPosts, blocks, documents, simpleContract: true,
+        surface: 'original', now: new Date(session.job.createdAt).toISOString() });
+      const recoveredIdeas = normalized.flatMap(idea => {
+        const previous = retained.filter(row => row.briefId === idea.briefId && row.publicMove === idea.publicMove);
+        return previous.length === 1 ? [{ ...idea, id: previous[0].id, supportingReasoning: previous[0].supportingReasoning,
+          generatorRankScore: previous[0].generatorRankScore }] : [];
+      });
+      const paidDrafts: Record<string, DraftEvaluation[]> = {}, recoveryIds: string[] = [];
+      for (const entry of recovery.entries) {
+        const idea = recoveredIdeas.find(row => row.id === entry.idea.id && row.status !== 'rejected');
+        const subject = subjects.find(row => row.id === idea?.briefId);
+        if (!idea || !subject) continue;
+        const evaluations = entry.drafts.map(row => {
+          const current = preflight({ ...structuredClone(row.draft), status: 'generated', rejectionCodes: [], failureCategory: undefined }, idea, subject);
+          if (current.draft.content !== row.draft.content) throw new Error('frozen_copy_changed_by_preflight');
+          return current;
+        });
+        if (!session.job.checkpoints[`drafts_ready:${idea.id}`]) paidDrafts[`drafts_ready:${idea.id}`] = evaluations;
+        if (evaluations.some(row => row.draft.status !== 'rejected')) recoveryIds.push(idea.id);
+      }
+      // Seed the ordinary stages atomically. This is recovery of paid inputs,
+      // never permission to reuse an old assessment or reset attempt history.
+      await session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, subjects_ready: subjects, briefs: subjects,
+        ideas_ready: recoveredIdeas, ...paidDrafts, paidRecoveryIdeaIds: recoveryIds, paidRecoveryPolicy: job.policy,
+        [ORIGINAL_PAID_RECOVERY_KEY]: { ...recovery, excludedIdeaIds: [...excluded] } } }));
+    }
+    const result = await runOriginalProduction<Subject, DraftEvaluation>({ session, deps: {
+      loadSubjects: async () => {
+        const built = buildGenerationBriefsV2({ count: 1, requestedTopic: input.requestedTopic, stories, documents,
+          voiceProfile: input.voiceProfile, analysis: input.analysis, learnings: input.learnings, style: input.style,
+          trending: input.trending, allTweets: input.allTweets, signals: input.signals, blocks, recentIdeas,
+          seedRotationKey: runId, dynamicIdeaSeeds, durable: true });
+        const qualified = built.filter(b => b.evidenceMode === 'operator_opinion'
+          ? b.sourceLane === 'manual_core_exploit' && b.identityScore >= .68
+          : b.sourceDocumentIds.length > 0 && b.qualifiedClaimIds.length > 0);
+        const subjects = await prepareSubjects(prioritizeCurrentInterestBriefsV2(qualified, runId, true).slice(0, 2));
         // Existing receipt/status readers address this stable artifact name.
         await session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, briefs: subjects } }));
         return subjects;
@@ -153,7 +224,6 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
       },
       write: async (idea, subjects) => {
         const source = subjects.find(s => s.id === idea.briefId)!;
-        const brief = briefForIdea(source, idea)!;
         const prompt = buildOriginalWritingPrompt({ idea: { ...idea, contentMode: idea.contentMode || source.editorialContext.contentMode, publicMove: idea.publicMove || idea.claim }, context: contextForOriginalMode(source.editorialContext, idea.contentMode || source.editorialContext.contentMode) });
         const response = await call('tweet_writing', { ...prompt, modelStack: input.modelStack, timeoutMs: 120_000, maxTokens: 2400, temperature: .8 });
         const raw = parseArray(response.text, 'drafts');
@@ -167,9 +237,7 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
             voiceAnchorIds: source.editorialContext.exampleRefs.map(e => e.id), evidenceIds: idea.evidenceIds,
             generationModelStack: input.modelStack, generationProvider: response.provider, generationModel: response.model,
             judgeProvider: null, judgeModel: null, judgeScore: null, mutationRound: 0, status: 'generated', rejectionCodes: [], createdAt: now, updatedAt: now };
-          return preflightDraft({ draft, idea, brief, documents: sourceDocumentsForBrief(brief, documents),
-            anchors: source.editorialContext.exampleRefs.map((e, i) => ({ id: e.id, content: source.editorialContext.voiceExamples[i], topic: idea.topic })),
-            input: assessmentInput, blocks });
+          return preflight(draft, idea, source);
         });
       },
       assess: async (evaluations, idea, subjects) => {

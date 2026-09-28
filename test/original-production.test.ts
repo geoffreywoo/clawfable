@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runOriginalProduction, type OriginalProductionDependencies } from '@/lib/original-production';
-import { claimGenerationJob, GenerationJobSession, getGenerationJob } from '@/lib/generation-job';
+import { claimGenerationJob, GenerationJobSession, getGenerationJob, getGenerationCanary,
+  reconcileGenerationCanaryAssessments, generationCanaryAttemptId, type GenerationCanary } from '@/lib/generation-job';
+import { mutateAiOperationalState } from '@/lib/kv-storage';
 import type { IdeaCandidate, DraftCandidate } from '@/lib/types';
 import type { RankedPublishingCandidate } from '@/lib/publishing-candidate';
 import { runOriginalModelStage } from '@/lib/original-model-stage';
@@ -222,5 +224,209 @@ describe('single-path original production', () => {
     expect(args.session.job.checkpoints.ideas_ready).toBeUndefined();
     expect(Object.entries(args.session.job.checkpoints).some(([key, value]) => key.startsWith('call:idea_generation:')
       && (value as { result?: GenerateTextResult }).result?.text === 'malformed paid JSON')).toBe(true);
+  });
+});
+
+describe('paid original recovery selection', () => {
+  async function recoverable() {
+    const args = await setup();
+    await args.session.write(job => ({ ...job, checkpoints: {
+      ...job.checkpoints,
+      subjects_ready: [{ id: 'subject', valid: true }],
+      // An unwritten reserve is first and was previously selected. Neither
+      // ordering nor old attempt history should displace the already-paid draft.
+      ideas_ready: [idea('reserve'), { ...idea('first'), status: 'reserve' }],
+      attemptedIdeas: ['first'], selectedIdeas: ['reserve'], reserveIdeas: ['first'],
+      paidRecoveryPolicy: job.policy, paidRecoveryIdeaIds: ['first'],
+      'drafts_ready:first': [{ ...draft('first'), draft: { ...draft('first').draft, status: 'pending_assessment' } }],
+    } }));
+    return args;
+  }
+
+  it('prioritizes paid attempted work over an unwritten reserve under its matching recovery policy', async () => {
+    const args = await recoverable();
+    const result = await runOriginalProduction(args);
+    expect(result.outcome).toBe('completed');
+    expect(result.selected[0].ideaId).toBe('first');
+    expect(args.deps.loadSubjects).not.toHaveBeenCalled();
+    expect(args.deps.ideate).not.toHaveBeenCalled();
+    expect(args.deps.write).not.toHaveBeenCalled();
+    expect(args.deps.assess).toHaveBeenCalledTimes(1);
+    expect(args.deps.assess.mock.calls[0][0][0].draft.id).toBe('draft-first');
+    expect(args.session.job.checkpoints.attemptedIdeas).toEqual(['first']);
+    expect(args.session.job.checkpoints.reserveIdeas).toEqual(['reserve']);
+  });
+
+  it('consumes a completed empty current-policy recovery before moving to its unwritten reserve', async () => {
+    const args = await recoverable();
+    args.deps.assess.mockImplementationOnce(async drafts => {
+      drafts[0].draft.status = 'rejected';
+      drafts[0].draft.rejectionCodes = ['copy_judge_low_quality'];
+      return [];
+    });
+    expect((await runOriginalProduction(args)).outcome).toBe('quality_empty');
+    const empty = args.session.job.checkpoints['assessed:first'];
+    expect(empty).toMatchObject({ selected: [], drafts: [{ draft: { status: 'rejected' } }] });
+    // Simulate a crash after the assessment checkpoint but before finish or a
+    // separate consumption marker. The completed decision is authoritative.
+    const recovered = new GenerationJobSession(args.session.agentId, (await getGenerationJob(args.session.agentId))!);
+    const result = await runOriginalProduction({ session: recovered, deps: args.deps });
+    expect(result.outcome).toBe('completed');
+    expect(result.selected[0].ideaId).toBe('reserve');
+    expect(args.deps.assess).toHaveBeenCalledTimes(2);
+    expect(args.deps.assess.mock.calls.map(call => call[0][0].draft.ideaId)).toEqual(['first', 'reserve']);
+    expect(args.deps.write.mock.calls.map(call => call[0].id)).toEqual(['reserve']);
+    expect(args.deps.ideate).not.toHaveBeenCalled();
+    expect(recovered.job.checkpoints['assessed:first']).toEqual(empty);
+  });
+
+  it('replays a completed qualified recovery until queue acknowledgement without another paid stage', async () => {
+    const args = await recoverable();
+    const first = await runOriginalProduction(args);
+    const before = args.deps.persistDrafts.mock.calls.length;
+    const recovered = new GenerationJobSession(args.session.agentId, (await getGenerationJob(args.session.agentId))!);
+    const replay = await runOriginalProduction({ session: recovered, deps: args.deps });
+    expect(replay).toEqual(first);
+    expect(replay.selected[0].ideaId).toBe('first');
+    expect(args.deps.assess).toHaveBeenCalledTimes(1);
+    expect(args.deps.write).not.toHaveBeenCalled();
+    expect(args.deps.ideate).not.toHaveBeenCalled();
+    expect(args.deps.persistDrafts.mock.calls.slice(before).flatMap(call => call[0]).every(row => row.status === 'selected')).toBe(true);
+  });
+
+  it('never reselects queued recovery ideas even when their paid eligibility and qualified checkpoint remain', async () => {
+    const args = await recoverable();
+    expect((await runOriginalProduction(args)).selected[0].ideaId).toBe('first');
+    await args.session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, queuedIdeas: ['first'] } }));
+    const result = await runOriginalProduction(args);
+    expect(result.selected[0].ideaId).toBe('reserve');
+    expect(args.deps.assess.mock.calls.map(call => call[0][0].draft.ideaId)).toEqual(['first', 'reserve']);
+    expect(args.deps.write.mock.calls.map(call => call[0].id)).toEqual(['reserve']);
+    expect(args.deps.ideate).not.toHaveBeenCalled();
+    expect(args.session.job.checkpoints.queuedIdeas).toEqual(['first']);
+  });
+
+  it('does not use stale-policy recovery eligibility to override attempt history', async () => {
+    const args = await recoverable();
+    await args.session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, paidRecoveryPolicy: 'older-policy' } }));
+    const result = await runOriginalProduction(args);
+    expect(result.selected[0].ideaId).toBe('reserve');
+    expect(args.deps.assess.mock.calls[0][0][0].draft.ideaId).toBe('reserve');
+    expect(args.deps.write.mock.calls.map(call => call[0].id)).toEqual(['reserve']);
+  });
+
+  it.each(['missing', 'empty'] as const)('does not purchase replacement writing for a %s paid recovery checkpoint', async state => {
+    const args = await recoverable();
+    await args.session.write(job => {
+      const checkpoints = { ...job.checkpoints };
+      if (state === 'missing') delete checkpoints['drafts_ready:first'];
+      else checkpoints['drafts_ready:first'] = [];
+      return { ...job, checkpoints };
+    });
+    const result = await runOriginalProduction(args);
+    expect(result.selected[0].ideaId).toBe('reserve');
+    expect(args.deps.assess.mock.calls[0][0][0].draft.ideaId).toBe('reserve');
+    expect(args.deps.write.mock.calls.map(call => call[0].id)).toEqual(['reserve']);
+    expect(args.deps.ideate).not.toHaveBeenCalled();
+    expect(args.session.job.checkpoints.attemptedIdeas).toEqual(['first']);
+  });
+
+  async function startCanary(agentId: string): Promise<GenerationCanary> {
+    const canary: GenerationCanary = { id: `campaign-${agentId}`, limitUsd: 6, status: 'active', emptyRuns: 0,
+      emptyAttemptIds: [], queuedIds: [] };
+    await mutateAiOperationalState<GenerationCanary, void>(agentId, 'generation-canary', () => ({ value: canary, result: undefined }));
+    return canary;
+  }
+
+  it('reconciles an empty recovery after a crash before finish exactly once before advancing the reserve', async () => {
+    const args = await recoverable();
+    const canary = await startCanary(args.session.agentId);
+    await args.session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, canaryAttemptPrefix: job.id } }));
+    args.deps.assess.mockImplementationOnce(async drafts => {
+      drafts[0].draft.status = 'rejected'; drafts[0].draft.rejectionCodes = ['copy_judge_low_quality']; return [];
+    });
+    expect((await runOriginalProduction(args)).outcome).toBe('quality_empty');
+    expect((await getGenerationCanary(args.session.agentId))?.emptyRuns).toBe(0);
+    const recovered = new GenerationJobSession(args.session.agentId, (await getGenerationJob(args.session.agentId))!);
+    const expectedAttempt = generationCanaryAttemptId(canary, recovered.job.id, ['first']);
+    expect(recovered.job.checkpoints['assessed:first']).toMatchObject({ canaryAttemptId: expectedAttempt });
+    expect(await reconcileGenerationCanaryAssessments(args.session.agentId, recovered.job))
+      .toMatchObject({ id: canary.id, emptyRuns: 1, emptyAttemptIds: [expectedAttempt], limitUsd: 6, status: 'active' });
+    expect(await reconcileGenerationCanaryAssessments(args.session.agentId, recovered.job))
+      .toMatchObject({ emptyRuns: 1, emptyAttemptIds: [expectedAttempt] });
+    const result = await runOriginalProduction({ session: recovered, deps: args.deps });
+    expect(result.selected[0].ideaId).toBe('reserve');
+    expect(args.deps.assess.mock.calls.map(call => call[0][0].draft.ideaId)).toEqual(['first', 'reserve']);
+    expect(await reconcileGenerationCanaryAssessments(args.session.agentId, recovered.job))
+      .toMatchObject({ emptyRuns: 1, emptyAttemptIds: [expectedAttempt] });
+  });
+
+  it('retains the reconciled empty attempt across compatible policy invalidation', async () => {
+    const args = await recoverable();
+    await startCanary(args.session.agentId);
+    await args.session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, canaryAttemptPrefix: job.id } }));
+    args.deps.assess.mockImplementationOnce(async drafts => {
+      drafts[0].draft.status = 'rejected'; drafts[0].draft.rejectionCodes = ['copy_judge_low_quality']; return [];
+    });
+    await runOriginalProduction(args);
+    // The wrapper must reconcile before claim clears obsolete assessments.
+    await reconcileGenerationCanaryAssessments(args.session.agentId, args.session.job);
+    const next = (await claimGenerationJob(args.session.agentId, {}, 'new-policy', Date.now() + 301_000, () => true))!;
+    expect(next.id).toBe(args.session.job.id);
+    expect(next.checkpoints['assessed:first']).toBeUndefined();
+    expect(await reconcileGenerationCanaryAssessments(args.session.agentId, next)).toMatchObject({ emptyRuns: 1 });
+    expect(args.deps.assess).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops at three reconciled empty attempts and does not count subsequent checkpoints or buy more work', async () => {
+    const args = await recoverable();
+    const canary = await startCanary(args.session.agentId);
+    await args.session.write(job => ({ ...job, checkpoints: { ...job.checkpoints,
+      ...Object.fromEntries(['one', 'two', 'three', 'four'].map(id => [`assessed:${id}`, { selected: [],
+        canaryAttemptId: generationCanaryAttemptId(canary, job.id, [id]),
+        drafts: [{ ...draft(id), draft: { ...draft(id).draft, status: 'rejected', rejectionCodes: ['copy_judge_low_quality'] } }] }])),
+    } }));
+    const reconciled = await reconcileGenerationCanaryAssessments(args.session.agentId, args.session.job);
+    expect(reconciled).toMatchObject({ status: 'blocked', emptyRuns: 3, id: canary.id, limitUsd: 6,
+      emptyAttemptIds: ['one', 'two', 'three'].map(id => generationCanaryAttemptId(canary, args.session.job.id, [id])) });
+    expect(await reconcileGenerationCanaryAssessments(args.session.agentId, args.session.job)).toEqual(reconciled);
+    expect(args.deps.ideate).not.toHaveBeenCalled();
+    expect(args.deps.write).not.toHaveBeenCalled();
+    expect(args.deps.assess).not.toHaveBeenCalled();
+  });
+
+  it('does not count selected, pending, incomplete, or unavailable assessments as completed empty attempts', async () => {
+    const args = await recoverable();
+    const canary = await startCanary(args.session.agentId);
+    await args.session.write(job => ({ ...job, checkpoints: { ...job.checkpoints,
+      'assessed:qualified': { canaryAttemptId: generationCanaryAttemptId(canary, job.id, ['qualified']), selected: [{ draftCandidateId: 'qualified' }], drafts: [draft('qualified')] },
+      'assessed:pending': { canaryAttemptId: generationCanaryAttemptId(canary, job.id, ['pending']), selected: [], drafts: [{ ...draft('pending'), draft: { ...draft('pending').draft, status: 'pending_assessment' } }] },
+      'assessed:unavailable': { canaryAttemptId: generationCanaryAttemptId(canary, job.id, ['unavailable']), selected: [], drafts: [draft('unavailable')] },
+      'assessed:no-drafts': { canaryAttemptId: generationCanaryAttemptId(canary, job.id, ['no-drafts']), selected: [], drafts: [] },
+      'assessed:malformed': { canaryAttemptId: generationCanaryAttemptId(canary, job.id, ['malformed']), drafts: [draft('malformed')] },
+    } }));
+    expect(await reconcileGenerationCanaryAssessments(args.session.agentId, args.session.job))
+      .toMatchObject({ status: 'active', emptyRuns: 0, emptyAttemptIds: [] });
+    expect(args.deps.assess).not.toHaveBeenCalled();
+  });
+
+  it('never infers new-window attempts from legacy or previously reviewed empty decisions', async () => {
+    const args = await recoverable();
+    const previous = await startCanary(args.session.agentId);
+    const current: GenerationCanary = { ...previous, recoveries: [{ id: 'reviewed-recovery', policy: 'policy',
+      evidenceRef: 'offline-receipt', evidenceHash: 'a'.repeat(64), resumedAt: createdAt,
+      previousEmptyRuns: 3, previousEmptyAttemptIds: ['old-1', 'old-2', 'old-3'], previousPolicy: 'old-policy' }] };
+    await mutateAiOperationalState<GenerationCanary, void>(args.session.agentId, 'generation-canary', () => ({ value: current, result: undefined }));
+    const rejected = (id: string) => [{ ...draft(id), draft: { ...draft(id).draft, status: 'rejected', rejectionCodes: ['copy_judge_low_quality'] } }];
+    await args.session.write(job => ({ ...job, checkpoints: { ...job.checkpoints,
+      'assessed:legacy': { selected: [], drafts: rejected('legacy') },
+      'assessed:old': { canaryAttemptId: generationCanaryAttemptId(previous, job.id, ['old']), selected: [], drafts: rejected('old') },
+      'assessed:current': { canaryAttemptId: generationCanaryAttemptId(current, job.id, ['current']), selected: [], drafts: rejected('current') },
+    } }));
+    expect(await reconcileGenerationCanaryAssessments(args.session.agentId, args.session.job)).toMatchObject({
+      status: 'active', emptyRuns: 1, emptyAttemptIds: [generationCanaryAttemptId(current, args.session.job.id, ['current'])],
+      recoveries: current.recoveries,
+    });
+    expect(args.deps.assess).not.toHaveBeenCalled();
   });
 });

@@ -52,10 +52,24 @@ export async function runOriginalProduction<Subject, Draft extends OriginalDraft
     return deps.ideate(subjects);
   })).map(normalizeCandidateDisposition);
   const attempted = new Set(session.job.checkpoints.attemptedIdeas as string[] || []);
-  const available = ideas.filter(idea => !attempted.has(idea.id)
+  const queued = new Set(session.job.checkpoints.queuedIdeas as string[] || []);
+  const recovery = new Set(session.job.checkpoints.paidRecoveryPolicy === session.job.policy
+    ? session.job.checkpoints.paidRecoveryIdeaIds as string[] || [] : []);
+  const recoverable = (id: string) => {
+    const assessment = session.job.checkpoints[`assessed:${id}`] as { selected?: unknown[] } | undefined;
+    const drafts = session.job.checkpoints[`drafts_ready:${id}`];
+    // An empty current assessment consumes this recovery. A qualified result
+    // remains replayable until queue acknowledgement, including after a crash.
+    return recovery.has(id) && !queued.has(id) && Array.isArray(drafts) && drafts.length > 0
+      && (!assessment || !!assessment.selected?.length);
+  };
+  const available = ideas.filter(idea => !queued.has(idea.id)
+    && (recovery.has(idea.id) ? recoverable(idea.id) : !attempted.has(idea.id))
     && ['generated', 'selected', 'reserve'].includes(idea.status));
   const previousSelection = (session.job.checkpoints.selectedIdeas as string[] || [])[0];
-  const chosen = available.find(idea => idea.id === previousSelection) || available[0];
+  const paid = available.filter(idea => recoverable(idea.id));
+  const priority = paid.length ? paid : available;
+  const chosen = priority.find(idea => idea.id === previousSelection) || priority[0];
   if (!chosen) {
     await deps.persistIdeas?.(ideas);
     if (ideas.some(idea => idea.status === 'pending_assessment')) throw new Error('stage_output_unavailable');
@@ -95,7 +109,10 @@ export async function runOriginalProduction<Subject, Draft extends OriginalDraft
     if (!selected.length && completedDrafts.some(artifact => artifact.draft.status === 'pending_assessment')) {
       throw new Error('copy_judgment_failed');
     }
-    return { drafts: completedDrafts, selected };
+    return { drafts: completedDrafts, selected,
+      canaryAttemptId: session.job.checkpoints.canaryAttemptPrefix
+        ? `${session.job.checkpoints.canaryAttemptPrefix}:${selectedIdea.id}` : undefined,
+    };
   });
   await deps.persistDrafts?.(assessed.drafts.map(artifact => artifact.draft));
   return result(assessed.selected.length ? 'completed' : 'quality_empty', ideas, assessed.drafts, assessed.selected);
