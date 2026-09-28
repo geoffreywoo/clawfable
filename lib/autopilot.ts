@@ -1639,6 +1639,16 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     };
   }
 
+  if (durableGenerationEnabled(agentId, settings)) {
+    const canary = await getGenerationCanary(agentId);
+    const qualifiedCount = new Set((canary?.queuedIds || []).filter(id => typeof id === 'string' && id.trim()).map(id => id.trim())).size;
+    if (canary && (canary.status !== 'passed' || qualifiedCount < 2)) {
+      return { agentId, action: 'skipped', repliesSent,
+        reason: `Original posting held: publishing canary ${canary.status}; ${qualifiedCount}/2 distinct queue-qualified originals. ${canary.status === 'blocked'
+          ? 'Resolve the canary blocker before posting.' : 'Finish the bounded canary before posting.'}` };
+    }
+  }
+
   // Pick tweet with diversity awareness (avoids consecutive same-format/topic + near-duplicates)
   const recentPostEntries = postLog
     .filter(isSuccessfulOriginalPostLogEntry)

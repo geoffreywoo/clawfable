@@ -1,4 +1,4 @@
-import { getAiOperationalState, getGenerationRuns } from './kv-storage';
+import { getAiOperationalState } from './kv-storage';
 import type { AiSpendLedger } from './ai-budget';
 import Anthropic from '@anthropic-ai/sdk';
 import { jsonSchemaOutputFormat } from '@anthropic-ai/sdk/helpers/json-schema';
@@ -659,7 +659,7 @@ export async function generateText(options: GenerateTextOptions): Promise<Genera
     const attempts = Object.values(ledger?.attempts || {}).filter(a=>a.runId===options.spendContext!.runId && a.requestKey===options.spendContext!.requestKey);
     const recovered = attempts.find(a=>a.recoveredResult);
     if (recovered?.recoveredResult) return recovered.recoveredResult;
-    if (attempts.some(a=>a.state==='dispatched' && a.reconciliationState !== 'unavailable')) throw new Error('provider_pending');
+    if (attempts.some(a=>a.state==='dispatched' && (a.reconciliationState !== 'unavailable' || !a.reconciliationReason))) throw new Error('provider_pending');
   }
   const callStartedAt = Date.now();
   const requestedChain = resolveModelChain(options);
@@ -810,33 +810,39 @@ export async function reconcileAiProviderAttempts(agentId: string): Promise<{set
   }
   const client = process.env.OPENAI_API_KEY ? new OpenAI({apiKey:process.env.OPENAI_API_KEY,maxRetries:0,timeout:15_000}) : null;
   let settled=0,unavailable=0;
-  const traces = await getGenerationRuns(agentId,120);
   // Leave the generation worker its complete 240-second window. Pending
   // recoveries are revisited by later ticks without buying replacement work.
   const deadline = Date.now() + 30_000;
   let providerReads = 0;
-  for (const a of Object.values(ledger?.attempts || {}).filter(a=>a.state==='dispatched' && Date.now()-Date.parse(a.createdAt)>300_000 && a.reconciliationState!=='unavailable').slice(-8)) {
+  for (const a of Object.values(ledger?.attempts || {}).filter(a=>a.state==='dispatched' && Date.now()-Date.parse(a.createdAt)>300_000 && (a.reconciliationState!=='unavailable' || !a.reconciliationReason)).slice(-8)) {
     if (Date.now() >= deadline || providerReads >= 2) break;
     const reservation={context:{agentId,operation:a.operation,runId:a.runId},id:a.id,day:a.day};
-    if (!a.responseId && a.provider==='openai') {
-      const ids=[...new Set((traces.find(t=>t.id===a.runId)?.modelCalls || []).filter(c=>c.stage===a.task && (c.model===a.model || c.requestedModel===a.model)).flatMap(c=>c.responseProgress?.responseId ? [c.responseProgress.responseId] : []))];
-      if (ids.length===1) { a.responseId=ids[0];await updateAiAttempt(reservation,{responseId:a.responseId}); }
+    // Local configuration says nothing about whether the provider can recover
+    // this response. Keep it pending (and committed) until a configured worker retries.
+    if (a.provider==='openai' && !client) continue;
+    // Only this attempt's durable response ID establishes ownership. A matching
+    // stage/model in a run trace may belong to a later, separately billed call.
+    if (a.provider!=='openai' || !a.responseId) {
+      await updateAiAttempt(reservation,{reconciliationState:'unavailable',reconciliationReason:a.provider!=='openai' ? 'provider_unsupported' : 'response_id_missing'}); unavailable++; continue;
     }
-    if (a.provider!=='openai' || !a.responseId || !client) {
-      await updateAiAttempt(reservation,{reconciliationState:'unavailable'}); unavailable++; continue;
+    // Older unavailable receipts do not distinguish absent local credentials
+    // from a provider 404. Probe the saved response ID once; a transient error
+    // must leave it pending so it cannot authorize replacement generation.
+    if (a.reconciliationState==='unavailable' && !a.reconciliationReason) {
+      await updateAiAttempt(reservation,{reconciliationState:'pending'});
     }
     try {
       providerReads++;
       const response=await client.responses.retrieve(a.responseId);
       if (['queued','in_progress'].includes(response.status || '')) continue;
       const observedUsd=estimateAiUsageCostUsd(a.model,response.usage?.input_tokens,response.usage?.output_tokens);
-      if (observedUsd===null) { await updateAiAttempt(reservation,{reconciliationState:'unavailable'}); unavailable++; continue; }
+      if (observedUsd===null) { await updateAiAttempt(reservation,{reconciliationState:'unavailable',reconciliationReason:'usage_unavailable'}); unavailable++; continue; }
       const result:GenerateTextResult={text:extractOpenAiText(response),stopReason:getOpenAiStopReason(response),provider:'openai',model:a.model,providerModel:response.model,
         inputTokens:response.usage?.input_tokens,outputTokens:response.usage?.output_tokens,spendAttemptId:a.id};
       await updateAiAttempt(reservation,{state:'settled',observedUsd,inputTokens:result.inputTokens,outputTokens:result.outputTokens,reconciliationState:'settled',
         ...(response.status==='completed' && result.text.trim() ? {recoveredResult:result}:{})}); settled++;
     } catch(error) {
-      if ((error as {status?:number}).status===404) { await updateAiAttempt(reservation,{reconciliationState:'unavailable'}); unavailable++; }
+      if ((error as {status?:number}).status===404) { await updateAiAttempt(reservation,{reconciliationState:'unavailable',reconciliationReason:'response_not_found'}); unavailable++; }
     }
   }
   return {settled,unavailable};

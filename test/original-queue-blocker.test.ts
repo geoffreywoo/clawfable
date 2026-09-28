@@ -7,6 +7,12 @@ const job = { status: 'deferred', stage: 'tweet_writing', blocker: 'reserve_read
   nextAttemptAt: now - 1000, expiresAt: now + 3600000 } as GenerationJob;
 const canary = { status: 'blocked', emptyRuns: 3 } as GenerationCanary;
 
+it('reports an operational recovery stop without inventing editorial failures', () => {
+  const reason = originalQueueBlockerReason(null, { ...canary, emptyRuns: 0, blockedReason: 'recovery_context_mismatch' });
+  expect(reason).toContain('refreshed account context started a new job');
+  expect(reason).not.toContain('editorial-empty');
+});
+
 it('separates repaired parent failures from completed current assessments', () => {
   const base = { generationRunId: 'job', updatedAt: '2026-09-27T00:00:00Z' };
   const result = generationFailureDiagnostics('job', [

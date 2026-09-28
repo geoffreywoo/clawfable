@@ -105,6 +105,21 @@ function compactOwnerStyle(communicationStyle: string): {
   return { baseStyle: boundedText(kept.filter(Boolean).join('\n\n'), 'baseStyle', 1200), directives, excluded: unique(excluded) };
 }
 
+/** Stable author input for durable identity, independent of generated learning appendices. */
+export function originalAuthorIdentity(profile: VoiceProfile | null | undefined) {
+  if (!profile) return profile;
+  try {
+    const { baseStyle, directives } = compactOwnerStyle(profile.communicationStyle || '');
+    // Keep every other profile field and complete owner coaching. The list of
+    // excluded application sections is diagnostic, not part of author identity.
+    return { ...profile, communicationStyle: { baseStyle, directives } };
+  } catch {
+    // Unknown or oversized owner material must not disappear from identity.
+    // The editorial builder still enforces its existing contract separately.
+    return { ...profile };
+  }
+}
+
 function accountRestrictions(profile: VoiceProfile, portfolio?: PortfolioCompanyGenerationContext | null): OriginalOwnerGuidance[] {
   const rules: Array<[string, string]> = [];
   if (isGeoffreyVoiceProfile(profile)) {

@@ -33,6 +33,9 @@ export function originalQueueBlockerReason(
     .map(([code, count]) => `${code} (${count})`);
   const gates = failedGates.length ? ` Latest failed gates: ${failedGates.join(', ')}.` : '';
   if (canary?.status === 'blocked') {
+    if (canary.blockedReason === 'recovery_context_mismatch') {
+      return 'Original queue empty: paid-work recovery stopped because refreshed account context started a new job. Next: validate context compatibility and resume saved drafts; no automatic paid retry is scheduled.';
+    }
     return `Original queue empty: canary blocked after ${canary.emptyRuns} consecutive editorial-empty attempts.${gates} Next: validate an offline fix before resuming paid canary work; no automatic retry is scheduled.`;
   }
   if (!job) return 'Original queue empty: no active generation job. Next: the generation worker will attempt refill on its next scheduled tick.';

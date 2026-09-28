@@ -58,8 +58,9 @@ export async function getReliableGenerationStatus(agentId:string) {
   const {inspectPublishableOriginalQueue}=await import('./autopilot');
   const publishable=agent ? await inspectPublishableOriginalQueue(agent) : [];
   const campaignCommittedUsd=Object.values(ledger?.attempts || {}).filter(a=>a.campaignId===canary?.id).reduce((n,a)=>n+committedAiSpend(a),0);
-  const blocker=dispatch?.state==='dispatched' ? 'x_publication_unresolved' : canary?.status==='blocked' ? 'canary_empty_limit' : job?.blocker || null;
+  const blocker=dispatch?.state==='dispatched' ? 'x_publication_unresolved' : canary?.status==='blocked' ? canary.blockedReason || 'canary_empty_limit' : job?.blocker || null;
   const nextAction=blocker==='x_publication_unresolved' ? 'Reconcile the official X receipt before another original write.' : blocker==='canary_empty_limit' ? 'Inspect the shared failed stage before any further paid canary work.'
+    : blocker==='recovery_context_mismatch' ? 'Reconcile current account context with saved paid work before another generation call.'
     : blocker==='malformed_output' ? 'Inspect the saved raw response and fix its parser or contract. No unchanged paid retry is scheduled before subject expiry.'
     : blocker==='reserve_ready' ? 'Resume the next qualified reserve idea.'
     : blocker?.includes('budget') ? 'Wait for funded capacity; preserve all unresolved charges.'

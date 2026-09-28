@@ -75,6 +75,19 @@ const mocks = vi.hoisted(() => ({
   discoverCurrentTrends: vi.fn(),
   generateText: vi.fn(),
   semanticIdeaSimilarity: vi.fn(),
+  getGenerationCanary: vi.fn(),
+  reconcileOriginalPostDispatch: vi.fn(),
+  dispatchOriginalPost: vi.fn(),
+}));
+
+vi.mock('@/lib/generation-job', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/generation-job')>(),
+  getGenerationCanary: mocks.getGenerationCanary,
+}));
+vi.mock('@/lib/original-post-dispatch', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/original-post-dispatch')>(),
+  reconcileOriginalPostDispatch: mocks.reconcileOriginalPostDispatch,
+  dispatchOriginalPost: mocks.dispatchOriginalPost,
 }));
 
 vi.mock('@/lib/kv-storage', () => ({
@@ -426,6 +439,9 @@ beforeEach(() => {
   vi.clearAllMocks();
 
   mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings });
+  mocks.getGenerationCanary.mockResolvedValue(null);
+  mocks.reconcileOriginalPostDispatch.mockResolvedValue(null);
+  mocks.dispatchOriginalPost.mockResolvedValue({ tweetId: 'x-durable', username: 'geoffwoo' });
   mocks.getAgent.mockResolvedValue(baseAgent);
   mocks.getAgentOwnerId.mockResolvedValue('owner-logging-1');
   mocks.getUser.mockResolvedValue(null);
@@ -588,6 +604,59 @@ afterEach(() => {
 });
 
 describe('autopilot remote debug logging', () => {
+  describe('durable original publishing canary', () => {
+    function setupCanaryPosting(agentId = '13', durable = true) {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-28T18:00:00Z'));
+      const agent = { ...baseAgent, id: agentId, handle: 'geoffwoo' };
+      process.env.AUTOMATION_EXEMPT_AGENT_IDS = agentId;
+      mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings, durableGenerationEnabled: durable });
+      mocks.getQueuedTweets.mockResolvedValue([{ ...validQueuedTweet, agentId,
+        content: 'a quiet dinner sounds good to me.', topic: 'health', confidenceScore: .99, candidateScore: 99 }]);
+      return agent;
+    }
+
+    it.each([
+      ['active', ['one'], 1],
+      ['active', ['one', 'two'], 2],
+      ['blocked', ['one', 'two'], 2],
+      ['passed', ['one', 'one'], 1],
+      ['passed', ['one', '  ', ''], 1],
+    ] as const)('holds a ready original while canary is %s with receipts %j', async (status, queuedIds, count) => {
+      const agent = setupCanaryPosting();
+      mocks.getGenerationCanary.mockResolvedValue({ id: 'canary', status, queuedIds, emptyRuns: 0, limitUsd: 6 });
+      const result = await runAutopilot(agent);
+      expect(result).toMatchObject({ action: 'skipped', reason: expect.stringContaining(`${count}/2 distinct queue-qualified originals`) });
+      expect(result.reason).toContain(`publishing canary ${status}`);
+      expect(mocks.dispatchOriginalPost).not.toHaveBeenCalled();
+      expect(mocks.postTweet).not.toHaveBeenCalled();
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(mocks.generateTweetBatchV2).not.toHaveBeenCalled();
+      expect(mocks.updateTweet).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: 'posted' }));
+    });
+
+    it.each([null, { id: 'canary', status: 'passed', queuedIds: ['one', 'two'], emptyRuns: 0, limitUsd: 6 }])(
+      'preserves posting when no canary exists or its two-original requirement passed: %j', async canary => {
+        const agent = setupCanaryPosting();
+        mocks.getGenerationCanary.mockResolvedValue(canary);
+        const result = await runAutopilot(agent);
+        expect(result.action).toBe('posted');
+        expect(mocks.dispatchOriginalPost).toHaveBeenCalledTimes(1);
+        expect(mocks.postTweet).not.toHaveBeenCalled();
+        expect(mocks.generateText).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([['another-agent', true], ['13', false]] as const)('does not change the existing path for account %s with durable flag %s', async (agentId, durable) => {
+      const agent = setupCanaryPosting(agentId, durable);
+      mocks.getGenerationCanary.mockResolvedValue({ id: 'canary', status: 'blocked', queuedIds: [], emptyRuns: 3, limitUsd: 6 });
+      expect((await runAutopilot(agent)).action).toBe('posted');
+      expect(mocks.getGenerationCanary).not.toHaveBeenCalled();
+      expect(mocks.postTweet).toHaveBeenCalledTimes(1);
+      expect(mocks.dispatchOriginalPost).not.toHaveBeenCalled();
+    });
+  });
+
   it('leaves operator-managed accounts to their sole writer before any reads, AI, or X calls', async () => {
     vi.stubEnv('CLAWFABLE_OPERATOR_MANAGED_AGENT_IDS', ' 5 ');
     const result = await runAutopilot({ ...baseAgent, id: '5', handle: 'antihunterai' });

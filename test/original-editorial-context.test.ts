@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { editorialHash, editorialPrompt } from '@/lib/editorial-contract';
-import { buildOriginalEditorialContext, contextForOriginalMode, ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS, type OriginalVoiceExample } from '@/lib/original-editorial-context';
+import { buildOriginalEditorialContext, contextForOriginalMode, originalAuthorIdentity, ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS, type OriginalVoiceExample } from '@/lib/original-editorial-context';
 import type { VoiceProfile } from '@/lib/soul-parser';
 import type { SubjectPacket } from '@/lib/subject-packet';
 import { buildAntiFundPortfolioContext, getAntiFundPortfolioCompany } from '@/lib/antifund-portfolio';
@@ -9,6 +9,66 @@ const profile: VoiceProfile = { accountHandle: 'geoffwoo', summary: 'Founder and
 const subject: SubjectPacket = { version: 'subject-packet-1', subject: 'Cognition agent pricing', sourceIds: ['source-a'], supportedFacts: ['Cognition says its agent costs $10.'], unverifiedContext: 'Unverified: adoption is growing.', permittedModes: ['opinion', 'prediction', 'factual_claim', 'observation'], observedAt: '2026-09-28T00:00:00Z', expiresAt: '2026-09-29T00:00:00Z', interest: { kind: 'research', relevance: .9 } };
 const example = (id: string, overrides: Partial<OriginalVoiceExample> = {}): OriginalVoiceExample => ({ id, content: `A concrete owner example ${id}.`, provenance: 'operator_composed', dispositions: ['diction_anchor'], ...overrides });
 const build = (overrides: Partial<Parameters<typeof buildOriginalEditorialContext>[0]> = {}) => buildOriginalEditorialContext({ voiceProfile: profile, subject, contentMode: 'opinion', voiceExamples: [example('a')], ...overrides });
+
+describe('stable original author identity', () => {
+  const coaching = (raw = 'Never disclose private revenue, except figures I have published.', lesson = 'Generated explanation') => [
+    '## OPERATOR VOICE DIRECTIVES (permanent rules from coaching — follow these)',
+    `1. Normalized rule.\n   Lesson: ${lesson}\n   Scope: topic / avoid: private revenue\n   Raw coaching: ${raw}`,
+    'Note: Prefer the more recent rule when directives conflict.',
+  ].join('\n');
+
+  it('ignores only recognized generated appendices, their values and the excluded-section list', () => {
+    const base = `${profile.communicationStyle}\n${coaching()}`;
+    const first = { ...profile, communicationStyle: `${base}\n## PERSONALIZATION MEMORY\nold\n## NEVER DO THIS AGAIN\nold generated advice` };
+    const fresh = { ...profile, communicationStyle: `${base}\n## PERSONALIZATION MEMORY\nnew derived state\n## HIGH-PERFORMING REFERENCE BANK\nnew examples` };
+    expect(originalAuthorIdentity(first)).toEqual(originalAuthorIdentity(fresh));
+    expect(originalAuthorIdentity(first)).toEqual(originalAuthorIdentity({ ...profile, communicationStyle: base }));
+    expect(originalAuthorIdentity({ ...profile, communicationStyle: `${profile.communicationStyle}\nStyle analysis: one` }))
+      .toEqual(originalAuthorIdentity({ ...profile, communicationStyle: `${profile.communicationStyle}\nStyle analysis: another` }));
+  });
+
+  it('preserves full raw coaching, exceptions and precedence while ignoring duplicate generated lessons', () => {
+    const first = { ...profile, communicationStyle: `${profile.communicationStyle}\n${coaching()}` };
+    const fresh = { ...profile, communicationStyle: `${profile.communicationStyle}\n${coaching(undefined, 'New model explanation')}` };
+    const identity = originalAuthorIdentity(first);
+    expect(identity).toEqual(originalAuthorIdentity(fresh));
+    expect(JSON.stringify(identity)).toContain('Never disclose private revenue, except figures I have published.');
+    expect(JSON.stringify(identity)).toContain('Prefer the more recent rule');
+    expect(identity).not.toEqual(originalAuthorIdentity({ ...first,
+      communicationStyle: `${profile.communicationStyle}\n${coaching('Never disclose private revenue, including published figures.')}` }));
+  });
+
+  it.each(['accountHandle', 'tone', 'summary', 'topics', 'antiGoals', 'communicationStyle'] as const)(
+    'keeps genuine owner changes in %s incompatible', key => {
+      const changed = { ...profile, [key]: Array.isArray(profile[key]) ? ['changed owner instruction'] : 'changed owner instruction' };
+      expect(originalAuthorIdentity(changed)).not.toEqual(originalAuthorIdentity(profile));
+    },
+  );
+
+  it('retains unknown profile fields and unknown owner sections without mutating them', () => {
+    const custom = { ...profile, futureOwnerRestriction: 'No private customer names.',
+      communicationStyle: `${profile.communicationStyle}\n## My custom boundary\nNever name private customers.` };
+    const original = structuredClone(custom);
+    const identity = originalAuthorIdentity(custom);
+    expect(JSON.stringify(identity)).toContain('futureOwnerRestriction');
+    expect(JSON.stringify(identity)).toContain('Never name private customers.');
+    expect(identity).not.toEqual(originalAuthorIdentity({ ...custom, communicationStyle: `${profile.communicationStyle}\n## My custom boundary\nNever name any customers.` }));
+    expect(custom).toEqual(original);
+  });
+
+  it('falls back to complete raw identity when coaching is unfamiliar or owner content is oversized', () => {
+    for (const communicationStyle of [
+      `${profile.communicationStyle}\n## OPERATOR VOICE DIRECTIVES\nAn unfamiliar owner instruction.`,
+      `${profile.communicationStyle}\n## My custom boundary\n${'Complete owner instruction. '.repeat(100)}`,
+    ]) {
+      const unfamiliar = { ...profile, communicationStyle };
+      expect(() => originalAuthorIdentity(unfamiliar)).not.toThrow();
+      expect(originalAuthorIdentity(unfamiliar)).toEqual(unfamiliar);
+      expect(originalAuthorIdentity({ ...unfamiliar, communicationStyle: `${communicationStyle} Changed restriction.` }))
+        .not.toEqual(originalAuthorIdentity(unfamiliar));
+    }
+  });
+});
 
 describe('one original editorial context', () => {
   it('isolates the real enriched-profile shape from legacy rubrics, example banks and model lessons', () => {

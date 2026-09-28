@@ -123,7 +123,7 @@ export interface CanaryRecoveryEvidence {
   evidenceRef: string;
   evidenceHash: string;
 }
-export interface GenerationCanary { id:string; limitUsd:number; emptyRuns:number; emptyAttemptIds?:string[]; queuedIds:string[]; status:'active'|'passed'|'blocked'; blockedPolicy?:string; resumedFromPolicy?:string;
+export interface GenerationCanary { id:string; limitUsd:number; emptyRuns:number; emptyAttemptIds?:string[]; queuedIds:string[]; status:'active'|'passed'|'blocked'; blockedPolicy?:string; blockedReason?:string; resumedFromPolicy?:string;
   recoveries?: Array<CanaryRecoveryEvidence & { resumedAt:string; previousEmptyRuns:number; previousEmptyAttemptIds:string[]; previousPolicy:string }>;
 }
 /** Identifies code; a version change alone is not evidence that a blocker is fixed. */
@@ -146,7 +146,7 @@ export async function resumeGenerationCanaryWithEvidence(agentId:string, evidenc
     if (!state || state.status!=='blocked' || state.recoveries?.some(r=>r.id===evidence.id || r.evidenceHash===evidence.evidenceHash)) return {value:state!,result:state || null,skip:true};
     const previousPolicy=state.blockedPolicy || 'unrecorded';
     const recovery={...evidence,resumedAt:new Date().toISOString(),previousEmptyRuns:state.emptyRuns,previousEmptyAttemptIds:[...state.emptyAttemptIds || []],previousPolicy};
-    const value:GenerationCanary={...state,status:'active',emptyRuns:0,blockedPolicy:undefined,resumedFromPolicy:previousPolicy,recoveries:[...state.recoveries || [],recovery]};
+    const value:GenerationCanary={...state,status:'active',emptyRuns:0,blockedPolicy:undefined,blockedReason:undefined,resumedFromPolicy:previousPolicy,recoveries:[...state.recoveries || [],recovery]};
     return {value,result:value};
   });
 }
@@ -174,6 +174,6 @@ export async function recordGenerationCanary(agentId:string, event:{queuedId?:st
     const emptyRuns=event.queuedId ? 0 : state.emptyRuns+(event.empty?1:0);
     const emptyAttemptIds=event.empty && event.attemptId ? [...state.emptyAttemptIds || [],event.attemptId] : state.emptyAttemptIds;
     const status:GenerationCanary['status']=queuedIds.length>=2?'passed':emptyRuns>=3?'blocked':'active';
-    return {value:{...state,queuedIds,emptyRuns,emptyAttemptIds,status,...(status==='blocked'?{blockedPolicy:canaryPolicyKey()}:{})},result:undefined};
+    return {value:{...state,queuedIds,emptyRuns,emptyAttemptIds,status,...(status==='blocked'?{blockedPolicy:canaryPolicyKey(),blockedReason:'canary_empty_limit'}:{})},result:undefined};
   });
 }

@@ -32,6 +32,8 @@ export interface AiSpendAttempt {
   requestKey?: string;
   responseId?: string;
   reconciliationState?: string;
+  /** Why provider recovery is terminal; absent on legacy ambiguous unavailable receipts. */
+  reconciliationReason?: 'provider_unsupported' | 'response_id_missing' | 'response_not_found' | 'usage_unavailable';
   recoveredResult?: import('./ai').GenerateTextResult;
   campaignId?: string;
   pricingVersion?: string;
