@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { editorialHash, editorialPrompt } from '@/lib/editorial-contract';
-import { buildOriginalEditorialContext, contextForOriginalMode, type OriginalVoiceExample } from '@/lib/original-editorial-context';
+import { buildOriginalEditorialContext, contextForOriginalMode, ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS, type OriginalVoiceExample } from '@/lib/original-editorial-context';
 import type { VoiceProfile } from '@/lib/soul-parser';
 import type { SubjectPacket } from '@/lib/subject-packet';
 import { buildAntiFundPortfolioContext, getAntiFundPortfolioCompany } from '@/lib/antifund-portfolio';
@@ -11,6 +11,53 @@ const example = (id: string, overrides: Partial<OriginalVoiceExample> = {}): Ori
 const build = (overrides: Partial<Parameters<typeof buildOriginalEditorialContext>[0]> = {}) => buildOriginalEditorialContext({ voiceProfile: profile, subject, contentMode: 'opinion', voiceExamples: [example('a')], ...overrides });
 
 describe('one original editorial context', () => {
+  it('isolates the real enriched-profile shape from legacy rubrics, example banks and model lessons', () => {
+    const enrichedStyle = [
+      'casual; fragments are fine',
+      'Style analysis: generated style analysis that is not owner coaching',
+      '## OPERATOR VOICE REFERENCE (manual/operator-written tweets are high-signal — match voice)',
+      `Voice anchors: ${'unfiltered historical premise '.repeat(180)}`,
+      '## OPERATOR VOICE DIRECTIVES (permanent rules from coaching — follow these)',
+      '1. Avoid disclosing private data.\n   Lesson: generated duplicate lesson\n   Scope: topic / avoid: private revenue\n   Raw coaching: Never disclose private revenue, except numbers I have already published.',
+      '2. Lead directly.\n   Lesson: generated duplicate lesson\n   Scope: hook / prefer: company judgment\n   Raw coaching: Lead with the company judgment; use one fact as support.',
+      'Note: If any directives seem contradictory, prefer the MORE RECENT ones (higher numbers).',
+      '## PERSONALIZATION MEMORY\n## NEVER DO THIS AGAIN',
+      '- Model criticism: every AI opinion must have a frontierLead score of 0.9.',
+      '## OPERATOR HIDDEN PREFERENCES\n- Mandatory 6-12 month forecast rubric.',
+      `## HIGH-PERFORMING REFERENCE BANK\n${'another historical premise '.repeat(180)}`,
+      '## IDENTITY CONSTRAINTS\n- Generated duplicate of coaching.',
+    ].join('\n');
+    const context = build({ voiceProfile: { ...profile, communicationStyle: enrichedStyle } });
+    const serialized = JSON.stringify(context);
+    expect(enrichedStyle.length).toBeGreaterThan(10_000);
+    expect(serialized.length).toBeLessThan(7000);
+    expect(context.stylePreferences.find(rule => rule.id === 'soul:style:1')?.text).toBe('casual; fragments are fine');
+    expect(context.ownerRestrictions.map(rule => rule.text)).toContain('1. Never disclose private revenue, except numbers I have already published.');
+    expect(context.stylePreferences.map(rule => rule.text)).toContain('2. Lead with the company judgment; use one fact as support.');
+    expect(context.ownerGuidance.join(' ')).toContain('higher numbers');
+    expect(serialized).not.toMatch(/unfiltered historical premise|another historical premise|frontierLead|6-12|generated duplicate|generated style analysis/i);
+    expect(context.voiceExamples).toEqual([example('a').content]);
+    expect(context.excludedApplicationSections).toContain('OPERATOR VOICE REFERENCE');
+    expect(context.supportedFacts).toEqual(subject.supportedFacts);
+  });
+
+  it('preserves unknown owner sections and fails closed on unfamiliar coaching formats', () => {
+    const context = build({ voiceProfile: { ...profile, communicationStyle: 'terse\n\n## My custom boundary\nNever name private customers.' } });
+    expect(context.stylePreferences.map(rule => rule.text).join(' ')).toContain('Never name private customers.');
+    expect(() => build({ voiceProfile: { ...profile, communicationStyle: 'terse\n\n## OPERATOR VOICE DIRECTIVES\nNever expose private revenue.' } }))
+      .toThrow('original_editorial_directive_format_unrecognized');
+  });
+
+  it('bounds complete fields and the total contract without cutting restrictions or evidence', () => {
+    const restriction = `Never disclose ${'private '.repeat(230)}unless the owner approves.`;
+    expect(() => build({ voiceProfile: { ...profile, antiGoals: [restriction] } })).toThrow('original_editorial_context_limit:guidance.soul:anti-goal:0');
+    expect(() => build({ subject: { ...subject, supportedFacts: [`Claim with attribution ${'evidence '.repeat(300)}`] } })).toThrow('original_editorial_context_limit:supportedFact');
+    expect(() => build({ subject: { ...subject, supportedFacts: Array.from({ length: 30 }, (_, index) => `Source ${index} says: ${'evidence '.repeat(100)}`) } }))
+      .toThrow(`original_editorial_context_limit:total:${ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS}`);
+    const context = build({ subject: { ...subject, supportedFacts: ['Company says revenue is $10m; this is unaudited.'] } });
+    expect(context.supportedFacts[0]).toBe('Company says revenue is $10m; this is unaudited.');
+  });
+
   it('preserves the exact context for ideas, writing, judgment and repair', () => {
     const context = build();
     const hash = editorialHash(context);

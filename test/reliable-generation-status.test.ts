@@ -44,3 +44,12 @@ it('uses the newest artifact state and does not fill missing retained candidates
  expect(status.stageSample.counts.assessedDrafts).toBe(1);
  expect(status.stageSample.counts.selectedDrafts).toBe(1);
 });
+
+
+it('counts eligible simple-flow ideas without inventing an independent judge score',()=>{
+ const run={id:'generation-job-simple',surface:'original',stageCounts:{}};
+ const idea={id:'idea-a',generationRunId:run.id,surface:'original',status:'reserve',judgeScore:null,generatorRankScore:.8,rejectionCodes:[],updatedAt:'2026-09-27T10:00:00Z'};
+ const status=summarizeOriginalDelivery([], [run] as any,null,'2026-09-27',{ideas:[idea,{...idea,id:'rejected',status:'rejected',rejectionCodes:['unsupported_operator_fact']},{...idea,id:'pending',status:'pending_assessment'},{...idea,id:'legacy',generatorRankScore:undefined}] as any,drafts:[]});
+ expect(status.stageSample.counts.eligibleIdeas).toBe(1);
+ expect(status.stageSample.ideaEligibilityRate).toBe(.25);
+});

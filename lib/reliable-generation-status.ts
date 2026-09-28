@@ -37,7 +37,7 @@ export function summarizeOriginalDelivery(tweets:Tweet[], runs:GenerationRunTrac
     // Traces are overwritten on resume. Candidate identities span those
     // resumes, and a pending judge request is not a completed assessment.
     counts={jobs:sample.length,ideas:ideas.length,
-      eligibleIdeas:ideas.filter(i=>hasScore(i) && editorialRejectionCodes(i.rejectionCodes).length===0).length,
+      eligibleIdeas:ideas.filter(i=>(hasScore(i) || Number.isFinite(i.generatorRankScore) && ['generated','selected','reserve'].includes(i.status)) && editorialRejectionCodes(i.rejectionCodes).length===0).length,
       selectedIdeas:new Set(drafts.map(d=>`${d.generationRunId}:${d.ideaId}`)).size,
       drafts:drafts.length,assessedDrafts:drafts.filter(hasScore).length,
       selectedDrafts:drafts.filter(d=>d.status==='selected').length};

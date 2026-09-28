@@ -1,3 +1,4 @@
+import { ORIGINAL_EDITORIAL_CONTEXT_VERSION } from './original-editorial-context';
 import { runOriginalModelStage } from './original-model-stage';
 import { EDITORIAL_PRINCIPLES as DURABLE_EDITORIAL_CONTRACT } from './editorial-contract';
 import { buildSubjectPacket, type SubjectPacket } from './subject-packet';
@@ -7639,7 +7640,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   const canary = await getGenerationCanary(input.agentId);
   if (canary?.status === 'blocked') return [];
   if (canary?.status === 'active') input = {...input,spendContext:{...input.spendContext,...aiSpendContext(input.agentId,'generation'),campaignId:canary.id,campaignLimitUsd:canary.limitUsd}};
-  const policy = jobFingerprint(['simple-original-1',GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,input.voiceProfile,input.learnings?.voiceCorpus?.snapshotId]);
+  const policy = jobFingerprint(['simple-original-1',ORIGINAL_EDITORIAL_CONTEXT_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,input.voiceProfile,input.learnings?.voiceCorpus?.snapshotId]);
   const snapshot = JSON.parse(JSON.stringify({...input,onTrace:undefined,onArtifacts:undefined,jobSession:undefined,originalModelCall:undefined}));
   const job = await claimGenerationJob(input.agentId,snapshot,policy,Date.now(),current=>{
     const saved=current.input as GenerateTweetBatchV2Input;

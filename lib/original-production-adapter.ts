@@ -136,7 +136,7 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
       validateSubjects: validate,
       ideate: async subjects => {
         const prompt = buildOriginalIdeationPrompt(subjects.map(s => ({ briefId: s.id, context: s.editorialContext })));
-        const response = await call('idea_generation', { ...prompt, modelStack: input.modelStack, timeoutMs: 60_000, maxTokens: 2200, temperature: .8 });
+        const response = await call('idea_generation', { ...prompt, modelStack: input.modelStack, timeoutMs: 120_000, maxTokens: 2200, temperature: .8 });
         const raw = parseArray(response.text, 'ideas');
         if (!Array.isArray(raw) || raw.length !== subjects.length * 3
           || subjects.some(s => raw.filter(i => i.briefId === s.id && s.subjectPacket!.permittedModes.includes(i.contentMode) && Array.isArray(i.evidenceIds) && i.evidenceIds.every(id => s.sourceDocumentIds.includes(id))).length !== 3)) throw new Error('malformed_output');
@@ -152,7 +152,7 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
         const source = subjects.find(s => s.id === idea.briefId)!;
         const brief = briefForIdea(source, idea)!;
         const prompt = buildOriginalWritingPrompt({ idea: { ...idea, contentMode: idea.contentMode || source.editorialContext.contentMode, publicMove: idea.publicMove || idea.claim }, context: contextForOriginalMode(source.editorialContext, idea.contentMode || source.editorialContext.contentMode) });
-        const response = await call('tweet_writing', { ...prompt, modelStack: input.modelStack, timeoutMs: 80_000, maxTokens: 2400, temperature: .8 });
+        const response = await call('tweet_writing', { ...prompt, modelStack: input.modelStack, timeoutMs: 120_000, maxTokens: 2400, temperature: .8 });
         const raw = parseArray(response.text, 'drafts');
         if (!Array.isArray(raw) || raw.length !== 3 || raw.some(draft => draft.ideaId !== idea.id || typeof draft.content !== 'string' || draft.content.trim().length < 12)) throw new Error('malformed_output');
         return raw.map((entry, index) => {
