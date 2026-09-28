@@ -1,9 +1,9 @@
-import { originalAuthorIdentity, ORIGINAL_EDITORIAL_CONTEXT_VERSION, type OriginalEditorialContext } from './original-editorial-context';
+import { contextForOriginalMode, originalAuthorIdentity, ORIGINAL_EDITORIAL_CONTEXT_VERSION, type OriginalEditorialContext } from './original-editorial-context';
 import { ORIGINAL_PROMPT_VERSION, originalModelContext } from './original-prompts';
 import { assessSourceCopy, bindSourceCopyAssessment, SOURCE_COPY_ASSESSMENT_VERSION, SOURCE_COPY_JUDGMENT_SCHEMA, SOURCE_COPY_JUDGE_GUIDANCE, type SourceCopyAssessment } from './source-copy-assessment';
 import { createOriginalAssessmentReceipt } from './original-assessment-receipt';
 import { finalCopyRejectionCodes } from './final-copy-policy';
-import { runOriginalModelStage } from './original-model-stage';
+import { originalModelRequestKey, runOriginalModelStage } from './original-model-stage';
 import { EDITORIAL_PRINCIPLES as DURABLE_EDITORIAL_CONTRACT } from './editorial-contract';
 import { buildSubjectPacket, type SubjectPacket } from './subject-packet';
 import { attributedSourceClaim, isCurrentSourceEvidence } from './source-validity';
@@ -7687,22 +7687,57 @@ export function finalizeTrace(trace: GenerationRunTrace): GenerationRunTrace {
 /** Evaluation adapter: run the actual production preflight and complete final policy without writing or queueing. */
 export async function assessExistingDraftUnderProductionPolicy(input: GenerateTweetBatchV2Input, artifact: {
   draft: DraftCandidate; idea: IdeaCandidate; brief: GenerationBriefV2; documents: SourceDocument[]; blocks?: SemanticBlock[];
+  /** Frozen writer context; never reconstruct owner guidance from model feedback. */
+  originalEditorialContext?: OriginalEditorialContext;
 }) {
   if (!input.spendContext?.evaluation) throw new Error('evaluation_budget_required');
+  const suppliedContext = artifact.originalEditorialContext || input.originalEditorialContext
+    || (artifact.brief as GenerationBriefV2 & { editorialContext?: OriginalEditorialContext }).editorialContext;
+  if (suppliedContext?.contextVersion !== ORIGINAL_EDITORIAL_CONTEXT_VERSION) throw new Error('production_editorial_context_required');
+  const originalEditorialContext = contextForOriginalMode(structuredClone(suppliedContext), artifact.idea.contentMode || suppliedContext.contentMode);
+  const packet = artifact.brief.subjectPacket;
+  const validateEvidence = () => {
+    const now = Date.now();
+    if (!packet || !(Date.parse(packet.expiresAt) > now) || !(Date.parse(originalEditorialContext.subject.expiresAt) > now)) throw new Error('subject_expired');
+    if (jobFingerprint(packet.sourceIds) !== jobFingerprint(originalEditorialContext.subject.sourceIds)
+      || [...packet.sourceIds, ...artifact.brief.sourceDocumentIds].some(id => !artifact.documents.some(source => source.id === id && isCurrentSourceEvidence(source, now)))
+      || artifact.documents.some(source => !isCurrentSourceEvidence(source, now))) throw new Error('stale_evidence');
+  };
+  validateEvidence();
+  const runLimitUsd = input.spendContext.runLimitUsd ?? 3;
+  if (!Number.isFinite(runLimitUsd) || runLimitUsd <= 0) throw new Error('evaluation_budget_required');
   const calls: GenerationModelCallTrace[] = [];
-  const evaluationInput = { ...input, count: 1, persistArtifacts: false, jobSession: undefined };
-  generationSpendContexts.set(calls, { ...input.spendContext, runLimitUsd: 3,
-    requestKey: `production-assessment:${jobFingerprint([artifact, getGenerationPolicyVersions(input.voiceProfile, 'original')])}` });
-  const draft = { ...artifact.draft, status: 'generated' as const, rejectionCodes: [], judgeScore: null, judgeModel: null, judgeProvider: null, judgeBreakdown: null, judgeNotes: null, judgeRawNotes: null };
+  let requestKey: string | null = null;
+  const evaluationInput: GenerateTweetBatchV2Input = { ...input, count: 1, mode: 'live', surface: 'original',
+    requireAutopostQuality: true, persistArtifacts: false, jobSession: undefined, durableGeneration: false,
+    previewJudgeModelStack: undefined, previewContext: undefined, onTrace: undefined, onArtifacts: undefined,
+    originalEditorialContext,
+    originalModelCall: async (stage, options, stageCalls, role) => {
+      if (stage !== 'copy_judgment') throw new Error('evaluation_stage_not_allowed');
+      const request = { ...options, timeoutMs: 90_000 };
+      requestKey = `${input.spendContext!.requestKey || 'production-assessment'}:${originalModelRequestKey(stage, request)}`;
+      return trackedGenerate(stage, { ...request, spendContext: { ...input.spendContext!,
+        evaluation: true, runLimitUsd: Math.min(runLimitUsd, 3), requestKey } }, stageCalls, role);
+    },
+  };
+  const draft = { ...structuredClone(artifact.draft), status: 'generated' as const, rejectionCodes: [],
+    judgeScore: null, judgeModel: null, judgeProvider: null, judgeBreakdown: null, judgeNotes: null, judgeRawNotes: null,
+    judgePolicyVersion: undefined, repairDecision: null, failureCategory: undefined };
 
   const evaluation = preflightDraft({ draft, idea: artifact.idea, brief: artifact.brief, documents: artifact.documents,
-    anchors: anchorsForIdea(artifact.idea, collectOperatorAnchors(input)), input: evaluationInput, blocks: artifact.blocks || [] });
+    anchors: originalEditorialContext.exampleRefs.map((example, index) => ({ id: example.id,
+      content: originalEditorialContext.voiceExamples[index], topic: artifact.idea.topic })),
+    input: evaluationInput, blocks: artifact.blocks || [] });
   if (evaluation.draft.content !== artifact.draft.content) throw new Error('frozen_copy_changed_by_preflight');
-  await selectFinalTweets({ evaluations: [evaluation], input: evaluationInput, calls, blocks: artifact.blocks || [] });
-  return { accepted: Boolean(evaluation.qualifiedCandidate), draft: evaluation.draft, calls,
+  await qualifyOriginalDrafts({ evaluations: [evaluation], input: evaluationInput, calls, blocks: artifact.blocks || [] });
+  validateEvidence();
+  evaluation.draft = normalizeCandidateDisposition(evaluation.draft);
+  return { accepted: Boolean(evaluation.qualifiedCandidate), draft: evaluation.draft, calls, requestKey,
     policyVersion: getGenerationPolicyVersions(input.voiceProfile, 'original').qualityPolicyVersion,
-    promptVersion: usesBudgetJudge(input) ? (process.env.AI_MODEL_POLICY === 'astra_all' ? 'budget-copy-judge-2-astra' : 'budget-copy-judge-1')
-      : getGenerationPolicyVersions(input.voiceProfile, 'original').finalCriticVersion };
+    promptVersion: evaluation.draft.judgePolicyVersion || (usesBudgetJudge(evaluationInput) ? (process.env.AI_MODEL_POLICY === 'astra_all' ? 'budget-copy-judge-2-astra' : 'budget-copy-judge-1')
+      : getGenerationPolicyVersions(input.voiceProfile, 'original').finalCriticVersion),
+    finalCriticVersion: getGenerationPolicyVersions(input.voiceProfile, 'original').finalCriticVersion,
+  };
 }
 
 export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Promise<RankedProtocolTweet[]> {
