@@ -76,7 +76,7 @@ export async function rescoreFrozenEditorialExample(input: GenerateTweetBatchV2I
   if (!assessment) return { disposition: 'pending_assessment' as const };
   const ledger = await getAiOperationalState<AiSpendLedger>(input.agentId, 'spend');
   const row: EditorialEvaluationRow = { id: exampleId, manifestHash: manifest.hash, contentHash: example.contentHash,
-    candidateVersion: CANDIDATE_EDITORIAL_VERSION, model,
+    candidateVersion: CANDIDATE_EDITORIAL_VERSION, model: candidate.result.model,
     baseline: { ...manifest.baseline, accepted: baseline.accepted, rejectionCodes: baseline.draft.rejectionCodes }, candidate: assessment,
     deterministicBlockers: deterministicEditorialBlockers(baseline.draft.rejectionCodes),
     spendAttemptIds: Object.values(ledger?.attempts || {}).filter(a => a.runId === runId).map(a => a.id) };

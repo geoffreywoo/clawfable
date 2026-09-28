@@ -70,6 +70,7 @@ it('refuses new owner-rejected acceptances, missing evaluations, and safety regr
   rows.find(r => r.id === reject.id)!.candidate.editorialScore = 1;
   expect(compareEditorialPolicies(manifest, rows, safety).eligibleForActivation).toBe(false);
   expect(compareEditorialPolicies(manifest, scores(manifest).slice(1), safety).eligibleForActivation).toBe(false);
+  expect(compareEditorialPolicies(manifest, scores(manifest).map(row => ({ ...row, model: 'fallback-judge' })), safety).eligibleForActivation).toBe(false);
   expect(compareEditorialPolicies(manifest, scores(manifest), [{ case: 'unsupported_fact', candidateAccepted: true }]).eligibleForActivation).toBe(false);
 });
 it('records the pending review once and never treats an edit as approval of the original', async () => {
