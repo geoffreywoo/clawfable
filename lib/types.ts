@@ -880,6 +880,10 @@ export interface IdeaCandidate {
   creativeSeedId?: string | null;
   topic: string;
   publicMove?: string;
+  /** Writer's own ranking estimate, never a final editorial approval. */
+  generatorRankScore?: number;
+  /** Optional private explanation of the proposed thought, not additional evidence. */
+  supportingReasoning?: string | null;
   claim: string;
   tension: string;
   implication: string;

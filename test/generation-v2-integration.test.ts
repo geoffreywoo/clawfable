@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { founderBrief, founderDraft, founderIdea } from './fixtures/founder-critic-execution';
+import { claimGenerationJob, GenerationJobSession } from '@/lib/generation-job';
 
 const mocks = vi.hoisted(() => ({
   durableState: new Map<string, any>(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/ai', () => ({
   estimateAiUsageCostUsd: () => null,
+  getModelChainForTask: () => [{ provider: 'openai', model: 'gpt-test' }],
   generateText: mocks.generateText,
   hasTextGenerationProvider: () => true,
   PUBLISHING_V2_CONTROL_MODEL_STACK: 'publishing_v2_fable_control',
@@ -366,7 +368,7 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
-  it('resumes durable paid ideas after an unavailable judge without regenerating them', async()=>{
+  it('resumes existing legacy durable paid ideas after an unavailable judge without regenerating them', async()=>{
     mocks.getStoryClusters.mockResolvedValue([]);
     mocks.getSourceDocuments.mockResolvedValue([]);
     mocks.generateText.mockImplementation(async(options:any)=>{
@@ -383,6 +385,9 @@ describe('generateTweetBatchV2 integration', () => {
       voiceProfile:{...input.voiceProfile,topics:['markets']},
       analysis:{...input.analysis,engagementPatterns:{topTopics:['markets']}},
       durableGeneration:true,modelStack:'publishing_v2_astra' as const,generationPolicy:'budget_v1' as const};
+    const legacySession = new GenerationJobSession('13', (await claimGenerationJob('13', durableInput, 'legacy-existing-policy'))!);
+    await legacySession.checkpoint('legacyExistingWork', async () => ({ version: 'durable-original-2' }));
+    await legacySession.finish([], 'provider_failure');
     await generateTweetBatchV2(durableInput);
     expect(mocks.durableState.get('generation-job').checkpoints.ideas_ready).toHaveLength(1);
     expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='idea_judgment'),
@@ -416,7 +421,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-10')).toBe(true);
   });
 
-  it('tags a missing verified handle deterministically instead of paying for a repair, while retaining final judgment', async () => {
+  it('finishes an existing legacy job with deterministic verified handles and retained final judgment', async () => {
     mocks.getStoryClusters.mockResolvedValue([]);
     mocks.getSourceDocuments.mockResolvedValue([]);
     const original="i think cognition can help teams build products they couldn't justify staffing. i'd rather see that than the same roadmap with fewer engineers.";
@@ -432,6 +437,9 @@ describe('generateTweetBatchV2 integration', () => {
     const durableInput={...input,agentId:'13',count:1,requestedTopic:'Cognition',
       voiceProfile:{...input.voiceProfile,topics:['Cognition']},analysis:{...input.analysis,engagementPatterns:{topTopics:['Cognition']}},
       durableGeneration:true,modelStack:'publishing_v2_astra' as const,generationPolicy:'budget_v1' as const};
+    const legacySession = new GenerationJobSession('13', (await claimGenerationJob('13', durableInput, 'legacy-existing-policy'))!);
+    await legacySession.checkpoint('legacyExistingWork', async () => ({ version: 'durable-original-2' }));
+    await legacySession.finish([], 'provider_failure');
     await generateTweetBatchV2(durableInput);
     const writers=mocks.generateText.mock.calls.map(([o])=>o).filter(o=>o.task==='tweet_writing');
     const repairs=writers.filter(o=>JSON.parse(o.prompt).failedAttempts?.length);

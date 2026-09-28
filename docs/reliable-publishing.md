@@ -116,3 +116,21 @@ Queue remains zero and no official X write was attempted. Neither the two-origin
 Evaluation/recovery-diagnostics release validation: 1,877 tests across 173 files passed; typecheck and production build passed. Candidate contract tests are offline regressions, not owner calibration or proof of model quality. No candidate final policy was activated.
 
 Live verification of evaluation release `d4963bf`: deployment `dpl_4GLUqGZn24uvPBj64AkoGDwq6Ptv` is Ready, both aliases return 200, and authenticated status reports only `voice_anchor_semantic_reskin: 3` as the current blocker; earlier final-assessment failures are separately historical. Canary commitments remain $2.46413, with generation blocked. Daily commitments were $4.93652 at the smoke check. A follow-up provenance guard records the actual candidate response model, so fallback-model assessments cannot qualify as active-model calibration; the same 1,877 tests and audit pass.
+
+## Sequential original production — `simple-original-1`
+
+New durable jobs for agent 13 follow one path:
+
+`current subjects → three ideas per subject → one selected idea → three drafts → one final assessment → queue`
+
+At most two subjects enter one ideation call. The generator's rank only allocates writing effort; it is stored as `generatorRankScore`, never as an independent judge score or permission to publish. One writing call creates three variants, and one final judgment compares them. There is no separate idea judge, secondary selection pass, shadow writer, recursive repair, per-brief lease, or overlapping cooldown in this path. An editorial rejection advances a saved reserve on the next worker attempt, subject to the existing canary stop and job budget. Provider fallback still belongs to the central provider adapter; three stage calls do not imply three provider attempts.
+
+The small control flow is in `lib/original-production.ts`. `original-production-adapter.ts` connects existing research, factual checks, persistence and the current publishing decision. `original-model-stage.ts` owns explicit execution context and saves raw output and response IDs before parsing. `original-prompts.ts` and `original-editorial-context.ts` hold the compact idea/writer contracts and owner context. Predictions remain available, with timing/grounding expectations applied to their content mode.
+
+Successful calls replay without another purchase. A failed or malformed judgment retains the drafts as pending assessment. Malformed saved output waits until its subject expires or a reviewed contract/parser fix changes policy; ordinary worker ticks do not repeatedly parse it or buy replacements. Unknown provider/storage failures remain operational deferrals. Compatible policy changes invalidate derived subjects, ideas, drafts and assessment while preserving raw response checkpoints and original evidence timestamps.
+
+A qualified draft is ranked before scheduling. Company-content mix belongs to the queue's existing hold/defer logic, and cannot turn a qualified draft into an editorial-empty attempt. Source freshness, withdrawal, contradiction and hashes are checked against current storage before each paid stage and before returning candidates. Existing publishing receipts, final thresholds, owner restrictions, duplication checks, $20 daily/$3 job budgets and reply block remain authoritative.
+
+Existing paid legacy jobs finish through their previous checkpoint format; new jobs do not enter the legacy orchestration. The legacy tracked executor also no longer temporarily removes the shared session during a provider call, which could let a concurrent call bypass persistence.
+
+The final editor remains the actual production policy, isolated behind an explicit adapter. The candidate single-decision editor is still evaluation-only until owner calibration permits activation. This release simplifies execution; it does not claim that the current editorial policy can produce five publishable posts a day. The blocked three-empty-attempt canary is not reset by this release, and no paid recovery is authorized by a version change alone.

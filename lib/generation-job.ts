@@ -57,8 +57,8 @@ export async function claimGenerationJob(agentId: string, input: unknown, policy
       // Re-run deterministic normalization and assessment under the current
       // policy. Preserve raw paid response checkpoints: identical stage
       // contracts replay, changed prompts buy only that affected stage.
-      value.status='running';value.result=undefined;value.blocker=null;
-      value.checkpoints=Object.fromEntries(Object.entries(current.checkpoints).filter(([key])=>key!=='ideaNormalizationVersion' && !key.startsWith('drafts_ready') && !key.startsWith('repair:')));
+      value.status='running';value.result=undefined;value.blocker=null;value.nextAttemptAt=0;
+      value.checkpoints=Object.fromEntries(Object.entries(current.checkpoints).filter(([key])=>!['ideaNormalizationVersion','ideas_ready','subjects_ready','briefs'].includes(key) && !key.startsWith('assessed:') && !key.startsWith('drafts_ready') && !key.startsWith('repair:')));
     }
     value.revision = (reusable ? current.revision || 0 : 0) + 1;
     return {value, result: value};
@@ -90,14 +90,16 @@ export class GenerationJobSession {
   async finish(result: unknown[], outcome: string) {
     const reserve = outcome === 'quality_empty' && !this.deferred && (this.job.checkpoints.reserveIdeas as string[] || []).length > 0;
     if (reserve) await this.write(current=>({...current,checkpoints:{...current.checkpoints,attemptedIdeas:[...current.checkpoints.attemptedIdeas as string[] || [],...current.checkpoints.selectedIdeas as string[] || []]}}));
-    const operational = reserve || this.deferred || ['run_deadline','provider_failure','idea_generation_failed','idea_judgment_failed','copy_judgment_failed','writing_failed','malformed_output','budget_exhausted','budget_unavailable','evaluation_deferred','stage_output_unavailable'].includes(outcome);
+    // Anything other than a completed editorial/context decision remains
+    // resumable. New provider/storage error codes must not discard paid work.
+    const operational = !result.length && (reserve || this.deferred || !['quality_empty','no_qualified_context','payment_required','voice_not_ready','subject_expired','stale_evidence'].includes(outcome));
     await this.write(current => ({...current, result:result.length ? result : undefined,
       // Repeated provider trouble must not discard paid stages and restart
       // ideation. Keep the job resumable while it is valid, with capped backoff.
       status:result.length ? 'assessed' : operational ? 'deferred' : 'failed',
       blocker:result.length ? null : this.deferred ? 'stage_deferred' : reserve ? 'reserve_ready' : outcome,
       failures:current.failures + (operational && !this.deferred ? 1 : 0),
-      nextAttemptAt: result.length ? 0 : Date.now() + (reserve || this.deferred ? 1000 : outcome === 'quality_empty' ? 30*60_000 : Math.min(120,10*2**current.failures)*60_000),
+      nextAttemptAt: result.length ? 0 : outcome === 'malformed_output' ? current.expiresAt : Date.now() + (reserve || this.deferred ? 1000 : outcome === 'quality_empty' ? 30*60_000 : Math.min(120,10*2**current.failures)*60_000),
       owner:result.length ? current.owner : null,leaseUntil:result.length ? current.leaseUntil : 0}));
   }
 }

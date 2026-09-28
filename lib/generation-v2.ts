@@ -1,3 +1,4 @@
+import { runOriginalModelStage } from './original-model-stage';
 import { EDITORIAL_PRINCIPLES as DURABLE_EDITORIAL_CONTRACT } from './editorial-contract';
 import { buildSubjectPacket, type SubjectPacket } from './subject-packet';
 import { attributedSourceClaim, isCurrentSourceEvidence } from './source-validity';
@@ -212,7 +213,7 @@ export const V2_MIN_GEOFFREY_TRAJECTORY_CONVICTION = 0.72;
 export const V2_MIN_GEOFFREY_FORECAST_GROUNDING = 0.6;
 export const V2_MIN_GEOFFREY_EXPONENTIAL_INTUITION = 0.58;
 
-function getGenerationPolicyVersions(
+export function getGenerationPolicyVersions(
   voiceProfile: VoiceProfile,
   surface: GenerationSurface | null | undefined = 'original',
 ): { qualityPolicyVersion: string; finalCriticVersion: string } {
@@ -596,6 +597,8 @@ export interface GenerateTweetBatchV2Input {
   agentId: string;
   durableGeneration?: boolean;
   jobSession?: GenerationJobSession;
+  /** Internal explicit executor for the standalone original pipeline. */
+  originalModelCall?: typeof trackedGenerate;
   count: number;
   requestedTopic?: string | null;
   voiceProfile: VoiceProfile;
@@ -670,25 +673,18 @@ export async function trackedGenerate(
 ): Promise<GenerateTextResult> {
   const session = generationJobSessions.get(calls);
   if (session) {
-    const key = `call:${stage}:${jobFingerprint({system:options.system,prompt:options.prompt,messages:options.messages,jsonSchema:options.jsonSchema,modelStack:options.modelStack,modelCallRole})}`;
-    const saved = session.job.checkpoints[key] as { result: GenerateTextResult; call: GenerationModelCallTrace } | undefined;
-    if (saved) return saved.result;
-    const requiredMs = options.timeoutMs || (stage === 'tweet_writing' && options.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK ? ASTRA_TWEET_WRITING_DEADLINE_MS : STAGE_DEADLINES_MS[stage]) || 180_000;
-    if ((generationRunDeadlines.get(calls) || Infinity) - Date.now() < requiredMs + 5000) {
-      session.deferred = true;
-      throw new Error('run_deadline');
-    }
-    generationJobSessions.delete(calls);
-    try {
-      return await session.checkpoint(key, async () => {
-        const result = await trackedGenerate(stage, {...options,spendContext:{...generationSpendContexts.get(calls)!,...options.spendContext,requestKey:key,downstreamReserveUsd:['idea_generation','idea_judgment'].includes(stage)?1.1:stage==='tweet_writing'?.3:0}}, calls, modelCallRole);
-        await session.write(current=>({...current,checkpoints:{...current.checkpoints,callHistory:[...calls]}}));
-        return {result,call:calls[calls.length-1]};
-      }).then(saved => saved.result);
-    } finally {
-      await session.write(current=>({...current,checkpoints:{...current.checkpoints,callHistory:[...calls]}}));
-      generationJobSessions.set(calls,session);
-    }
+    const legacyKey = `call:${stage}:${jobFingerprint({system:options.system,prompt:options.prompt,messages:options.messages,jsonSchema:options.jsonSchema,modelStack:options.modelStack,modelCallRole})}`;
+    const legacy = session.job.checkpoints[legacyKey] as {result:GenerateTextResult} | undefined;
+    if (legacy?.result) return structuredClone(legacy.result);
+    const result = await runOriginalModelStage({
+      session, stage,
+      options: {...options, timeoutMs: options.timeoutMs || (stage === 'tweet_writing' && options.modelStack === PUBLISHING_V2_ASTRA_MODEL_STACK ? ASTRA_TWEET_WRITING_DEADLINE_MS : STAGE_DEADLINES_MS[stage]) || 180_000},
+      spendContext: {...generationSpendContexts.get(calls)!, ...options.spendContext,
+        downstreamReserveUsd: ['idea_generation','idea_judgment'].includes(stage) ? 1.1 : stage === 'tweet_writing' ? .3 : 0},
+      deadlineAt: generationRunDeadlines.get(calls) || Date.now() + GENERATION_RUN_DEADLINE_MS,
+    });
+    calls.splice(0, calls.length, ...structuredClone(session.job.checkpoints.callHistory as GenerationModelCallTrace[] || []));
+    return result;
   }
   const startedAt = Date.now();
   const deadline = generationRunDeadlines.get(calls);
@@ -3997,7 +3993,7 @@ function subjectiveBrief(brief:GenerationBriefV2):GenerationBriefV2 {
   return {...brief,evidenceMode:'operator_opinion',evidenceIds:[],sourceDocumentIds:[],qualifiedClaimIds:[],evidence:[],
     sourceBrief:'Subject cue only. This idea is a subjective opinion with no cited facts.'};
 }
-function briefForIdea(brief:GenerationBriefV2|undefined,idea:IdeaCandidate):GenerationBriefV2|undefined {
+export function briefForIdea(brief:GenerationBriefV2|undefined,idea:IdeaCandidate):GenerationBriefV2|undefined {
   return brief && idea.contentMode==='opinion' && !idea.evidenceIds.length ? subjectiveBrief(brief) : brief;
 }
 
@@ -5085,7 +5081,7 @@ function initialVariantMoveForAnchor(anchor: DictionAnchor | undefined, slot: nu
   };
 }
 
-interface DraftEvaluation {
+export interface DraftEvaluation {
   /** Set only after every deterministic and final-critic gate has passed. */
   qualifiedCandidate?: RankedProtocolTweet;
   draft: DraftCandidate;
@@ -5102,7 +5098,7 @@ export function getV2BoundedRepairCharacterLimit(content: string): number {
   return Math.min(V2_MAX_DRAFT_CHARACTERS, Math.max(content.length + 48, Math.ceil(content.length * 1.2)));
 }
 
-function collectOperatorAnchors(input: GenerateTweetBatchV2Input): DictionAnchor[] {
+export function collectOperatorAnchors(input: GenerateTweetBatchV2Input): DictionAnchor[] {
   const reference = input.learnings?.operatorVoiceReference;
   const performanceAnchors: TweetPerformance[] = [
     ...(reference?.pinnedExamples || []),
@@ -5130,7 +5126,7 @@ function anchorsForIdea(idea: IdeaCandidate, anchors: DictionAnchor[]): DictionA
   return selectNativeReactionAnchors(anchors, [idea.topic, ideaPublicMove(idea)], 3);
 }
 
-function sourceDocumentsForBrief(brief: GenerationBriefV2, documents: SourceDocument[]): SourceDocument[] {
+export function sourceDocumentsForBrief(brief: GenerationBriefV2, documents: SourceDocument[]): SourceDocument[] {
   const qualifiedClaims = new Set(brief.qualifiedClaimIds);
   return brief.sourceDocumentIds
     .map((id) => documents.find((document) => document.id === id))
@@ -5710,7 +5706,7 @@ export function getSourceAttributionIssueV2(
   return 'Source attribution was dropped from an attributed or self-reported claim.';
 }
 
-function preflightDraft({
+export function preflightDraft({
   draft,
   idea,
   brief,
@@ -5831,7 +5827,7 @@ function preflightDraft({
   if (isGeoffreyVoiceProfile(input.voiceProfile) && draftCompanyLed && !briefCompanyLed) {
     codes.push('company_subject_introduced');
   }
-  if (contentMixDecision?.issue) codes.push('company_content_mix');
+  if (contentMixDecision?.issue && !input.originalModelCall) codes.push('company_content_mix');
   codes.push(...portfolioPolicyIssues);
   if (authorityIssue) codes.push('unearned_authority');
   if (brief.evidenceMode === 'verified_source' && claimIssue) codes.push('claim_evidence');
@@ -6201,7 +6197,7 @@ async function judgeDrafts(
   // previously rejected every draft in the run, fed the failure circuit
   // breaker, and could silence the account for hours.
   const first = await judgeDraftsOnce(evaluations, input, calls, blocks);
-  if (!first.failureCode || usesEfficientGeneration(input)) return first;
+  if (!first.failureCode || usesEfficientGeneration(input) || input.originalModelCall) return first;
   return judgeDraftsOnce(evaluations, input, calls, blocks, {
     retryNudge: 'The previous judgment response was malformed. Include every candidate id exactly once in ranking and exactly one scores entry per candidate id.',
   });
@@ -6271,7 +6267,7 @@ async function judgeDraftsOnce(
       budget: V2_JUDGE_VOICE_GUIDANCE_BUDGET_CHARS,
       includeRawProse: true,
     });
-    const result = await trackedGenerate('copy_judgment', {
+    const result = await (input.originalModelCall || trackedGenerate)('copy_judgment', {
       task: 'copy_judgment',
       modelStack: usesBudgetJudge(input) ? budgetJudgeStack() : input.previewJudgeModelStack || input.modelStack,
         ...(usesBudgetJudge(input) ? { openAiReasoningEffort: 'medium' as const } : {}),
@@ -6350,7 +6346,8 @@ async function judgeDraftsOnce(
       model: result.model,
       failureCode: null,
     };
-  } catch {
+  } catch (error) {
+    if (input.originalModelCall) throw error;
     return {
       ranking: [],
       scores: new Map(),
@@ -6775,7 +6772,7 @@ function toRankedTweet(
   };
 }
 
-async function selectFinalTweets({
+export async function selectFinalTweets({
   evaluations,
   input,
   calls,
@@ -6871,6 +6868,17 @@ async function selectFinalTweets({
       || (judgeOrder.get(left.draft.id) ?? Number.MAX_SAFE_INTEGER)
         - (judgeOrder.get(right.draft.id) ?? Number.MAX_SAFE_INTEGER);
   });
+
+  // A standalone original attempt has one idea. Scheduling/mix belongs to the
+  // queue; it must not turn an editorially qualified draft into an empty run.
+  if (input.originalModelCall) {
+    const winner = selectionPool[0];
+    for (const evaluation of selectionPool) {
+      evaluation.draft.status = evaluation === winner ? 'selected' : 'reserve';
+      evaluation.draft.rejectionCodes = evaluation === winner ? [] : ['copy_not_selected'];
+    }
+    return winner?.qualifiedCandidate ? [winner.qualifiedCandidate] : [];
+  }
 
   const selected: RankedProtocolTweet[] = [];
   const selectedIdeas = new Set<string>();
@@ -7496,7 +7504,7 @@ async function generateRescueDraftEvaluations({
   return outputs.flat();
 }
 
-function countRejections(
+export function countRejections(
   ideas: IdeaCandidate[],
   drafts: DraftCandidate[],
 ): Record<string, number> {
@@ -7580,7 +7588,7 @@ function logGenerationRunSummary(
   console.info('[gen:run]', JSON.stringify(summarizeGenerationRunForLog(trace, artifacts)));
 }
 
-function finalizeTrace(trace: GenerationRunTrace): GenerationRunTrace {
+export function finalizeTrace(trace: GenerationRunTrace): GenerationRunTrace {
   const budgetStop = trace.modelCalls.find(call => ['budget_exhausted', 'budget_unavailable', 'evaluation_deferred'].includes(call.error || ''));
   if (budgetStop && trace.selectedDraftIds.length === 0) trace = { ...trace, status: 'empty', outcomeCode: budgetStop.error as GenerationRunTrace['outcomeCode'], error: budgetStop.error };
   const usage = summarizeGenerationUsage(trace.modelCalls);
@@ -7631,8 +7639,8 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   const canary = await getGenerationCanary(input.agentId);
   if (canary?.status === 'blocked') return [];
   if (canary?.status === 'active') input = {...input,spendContext:{...input.spendContext,...aiSpendContext(input.agentId,'generation'),campaignId:canary.id,campaignLimitUsd:canary.limitUsd}};
-  const policy = jobFingerprint([GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,input.voiceProfile,input.learnings?.voiceCorpus?.snapshotId]);
-  const snapshot = JSON.parse(JSON.stringify({...input,onTrace:undefined,onArtifacts:undefined,jobSession:undefined}));
+  const policy = jobFingerprint(['simple-original-1',GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,input.voiceProfile,input.learnings?.voiceCorpus?.snapshotId]);
+  const snapshot = JSON.parse(JSON.stringify({...input,onTrace:undefined,onArtifacts:undefined,jobSession:undefined,originalModelCall:undefined}));
   const job = await claimGenerationJob(input.agentId,snapshot,policy,Date.now(),current=>{
     const saved=current.input as GenerateTweetBatchV2Input;
     // A change to the legacy efficient runner is not a reason to regenerate
@@ -7646,8 +7654,14 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   if (job.status === 'assessed' && job.result?.length) { await session.finish(job.result,'completed'); return job.result as RankedProtocolTweet[]; }
   let outcome = 'provider_failure';
   try {
-    let result = await generateTweetBatchV2Internal({...job.input as GenerateTweetBatchV2Input,jobSession:session,
-      entitlement:input.entitlement,onArtifacts:input.onArtifacts,onTrace:trace=>{outcome=trace.outcomeCode || 'provider_failure'; input.onTrace?.(trace);}});
+    // New jobs use the small sequential engine. Finish already-paid legacy jobs
+    // on their existing checkpoints instead of silently discarding their work.
+    const simple = session.job.checkpoints.originalProductionVersion || Object.keys(session.job.checkpoints).length === 0;
+    const runInput = {...job.input as GenerateTweetBatchV2Input,jobSession:session,
+      entitlement:input.entitlement,onArtifacts:input.onArtifacts,onTrace:(trace:GenerationRunTrace)=>{outcome=trace.outcomeCode || 'provider_failure'; input.onTrace?.(trace);}};
+    let result = simple
+      ? await (await import('./original-production-adapter')).generateOriginalProduction(runInput)
+      : await generateTweetBatchV2Internal(runInput);
     const savedIdeas = session.job.checkpoints.ideas_ready as IdeaCandidate[] || [];
     const savedBriefs = session.job.checkpoints.briefs as GenerationBriefV2[] || [];
     const savedDocuments = (session.job.checkpoints.context as [SourceDocument[]] | undefined)?.[0] || [];

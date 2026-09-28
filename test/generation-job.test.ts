@@ -28,6 +28,7 @@ describe('durable generation jobs',()=>{
   const job=(await claimGenerationJob('job-queue',{},'p'))!;
   const session=new GenerationJobSession('job-queue',job);
   await session.finish([{id:'draft-1'}],'completed');
+  expect(session.job.failures).toBe(0);
   expect(await claimGenerationJob('job-queue',{},'p')).toBeNull();
   const retry=(await claimGenerationJob('job-queue',{},'p',Date.now()+301000))!;
   expect(retry.result).toEqual([{id:'draft-1'}]);
@@ -65,6 +66,22 @@ describe('durable generation jobs',()=>{
   expect(session.job.status).toBe('deferred');
   expect(session.job.checkpoints.drafts_ready).toEqual(['paid draft']);
  });
+ it.each(['provider_pending','rate_limited','kv_write_temporarily_unavailable'])(
+  'keeps %s operationally deferred with its paid drafts intact',async outcome=>{
+   const agentId=`job-operational-${outcome}-${crypto.randomUUID()}`;
+   const session=new GenerationJobSession(agentId,(await claimGenerationJob(agentId,{},'p'))!);
+   await session.checkpoint('call:tweet_writing:paid',async()=>({result:{text:'paid raw draft'}}));
+   await session.checkpoint('drafts_ready:idea',async()=>[{id:'draft',status:'pending_assessment'}]);
+   await session.finish([],outcome);
+   expect(session.job).toMatchObject({status:'deferred',blocker:outcome,owner:null,leaseUntil:0});
+   expect(session.job.checkpoints['call:tweet_writing:paid']).toEqual({result:{text:'paid raw draft'}});
+   expect(session.job.checkpoints['drafts_ready:idea']).toEqual([{id:'draft',status:'pending_assessment'}]);
+   expect(session.job.checkpoints.attemptedIdeas).toBeUndefined();
+   const resumed=await claimGenerationJob(agentId,{},'p',session.job.nextAttemptAt+1);
+   expect(resumed?.id).toBe(session.job.id);
+   expect(resumed?.checkpoints['drafts_ready:idea']).toEqual([{id:'draft',status:'pending_assessment'}]);
+  },
+ );
  it('reassesses compatible policy changes while preserving paid stage responses',async()=>{
   const session=new GenerationJobSession('job-policy',(await claimGenerationJob('job-policy',{},'old'))!);
   await session.checkpoint('call:tweet_writing:hash',async()=>({result:{text:'paid output'}}));
@@ -75,6 +92,51 @@ describe('durable generation jobs',()=>{
   expect(next?.result).toBeUndefined();
   expect(next?.checkpoints['call:tweet_writing:hash']).toEqual({result:{text:'paid output'}});
   expect(next?.checkpoints['drafts_ready:idea']).toBeUndefined();
+ });
+ it('invalidates complete derived assessments and idea normalization while retaining original paid artifacts',async()=>{
+  const agentId=`job-complete-policy-${crypto.randomUUID()}`;
+  const session=new GenerationJobSession(agentId,(await claimGenerationJob(agentId,{},'old'))!);
+  const raw={result:{text:'raw provider response'}};
+  await session.write(job=>({...job,checkpoints:{
+   context:[[{id:'source',observedAt:'original-time'}]],originalProductionVersion:'simple-original-1',
+   subjects_ready:[{id:'subject',expiresAt:Date.now()+60*60_000}],
+   briefs:[{id:'subject',editorialContext:{version:'old'}}],
+   ideas_ready:[{id:'idea',oldNormalization:true}],ideaNormalizationVersion:'old',
+   selectedIdeas:['idea'],reserveIdeas:['reserve'],attemptedIdeas:['already-used'],
+   'call:idea_generation:paid':raw,'call:tweet_writing:paid':raw,'call:copy_judgment:paid':raw,
+   'call:copy_judgment:paid:responses':['response-id'],
+   'drafts_ready:idea':[{id:'draft',status:'selected'}],
+   'assessed:idea':{drafts:[{draft:{id:'draft',status:'selected'}}],selected:[{draftCandidateId:'draft'}]},
+   'repair:idea':[{id:'repaired'}],
+  }}));
+  await session.finish([{draftCandidateId:'draft'}],'completed');
+  const next=await claimGenerationJob(agentId,{},'new',Date.now()+301_000,()=>true);
+  expect(next?.id).toBe(session.job.id);
+  expect(next?.status).toBe('running');
+  expect(next?.result).toBeUndefined();
+  for(const key of ['subjects_ready','briefs','ideas_ready','ideaNormalizationVersion','drafts_ready:idea','assessed:idea','repair:idea']){
+   expect(next?.checkpoints[key]).toBeUndefined();
+  }
+  for(const key of ['call:idea_generation:paid','call:tweet_writing:paid','call:copy_judgment:paid']){
+   expect(next?.checkpoints[key]).toEqual(raw);
+  }
+  expect(next?.checkpoints['call:copy_judgment:paid:responses']).toEqual(['response-id']);
+  expect(next?.checkpoints.context).toEqual(session.job.checkpoints.context);
+  expect(next?.checkpoints.originalProductionVersion).toBe('simple-original-1');
+  expect(next?.checkpoints.attemptedIdeas).toEqual(['already-used']);
+ });
+ it('holds malformed paid output for a parser or contract change instead of retrying every tick',async()=>{
+  const agentId=`job-malformed-${crypto.randomUUID()}`;
+  const session=new GenerationJobSession(agentId,(await claimGenerationJob(agentId,{},'old'))!);
+  const raw={result:{text:'malformed but paid provider output'}};
+  await session.checkpoint('call:idea_generation:paid',async()=>raw);
+  await session.finish([],'malformed_output');
+  expect(session.job).toMatchObject({status:'deferred',blocker:'malformed_output',nextAttemptAt:session.job.expiresAt});
+  expect(await claimGenerationJob(agentId,{},'old',Date.now()+10*60_000)).toBeNull();
+  const fixed=await claimGenerationJob(agentId,{},'parser-fix',Date.now()+10*60_000,()=>true);
+  expect(fixed?.id).toBe(session.job.id);
+  expect(fixed?.nextAttemptAt).toBe(0);
+  expect(fixed?.checkpoints['call:idea_generation:paid']).toEqual(raw);
  });
  it('preserves real rejection alongside selection or operational codes',()=>{
   const item={status:'rejected',rejectionCodes:['idea_not_selected']} as any;
