@@ -4,6 +4,7 @@ import {getAiOperationalState, getGenerationRuns, getTweets, getAgent, getIdeaCa
 import type {GenerationRunTrace, Tweet, IdeaCandidate, DraftCandidate} from './types';
 import {editorialRejectionCodes} from './candidate-disposition';
 import {getOriginalPostDispatch} from './original-post-dispatch';
+import {generationFailureDiagnostics} from './original-queue-blocker';
 
 function ratio(a:number,b:number) { return b ? a/b : null; }
 export function summarizeOriginalDelivery(tweets:Tweet[], runs:GenerationRunTrace[], ledger:AiSpendLedger|null, day=aiBudgetDay(), artifacts?:{ideas:IdeaCandidate[];drafts:DraftCandidate[]}) {
@@ -64,8 +65,10 @@ export async function getReliableGenerationStatus(agentId:string) {
     : blocker ? 'Resume the saved stage at nextAttemptAt; inspect repeated failures without discarding paid artifacts.'
     : publishable.length>=5 ? 'Reserve target met; wait for consumption.' : 'Continue the next unfinished generation stage.';
   const trace=runs.find(r=>r.id===job?.id);
+  const failureDiagnostics=generationFailureDiagnostics(job?.id,drafts);
   return {publishableDepth:publishable.length,targetDepth:5,blocker,nextAction,
-    rejectionCounts:trace?.rejectionCounts || {},
+    rejectionCounts:failureDiagnostics.assessedDrafts ? failureDiagnostics.assessedRejectionCounts : trace?.rejectionCounts || {},
+    failureDiagnostics,historicalRejectionCounts:trace?.rejectionCounts || {},
     publication:dispatch?{tweetId:dispatch.tweetId,state:dispatch.state,xTweetId:dispatch.receipt?.tweetId || null,nextReconcileAt:dispatch.nextReconcileAt}:null,
     job:job?{id:job.id,version:job.version,policy:job.policy,stage:job.stage,status:job.status,blocker:job.blocker,nextAttemptAt:job.nextAttemptAt,expiresAt:job.expiresAt}:null,
     canary:canary?{...canary,committedUsd:campaignCommittedUsd,remainingUsd:Math.max(0,canary.limitUsd-campaignCommittedUsd)}:null,

@@ -3101,7 +3101,13 @@ export async function upsertSourceDocuments(agentId: string, documents: SourceDo
   return withKeyLock(KEYS.agentSourceDocuments(agentId), async () => {
     const now = Date.now();
     const current = await getSourceDocuments(agentId, MAX_SOURCE_DOCUMENTS);
-    const normalized = documents.map((entry) => ({ ...entry, agentId, schemaVersion: 2 as const }));
+    const normalized = documents.map((entry) => {
+      const previous = agentId === '13' ? current.find(d => d.id === entry.id) : undefined;
+      // Withdrawal is explicit evidence, never erased by absence in a refresh.
+      const invalidation = Object.fromEntries(['withdrawn', 'withdrawnAt', 'contradicted', 'contradictedAt']
+        .filter(key => previous?.metadata?.[key]).map(key => [key, previous!.metadata[key]]));
+      return { ...entry, agentId, schemaVersion: 2 as const, metadata: { ...entry.metadata, ...invalidation } };
+    });
     const retained = mergeRecordsById(current, normalized).filter((entry) => {
       const fetchedAt = Date.parse(entry.fetchedAt);
       if (!Number.isFinite(fetchedAt)) return false;

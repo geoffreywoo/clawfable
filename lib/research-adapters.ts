@@ -523,6 +523,8 @@ export function sourceDocumentsFromTrending(
   now = new Date(),
 ): SourceDocument[] {
   return topics.flatMap((topic) => {
+    const observedAt = topic.observedAt || topic.timestamp;
+    const observedMs = Date.parse(observedAt);
     const sourceType: 'hacker_news' | 'x' = topic.sourceType === 'hacker_news' ? 'hacker_news' : 'x';
     const evidence = sourceType === 'x' && topic.evidence?.length
       ? topic.evidence.map((entry) => ({
@@ -580,6 +582,8 @@ export function sourceDocumentsFromTrending(
         query: null,
         metadata: {
           trendTopicId: topic.networkTopicId || String(topic.id),
+          observedAt,
+          expiresAt: new Date(Number.isFinite(observedMs) ? observedMs + 24 * 3600_000 : 0).toISOString(),
           sourceTweetId: entry.tweetId,
           sourceCount: topic.sourceCount || evidence.length,
           sourceQuality: topic.sourceQuality ?? null,

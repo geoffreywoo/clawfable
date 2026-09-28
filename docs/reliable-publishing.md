@@ -84,3 +84,15 @@ The insight cache hashed entire derived records, including `styleFingerprint.upd
 The regression fails against upstream code (two calls instead of one) and passes with the fix, including a changed metric and model-policy refresh. This background-spend fix does not change original generation, final editorial thresholds, factual gates, canary recovery authorization or the reply block. The measured final-copy bottleneck and pending owner calibration remain the next publishing actions. The first natural research run will populate the new cache; later identical requests should reuse it, so production savings still require observation.
 
 Validation: all 1,861 tests across 171 files passed, including the new cache regression; TypeScript checking and the production build passed.
+
+## September 27 — repair the research-to-generation boundary
+
+The saved failed Cognition job contained the official X source document and a still-current observation, but no corresponding story. Read-only replay isolated the cause: `dueNetwork=false` supplies an empty observed-network set, the clustering filter excludes every cached X document, and storage replaces the complete story snapshot. The same source produced one qualified story when present in the observed set and zero otherwise. This is independent of writing quality.
+
+For the agent-13 durable rollout, research now retains X evidence through its original observation expiry across off-cycle, partial, and failed refreshes. Withdrawal and contradiction invalidate it immediately. Adapters carry observation/expiration metadata rather than resetting freshness on retrieval; legacy records use their recorded fetched time. Subject packets honor the earliest required source expiration. Existing research snapshot replacement semantics remain intact, with a complete current source set supplied to clustering.
+
+Durable planning joins current-interest topics to qualified stories by recorded source/topic identity and carries attributed primary-X claims into the writing packet. It compares at most two distinct subjects but still funds one selected idea's writer. Current production final-quality gates remain unchanged. Status and posting reasons separate assessed leaf-draft failures from historical preflight errors on repaired parents. The generation policy is `geoffrey-autopost-per-dollar-10`; a version bump cannot restart the stopped canary.
+
+The owner confirmed that personally published posts outside Clawfable may serve as positive voice evidence. Generated outputs and prompt-exposed examples must still be excluded, and human-post results must remain separate from generated-draft approval results. Shared-contract evaluation and calibrated activation follow this source fix; no threshold change is authorized by source retention alone.
+
+Validation: 1,868 tests across 172 files, typecheck, and production build passed. A read-only live replay found 39 current X documents, zero stored X stories, and 38 rebuilt X stories. Primary company statements require attribution at preflight. Explicit source withdrawals survive re-fetch and are rechecked at publication. No final editorial threshold changed.

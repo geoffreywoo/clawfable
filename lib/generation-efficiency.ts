@@ -2,7 +2,7 @@ import type { CandidateJudgeBreakdown } from './types';
 import { createHash } from 'node:crypto';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 
-export const EFFICIENT_GENERATION_POLICY = 'geoffrey-autopost-per-dollar-9';
+export const EFFICIENT_GENERATION_POLICY = 'geoffrey-autopost-per-dollar-10';
 export interface RepairDecision {
   disposition: 'pass' | 'repair' | 'abandon';
   failingDimension: string;

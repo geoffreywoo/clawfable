@@ -413,7 +413,7 @@ describe('generateTweetBatchV2 integration', () => {
     expect(critics[0].jsonSchema).toEqual(critics[1].jsonSchema);
     expect(critics.every(o=>o.modelStack==='publishing_v2_gpt_control'&&o.openAiReasoningEffort==='medium')).toBe(true);
     expect(traces.some(t=>t.generationPolicyVersion==='legacy-v2')).toBe(true);
-    expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-9')).toBe(true);
+    expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-10')).toBe(true);
   });
 
   it('tags a missing verified handle deterministically instead of paying for a repair, while retaining final judgment', async () => {
@@ -468,7 +468,7 @@ describe('generateTweetBatchV2 integration', () => {
       expect(writer.system + writer.prompt).not.toContain('this control variant is only the direct reaction');
     }
     expect(calls.filter(o=>o.task==='idea_judgment'||o.task==='copy_judgment').every(o=>o.modelStack==='publishing_v2_gpt_control' && o.openAiReasoningEffort==='medium')).toBe(true);
-    expect(trace.generationPolicyVersion).toBe('geoffrey-autopost-per-dollar-9');
+    expect(trace.generationPolicyVersion).toBe('geoffrey-autopost-per-dollar-10');
     expect(trace.stageCounts.ideasGenerated).toBe(Math.min(2, briefs.length) * 3);
     expect(calls.filter(o=>o.task==='idea_generation').every(o=>JSON.parse(o.prompt).requirements.ideasPerBrief===3)).toBe(true);
     expect(trace.stageCounts.ideaRetryCalls).toBe(0);

@@ -1,6 +1,7 @@
+import { isCurrentSourceEvidence } from './source-validity';
 import { repairTweetIndexes } from './kv-storage';
 import { durableGenerationEnabled, acknowledgeGenerationQueue, recordGenerationCanary, getGenerationCanary, getGenerationJob } from './generation-job';
-import { originalQueueBlockerReason } from './original-queue-blocker';
+import { originalQueueBlockerReason, generationFailureDiagnostics } from './original-queue-blocker';
 import { recordEmptyQueueRun } from './generation-efficiency';
 import { dispatchOriginalPost,reconcileOriginalPostDispatch,OriginalDispatchPendingError } from './original-post-dispatch';
 import { originalPostingCadence } from './original-post-cadence';
@@ -42,6 +43,7 @@ import {
   getRelationshipProfiles,
   getProductFacts,
   getGenerationRuns,
+  getDraftCandidates,
   invalidateAgentConnection,
   saveGenerationRun,
   upsertRelationshipProfile,
@@ -569,7 +571,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     const originIssue = getGeneratedPublishIssue(tweet, {
       currentVoiceCorpusVersion,
       accountHandle: agent.handle,
-    }) || (tweet.assessmentReceipt?.evidence?.some(e=>!currentSources.some(source=>source.id===e.sourceDocumentId && source.contentHash===e.contentHash && source.metadata?.withdrawn!==true && source.metadata?.contradicted!==true))
+    }) || (tweet.assessmentReceipt?.evidence?.some(e=>!currentSources.some(source=>source.id===e.sourceDocumentId && source.contentHash===e.contentHash && isCurrentSourceEvidence(source)))
       || (tweet.storyClusterId && tweet.assessmentReceipt?.evidence?.length && !currentStories.some(story=>story.id===tweet.storyClusterId && story.evidenceQualified && !story.blockReason))
       ? 'Subject evidence changed or was withdrawn; reassessment is required.' : null);
     const portfolioCompanyIssue = isGeoffreyAccount(agent.handle) || tweet.portfolioCompanyContext
@@ -1617,8 +1619,9 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     const latestGeneration = durableState
       ? recentGenerations.find(run => run.id === durableState[0]?.id)
       : recentGenerations[0];
+    const failures = durableState ? generationFailureDiagnostics(durableState[0]?.id, await getDraftCandidates(agentId, 600)) : null;
     const emptyQueueReason = durableState
-      ? originalQueueBlockerReason(durableState[0], durableState[1], latestGeneration?.rejectionCounts)
+      ? originalQueueBlockerReason(durableState[0], durableState[1], failures?.assessedDrafts ? failures.assessedRejectionCounts : latestGeneration?.rejectionCounts)
       : latestGeneration?.outcomeCode === 'budget_exhausted'
       ? 'AI generation budget limit reached. Queue refill is paused; existing spending limits remain in effect.'
       : 'Queue empty after auto-repair and generation attempts';

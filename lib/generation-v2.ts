@@ -1,4 +1,5 @@
 import { buildSubjectPacket, type SubjectPacket } from './subject-packet';
+import { attributedSourceClaim, isCurrentSourceEvidence } from './source-validity';
 import { GenerationJobSession, claimGenerationJob, jobFingerprint, GENERATION_JOB_VERSION, getGenerationCanary, recordGenerationCanary, generationCanaryAttemptId } from './generation-job';
 import { editorialRejectionCodes, normalizeCandidateDisposition } from './candidate-disposition';
 import { PUBLISHING_V2_GEOFFREY_AI_AMBITION } from './publishing-quality-policy';
@@ -1698,7 +1699,16 @@ export function rotateBudgetedBriefsV2<T>(briefs: T[], runId: string): T[] {
   return [...briefs.slice(offset), ...briefs.slice(0, offset)];
 }
 
-export function prioritizeCurrentInterestBriefsV2<T extends { trendTopicId?: string | null; storyClusterId?: string | null }>(briefs: T[], runId: string): T[] {
+export function prioritizeCurrentInterestBriefsV2<T extends { trendTopicId?: string | null; storyClusterId?: string | null }>(briefs: T[], runId: string, durable = false): T[] {
+  if (durable) {
+    // A sourced current interest wins; otherwise compare a research packet
+    // against an interest/opinion packet before funding one writer.
+    const sourced = briefs.filter(b => b.storyClusterId);
+    const opinion = briefs.filter(b => !b.storyClusterId);
+    const first = sourced.find(b => b.trendTopicId) || rotateBudgetedBriefsV2(sourced, runId)[0];
+    const second = opinion.find(b => b.trendTopicId) || sourced.find(b => b !== first) || opinion[0];
+    return [...new Set([first, second, ...briefs].filter(Boolean))] as T[];
+  }
   return [
     ...briefs.filter(brief => Boolean(brief.trendTopicId) && !brief.storyClusterId),
     ...rotateBudgetedBriefsV2(briefs.filter(brief => !brief.trendTopicId || brief.storyClusterId), runId),
@@ -2008,6 +2018,7 @@ export function buildGenerationBriefsV2({
   recentIdeas = [],
   seedRotationKey = '',
   dynamicIdeaSeeds = [],
+  durable = false,
   now = new Date(),
 }: {
   count: number;
@@ -2025,6 +2036,7 @@ export function buildGenerationBriefsV2({
   recentIdeas?: IdeaCandidate[];
   seedRotationKey?: string;
   dynamicIdeaSeeds?: FrontierIdeaSeed[];
+  durable?: boolean;
   now?: Date;
 }): GenerationBriefV2[] {
   const briefCount = Math.max(4, Math.min(8, count * 2));
@@ -2035,6 +2047,10 @@ export function buildGenerationBriefsV2({
   const activeQualityPolicyVersion = getGenerationPolicyVersions(voiceProfile, 'original').qualityPolicyVersion;
   const editorialStories = stories.filter((story) => (
     isStoryEditoriallyQualifiedV2(story, { minConsequence: geoffreyPortfolio ? 0.55 : undefined })
+    && (!durable || story.sourceDocumentIds.every(id => {
+      const document = documents.find(d => d.id === id);
+      return document && isCurrentSourceEvidence(document, now.getTime());
+    }))
   ));
   const storyCandidates = editorialStories
     .filter((story) => getStoryGenerationPlanningRejectionCodesV2(story, {
@@ -2171,12 +2187,17 @@ export function buildGenerationBriefsV2({
     return briefs;
   }
 
-  const appendStory = (story: StoryCluster): boolean => {
+  const appendStory = (story: StoryCluster, trendTopicId?: string): boolean => {
     const key = topicKey(`${story.topic} ${story.entities.join(' ')}`);
     if (usedTopics.has(key)) return false;
     const subject = storySubject(story);
     if (usedStorySubjects.some((used) => researchTokenSimilarity(subject, used) >= 0.52)) return false;
     const brief = storyBrief(story, documents);
+    if (trendTopicId) brief.trendTopicId = trendTopicId;
+    if (durable) brief.evidence = brief.evidence.map(e => {
+      const source = documents.find(d => d.id === e.sourceDocumentId);
+      return source ? { ...e, claim: attributedSourceClaim(source, e.claim) } : e;
+    });
     if (!portfolioAllowsTopic(
       `${story.topic} ${story.title} ${story.entities.join(' ')}`,
       `${story.topic} ${story.title} ${story.entities.join(' ')}`,
@@ -2267,6 +2288,14 @@ export function buildGenerationBriefsV2({
       ))
     ))) continue;
     const signalTokens = new Set(significantResearchTokens(signal.subject));
+    if (durable) {
+      const linked = storyCandidates.find(story => story.sourceDocumentIds.some(id =>
+        documents.some(document => document.id === id && document.metadata.trendTopicId === signal.id)));
+      if (linked) {
+        appendStory(linked, signal.id);
+        continue;
+      }
+    }
     if (editorialStories.some((story) => (
       sharedTokenCount(meaningfulStoryEntityTokens(story), signalTokens) >= 1
       || researchTokenSimilarity(storySubject(story), signal.subject) >= 0.38
@@ -5665,9 +5694,11 @@ function sourceAttributionTokens(documents: SourceDocument[]): Set<string> {
 export function getSourceAttributionIssueV2(
   content: string,
   documents: SourceDocument[],
+  primaryClaimsRequireAttribution = false,
 ): string | null {
   const requiresAttribution = documents.some((document) => (
-    document.claims.some((claim) => ATTRIBUTED_SOURCE_CLAIM.test(claim.text))
+    (primaryClaimsRequireAttribution && document.sourceType === 'x' && document.isPrimary)
+    || document.claims.some((claim) => ATTRIBUTED_SOURCE_CLAIM.test(claim.text))
   ));
   if (!requiresAttribution || GENERIC_COPY_ATTRIBUTION.test(content)) return null;
   const sourceTokens = sourceAttributionTokens(documents);
@@ -5723,7 +5754,7 @@ function preflightDraft({
     allowForecastTimingNumbers: true,
   }).issue;
   const sourceAttributionIssue = brief.evidenceMode === 'verified_source'
-    ? getSourceAttributionIssueV2(content, documents)
+    ? getSourceAttributionIssueV2(content, documents, Boolean(input.jobSession))
     : null;
   const recentDuplicate = isNearDuplicate(content, [
     ...input.recentPosts,
@@ -7801,6 +7832,7 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
       recentIdeas,
       seedRotationKey: runId,
       dynamicIdeaSeeds,
+      durable: Boolean(input.jobSession),
     });
     // Verified stories require claim-level evidence. Native operator briefs are
     // allowed to carry opinion only; deterministic idea and copy gates reject
@@ -7817,10 +7849,10 @@ async function generateTweetBatchV2Internal(input: GenerateTweetBatchV2Input): P
         briefKeys.set(brief.id, substantiveBriefDigest(brief, claims, `${trace.voiceCorpusVersion || ''}:${JSON.stringify(input.voiceProfile)}`, `${trace.qualityPolicyVersion || ''}:${trace.generationPolicyVersion}`));
       }
       briefs = briefs.filter(brief => !failed.has(briefKeys.get(brief.id)!));
-      if (input.mode !== 'preview') briefs = prioritizeCurrentInterestBriefsV2(briefs, runId);
+      if (input.mode !== 'preview') briefs = prioritizeCurrentInterestBriefsV2(briefs, runId, Boolean(input.jobSession));
       // Ideation is the cheap stage: two briefs give the judge six premises, while
       // selection below still funds only input.count writers.
-      briefs = briefs.slice(0, input.jobSession ? Math.min(2, input.count) : 2);
+      briefs = briefs.slice(0, 2);
       if (input.mode !== 'preview') {
         const claimed = new Set(await claimGenerationBriefs(input.agentId, runId, briefs.map(brief => briefKeys.get(brief.id)!)));
         briefs = briefs.filter(brief => claimed.has(briefKeys.get(brief.id)!));

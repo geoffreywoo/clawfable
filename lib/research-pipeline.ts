@@ -1,5 +1,7 @@
 import { cachedAiValue } from './ai-value-cache';
 import { aiSpendContext } from './ai-budget';
+import { isCurrentSourceEvidence } from './source-validity';
+import { durableGenerationEnabled } from './generation-job';
 import type {
   Agent,
   AgentLearnings,
@@ -26,6 +28,7 @@ import {
   getLearnings,
   getPerformanceHistory,
   getResearchAgenda,
+  getProtocolSettings,
   getResearchRefreshState,
   getSemanticBlocks,
   getStoryClusters,
@@ -585,8 +588,11 @@ export function isStoryClusterEligibleForGeneration(story: StoryCluster, nowMs =
 export function isResearchDocumentEligibleForClustering(
   document: SourceDocument,
   observedNetworkDocumentIds?: Set<string>,
+  retainCurrentNetwork = false,
+  now = Date.now(),
 ): boolean {
   if (document.sourceType === 'sec_edgar' && isLowSignalSecFilingTitle(document.title)) return false;
+  if (retainCurrentNetwork && document.sourceType === 'x') return isCurrentSourceEvidence(document, now);
   return document.sourceType !== 'x'
     || !observedNetworkDocumentIds
     || observedNetworkDocumentIds.has(document.id);
@@ -981,7 +987,7 @@ export async function refreshAgentResearch(
   await saveResearchRefreshState(agent.id, runningState);
 
   try {
-    const [currentAgenda, learnings, performance, feedback, tweets, semanticBlocks, existingClusters, trendSnapshot] = await Promise.all([
+    const [currentAgenda, learnings, performance, feedback, tweets, semanticBlocks, existingClusters, trendSnapshot, settings] = await Promise.all([
       getResearchAgenda(agent.id),
       getLearnings(agent.id),
       getPerformanceHistory(agent.id, 250),
@@ -990,6 +996,7 @@ export async function refreshAgentResearch(
       getSemanticBlocks(agent.id),
       getStoryClusters(agent.id),
       getTrendingCacheSnapshot(agent.id),
+      getProtocolSettings(agent.id),
     ]);
     const voiceProfile = parseSoulMd(agent.name || agent.handle, agent.soulMd || '');
     const needsSemanticBackfill = (previousState?.semanticBackfillVersion || 0) < GENERATION_V2_SEMANTIC_BACKFILL_VERSION;
@@ -1070,7 +1077,7 @@ export async function refreshAgentResearch(
     const storedDocuments = await upsertSourceDocuments(agent.id, enriched);
     const observedDocumentIds = new Set(fetchedDocuments.map((document) => document.id));
     const clusterDocuments = storedDocuments.filter((document) => (
-      isResearchDocumentEligibleForClustering(document, observedDocumentIds)
+      isResearchDocumentEligibleForClustering(document, observedDocumentIds, durableGenerationEnabled(agent.id, settings), now.getTime())
     ));
     const clusters = clusterAndQualifySources({
       agentId: agent.id,
