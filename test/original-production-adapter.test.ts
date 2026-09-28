@@ -63,7 +63,7 @@ beforeEach(() => {
         'an evening with no plans sounds pretty good to me.',
         'my ideal weekend has a little room to change my mind.',
       ].map((publicMove, index) => ({ briefId: subject.briefId, publicMove,
-        contentMode: subject.context.contentMode, evidenceIds: [], supportingReasoning: null, rankScore: 1 - index * .1 }))) });
+        contentMode: subject.context.contentMode || payload.sharedContext.contentMode, evidenceIds: [], supportingReasoning: null, rankScore: 1 - index * .1 }))) });
     } else if (options.task === 'tweet_writing') {
       text = JSON.stringify({ drafts: [
         'a quiet dinner sounds good to me.',
