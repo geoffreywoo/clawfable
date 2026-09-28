@@ -1302,9 +1302,7 @@ export async function buildLearnings(agent: Agent, options: { backfillAudienceFe
     .map((entry) => buildViralityPostmortem(agent.id, entry));
 
   // Generate prescriptive insights
-  const insights = await cachedAiValue(agent.id, 'performance-insights-2',
-    { history: policyLearningHistory, formatRankings, topicRankings, styleFingerprint, sourceBreakdown, accountHandle: agent.handle },
-    () => generateInsights(policyLearningHistory, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown, agent.handle, agent.id))
+  const insights = await generateInsights(policyLearningHistory, sorted, formatRankings, topicRankings, styleFingerprint, sourceBreakdown, agent.handle, agent.id)
     .catch(async () => (await getLearnings(agent.id))?.insights || []);
 
   const learnings: AgentLearnings = {
@@ -1737,9 +1735,10 @@ async function generateInsights(
       ? 'mixed with manually posted high-signal approvals'
       : 'mixed because autopilot history is still sparse';
 
-  try {
-    const response = await generateText({
-      spendContext: aiSpendContext(agentId, 'performance'),
+  // Hash the request the model actually sees. Derived history and the style
+  // fingerprint carry fresh audit timestamps on every rebuild; those must not
+  // turn identical evidence into another paid analysis.
+  const request: Parameters<typeof generateText>[0] = {
       task: 'learning',
       modelStack: resolvePublishingV2ModelStacks(accountHandle).learningStack,
       maxTokens: getLearningInsightMaxTokens(history.length),
@@ -1776,17 +1775,14 @@ BOTTOM ${worst.length} TWEETS:
 ${worst.map((t) => formatLearningInsightTweetExample(t, promptLimits.textChars)).join('\n')}
 
 Generate prescriptive rules for improving content quality. Focus on style patterns, not just topics.`,
-    });
-
-    const text = response.text;
-
-    return text.split('\n')
+  };
+  return cachedAiValue(agentId, 'performance-insights-3', request, async () => {
+    const response = await generateText({ ...request, spendContext: aiSpendContext(agentId, 'performance') });
+    return response.text.split('\n')
       .map((l) => l.replace(/^[-•*]\s*/, '').trim())
       .filter((l) => l.length > 10)
       .slice(0, 7);
-  } catch (error) {
-    throw error;
-  }
+  });
 }
 
 /**

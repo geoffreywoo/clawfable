@@ -74,3 +74,13 @@ At 11:46 Pacific the campaign was still blocked at $1.68773, queue depth zero, a
 Status now calculates the stage sample from distinct retained idea/draft identities for those jobs, uses the newest candidate state, excludes replies and unrelated runs, and counts only finite judge scores as completed assessments. Pending judgments remain unassessed. The sample explicitly discloses the bounded retention window and does not claim lifetime totals; selected-idea counts mean distinct ideas with written drafts. Live read-only evaluation yields twelve ideas, eight eligible ideas, five written ideas, eighteen drafts, three assessed drafts, and zero selected drafts. No generation, recovery, budget, or publishing policy changed.
 
 Validation for the reporting fix: 1,857 tests across 169 files, the focused status suite, typecheck, and production build passed.
+
+## September 27 — avoid paying again for unchanged learning inputs
+
+At 19:48 Pacific the original canary remained blocked at $1.68773, with zero publishable originals, no X dispatch receipt, and no new owner labels. Daily commitments were $3.99872, including $1.76295 of performance work: twenty learning calls ($1.60489) and twenty classification calls ($0.15806). These totals identify spend, not the amount recoverable or avoidable; no settled or uncertain charge was refunded.
+
+The insight cache hashed entire derived records, including `styleFingerprint.updatedAt`, which is regenerated on every learning rebuild. A regression test reproduces a second provider call for identical evidence one hour later. The cache now hashes the exact model request (prompt, system instructions, model stack, task and output limit) under a new cache version, with the existing model-policy fingerprint and account boundary. Audit timestamps and unchanged metric observations no longer trigger new paid insights. Changed evidence visible in the prompt or a changed model policy still triggers a fresh analysis. Existing lease, failure and budget handling remain in use.
+
+The regression fails against upstream code (two calls instead of one) and passes with the fix, including a changed metric and model-policy refresh. This background-spend fix does not change original generation, final editorial thresholds, factual gates, canary recovery authorization or the reply block. The measured final-copy bottleneck and pending owner calibration remain the next publishing actions. The first natural research run will populate the new cache; later identical requests should reuse it, so production savings still require observation.
+
+Validation: all 1,861 tests across 171 files passed, including the new cache regression; TypeScript checking and the production build passed.
