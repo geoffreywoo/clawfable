@@ -1,6 +1,6 @@
 import {
   buildGenerationBriefsV2, prioritizeCurrentInterestBriefsV2, normalizeIdeaCandidatesV2,
-  normalizeDraftContentV2, preflightDraft, selectFinalTweets, collectOperatorAnchors,
+  normalizeDraftContentV2, preflightDraft, qualifyOriginalDrafts, collectOperatorAnchors,
   sourceDocumentsForBrief, briefForIdea, getGenerationPolicyVersions, countRejections, finalizeTrace, isStoryEditoriallyQualifiedV2,
   type GenerateTweetBatchV2Input, type GenerationBriefV2, type DraftEvaluation,
 } from './generation-v2';
@@ -22,7 +22,7 @@ import { stableResearchId } from './research-utils';
 import type { DraftCandidate, IdeaCandidate, GenerationModelCallTrace, GenerationRunTrace, SourceDocument } from './types';
 import type { RankedPublishingCandidate } from './publishing-candidate';
 
-export const ORIGINAL_PRODUCTION_VERSION = 'simple-original-1';
+export const ORIGINAL_PRODUCTION_VERSION = 'simple-original-2';
 type Subject = GenerationBriefV2 & { editorialContext: OriginalEditorialContext };
 function parseArray(text: string, field: string): Array<Record<string, any>> {
   try {
@@ -33,8 +33,10 @@ function parseArray(text: string, field: string): Array<Record<string, any>> {
 }
 
 /** Validate the live evidence, not merely the once-valid job snapshot. */
-export function validateOriginalSubjects(subjects: GenerationBriefV2[], frozen: SourceDocument[], current: SourceDocument[], now = Date.now()) {
-  for (const subject of subjects) {
+export function validateOriginalSubjects(subjects: GenerationBriefV2[], frozen: SourceDocument[], current: SourceDocument[], now = Date.now(), selectedIdea?: Pick<IdeaCandidate, 'briefId'>) {
+  const required = selectedIdea ? subjects.filter(subject => subject.id === selectedIdea.briefId) : subjects;
+  if (selectedIdea && required.length !== 1) throw new Error('stale_evidence');
+  for (const subject of required) {
     if (!subject.subjectPacket || !(Date.parse(subject.subjectPacket.expiresAt) > now)) throw new Error('subject_expired');
     for (const id of subject.sourceDocumentIds) {
       const original = frozen.find(source => source.id === id), live = current.find(source => source.id === id);
@@ -95,10 +97,11 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
       getIdeaCandidates(input.agentId, 300), getDynamicIdeaSeeds(input.agentId),
     ]));
     const [documents, stories, blocks, recentIdeas, dynamicIdeaSeeds] = context;
-    const validate = async (subjects: Subject[]) => {
-      validateOriginalSubjects(subjects, documents, await getSourceDocuments(input.agentId, 300));
+    const validate = async (subjects: Subject[], selectedIdea?: IdeaCandidate) => {
+      validateOriginalSubjects(subjects, documents, await getSourceDocuments(input.agentId, 300), Date.now(), selectedIdea);
+      const required = selectedIdea ? subjects.filter(subject => subject.id === selectedIdea.briefId) : subjects;
       const liveStories = await getStoryClusters(input.agentId, 200);
-      if (subjects.some(subject => subject.storyClusterId && !liveStories.some(story => story.id === subject.storyClusterId && isStoryEditoriallyQualifiedV2(story) && !story.blockReason))) throw new Error('stale_evidence');
+      if (required.some(subject => subject.storyClusterId && !liveStories.some(story => story.id === subject.storyClusterId && isStoryEditoriallyQualifiedV2(story) && !story.blockReason))) throw new Error('stale_evidence');
     };
     const result = await runOriginalProduction<Subject, DraftEvaluation>({ session, deps: {
       loadSubjects: async () => {
@@ -169,8 +172,10 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
             input: assessmentInput, blocks });
         });
       },
-      assess: async evaluations => {
-        const selected = await selectFinalTweets({ evaluations, input: assessmentInput, calls: [], blocks });
+      assess: async (evaluations, idea, subjects) => {
+        const subject = subjects.find(row => row.id === idea.briefId)!;
+        const originalEditorialContext = contextForOriginalMode(subject.editorialContext, idea.contentMode || subject.editorialContext.contentMode);
+        const selected = await qualifyOriginalDrafts({ evaluations, input: { ...assessmentInput, originalEditorialContext }, calls: [], blocks });
         if (evaluations.some(e => e.draft.rejectionCodes.includes('malformed_copy_judgment'))) throw new Error('malformed_output');
         if (evaluations.some(e => e.draft.rejectionCodes.includes('copy_judge_unavailable'))) throw new Error('copy_judgment_failed');
         return selected;
@@ -178,7 +183,9 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
       persistIdeas: async values => { ideas = values.map(normalizeCandidateDisposition); await upsertIdeaCandidates(input.agentId, ideas); await record(); },
       persistDrafts: async values => { drafts = values.map(normalizeCandidateDisposition); await upsertDraftCandidates(input.agentId, drafts); await record(); },
     } });
-    await validate(result.subjects);
+    const selectedIdeaId = (session.job.checkpoints.selectedIdeas as string[] || [])[0];
+    const selectedIdea = result.ideas.find(idea => idea.id === selectedIdeaId);
+    if (selectedIdea) await validate(result.subjects, selectedIdea);
     trace.sourceDocumentIds = [...new Set(result.subjects.flatMap(s => s.sourceDocumentIds))];
     trace.storyClusterIds = result.subjects.flatMap(s => s.storyClusterId ? [s.storyClusterId] : []);
     trace.inputFingerprint = jobFingerprint(result.subjects);

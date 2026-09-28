@@ -6,8 +6,8 @@ import type { RankedPublishingCandidate } from './publishing-candidate';
 export interface OriginalDraftArtifact { draft: DraftCandidate }
 export interface OriginalProductionDependencies<Subject, Draft extends OriginalDraftArtifact> {
   loadSubjects(): Promise<Subject[]>;
-  /** Recheck current evidence, including after resuming frozen subject artifacts. */
-  validateSubjects(subjects: Subject[]): Promise<void>;
+  /** Check all ideation inputs, or only the selected idea's dependencies after selection. */
+  validateSubjects(subjects: Subject[], selectedIdea?: IdeaCandidate): Promise<void>;
   /** Return deterministically eligible ideas in the generator's preference order. */
   ideate(subjects: Subject[]): Promise<IdeaCandidate[]>;
   write(idea: IdeaCandidate, subjects: Subject[]): Promise<Draft[]>;
@@ -46,9 +46,11 @@ export async function runOriginalProduction<Subject, Draft extends OriginalDraft
     { outcome, subjects, ideas, drafts, selected }
   );
   if (!subjects.length) return result('no_qualified_context');
-  await deps.validateSubjects(subjects);
 
-  let ideas = (await session.checkpoint('ideas_ready', () => deps.ideate(subjects))).map(normalizeCandidateDisposition);
+  let ideas = (await session.checkpoint('ideas_ready', async () => {
+    await deps.validateSubjects(subjects);
+    return deps.ideate(subjects);
+  })).map(normalizeCandidateDisposition);
   const attempted = new Set(session.job.checkpoints.attemptedIdeas as string[] || []);
   const available = ideas.filter(idea => !attempted.has(idea.id)
     && ['generated', 'selected', 'reserve'].includes(idea.status));
@@ -65,20 +67,23 @@ export async function runOriginalProduction<Subject, Draft extends OriginalDraft
     rejectionCodes: [], failureCategory: idea.id === chosen.id ? undefined : 'selection',
   }));
   const selectedIdea = ideas.find(idea => idea.id === chosen.id)!;
+  // A stale unused runner-up cannot invalidate paid work on this idea. Check
+  // the selected dependency even when its assessment is already checkpointed.
+  await deps.validateSubjects(subjects, selectedIdea);
   await session.write(job => ({ ...job, stage: 'idea_selected', checkpoints: {
     ...job.checkpoints, ideas_ready: ideas, selectedIdeas: [selectedIdea.id],
     reserveIdeas: available.filter(idea => idea.id !== selectedIdea.id).map(idea => idea.id),
   } }));
   await deps.persistIdeas?.(ideas);
 
-  const drafts = await session.checkpoint(`drafts_ready:${selectedIdea.id}`, async () => {
-    await deps.validateSubjects(subjects);
-    return (await deps.write(selectedIdea, subjects)).map(pendingDraft);
-  });
-  await deps.persistDrafts?.(drafts.map(artifact => artifact.draft));
-
   const assessed = await session.checkpoint(`assessed:${selectedIdea.id}`, async () => {
-    await deps.validateSubjects(subjects);
+    // Replaying a completed assessment must never re-persist its earlier
+    // pending writer snapshot or downgrade its externally stored disposition.
+    const drafts = await session.checkpoint(`drafts_ready:${selectedIdea.id}`, async () => (
+      (await deps.write(selectedIdea, subjects)).map(pendingDraft)
+    ));
+    await deps.persistDrafts?.(drafts.map(artifact => artifact.draft));
+    await deps.validateSubjects(subjects, selectedIdea);
     // Existing assessment adapters accept generated drafts. The durable writer
     // checkpoint remains pending until this complete assessment commits.
     const evaluating: Draft[] = drafts.map(artifact => ({ ...artifact, draft: {

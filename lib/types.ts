@@ -239,7 +239,9 @@ export interface CandidateJudgeBreakdown {
   voiceDriftRisk?: number;
   statusTextureRisk?: number;
   generatedPatternRisk?: number;
+  /** Raw lexical diagnostic; substantive-copy judgment is recorded separately. */
   sourceCopyRisk?: number;
+  sourceCopyAssessment?: import('./source-copy-assessment').SourceCopyAssessment;
   qualityMargin?: number;
   viralityUpside?: number;
   /**
@@ -496,7 +498,7 @@ export interface GenerationSelectionTrace {
 }
 
 export interface Tweet {
-  assessmentReceipt?: { evaluationOnly?: boolean; editorialContractVersion?: string; contentHash: string; policyVersion: string; criticVersion: string; assessedAt: string; validUntil?: string; evidence?: Array<{sourceDocumentId:string;contentHash:string}> } | null;
+  assessmentReceipt?: { sourceCopyAssessment?: import('./source-copy-assessment').SourceCopyAssessment; evidenceContextHash?: string; evaluationOnly?: boolean; editorialContractVersion?: string; contentHash: string; policyVersion: string; criticVersion: string; assessedAt: string; validUntil?: string; evidence?: Array<{sourceDocumentId:string;contentHash:string}> } | null;
   id: string;
   agentId: string;
   content: string;

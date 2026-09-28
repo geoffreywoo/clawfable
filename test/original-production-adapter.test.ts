@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateOriginalProduction, validateOriginalSubjects } from '@/lib/original-production-adapter';
 import { claimGenerationJob, GenerationJobSession, getGenerationJob } from '@/lib/generation-job';
-import { getGenerationRuns, getDraftCandidates } from '@/lib/kv-storage';
+import { getGenerationRuns, getDraftCandidates, getLearningSignals } from '@/lib/kv-storage';
+import { editorialRejectionCodes } from '@/lib/candidate-disposition';
 import { getGeneratedPublishIssue } from '@/lib/generation-origin';
 import { getPublishingV2AutopostQualityMargin, getPublishingV2FinalCriticVersion, getPublishingV2QualityPolicyVersion } from '@/lib/publishing-quality-policy';
 import type { GenerateTextOptions } from '@/lib/ai';
@@ -9,7 +10,7 @@ import { generateTweetBatchV2, type GenerateTweetBatchV2Input, type GenerationBr
 import type { SourceDocument } from '@/lib/types';
 
 const harness = vi.hoisted(() => ({
-  generate: vi.fn(), finalOverall: .99, malformed: false,
+  generate: vi.fn(), finalOverall: .99, malformed: false, copyVerdict: 'clear', firstCopyUncertain: false,
   anchors: [
     { id: 'anchor-a', content: 'coffee outside. walking home.', topic: 'health' },
     { id: 'anchor-b', content: 'the little kitchen table is plenty.', topic: 'health' },
@@ -48,12 +49,12 @@ vi.mock('@/lib/generation-v2', async importOriginal => {
       status: 'generated', rejectionCodes: [], createdAt: now, updatedAt: now,
     })),
     preflightDraft: ({ draft, idea, brief, documents, anchors }: any) => ({ draft, idea, brief, sourceDocuments: documents, anchors }),
-    // selectFinalTweets deliberately remains the real production implementation.
+    // qualifyOriginalDrafts deliberately remains the real production implementation.
   };
 });
 
 beforeEach(() => {
-  harness.generate.mockReset(); harness.finalOverall = .99; harness.malformed = false;
+  harness.generate.mockReset(); harness.finalOverall = .99; harness.malformed = false; harness.copyVerdict = 'clear'; harness.firstCopyUncertain = false;
   harness.generate.mockImplementation(async (options: GenerateTextOptions) => {
     const payload = JSON.parse(options.prompt);
     let text: string;
@@ -73,12 +74,14 @@ beforeEach(() => {
     } else if (options.task === 'copy_judgment') {
       text = harness.malformed ? JSON.stringify({ ranking: [], scores: [] }) : JSON.stringify({
         ranking: payload.candidates.map((candidate: any) => candidate.id),
-        scores: payload.candidates.map((candidate: any) => ({ id: candidate.id,
+        scores: payload.candidates.map((candidate: any, index: number) => ({ id: candidate.id,
           overall: harness.finalOverall, voiceFit: .99, operatorPlausibility: .99,
           frontierLead: 1, aiBullishness: 1, trajectoryConviction: 1, forecastGrounding: 1,
           exponentialIntuition: 1, cringeRisk: 0, insight: .99, specificity: .99,
           factualSafety: .99, clarity: .99, novelty: .99, manualAnchorReskinRisk: 0,
           diagnosis: 'A concrete short preference in ordinary words.',
+          sourceCopyAssessment: { verdict: harness.firstCopyUncertain && index === 0 ? 'uncertain' : harness.copyVerdict,
+            explanation: harness.firstCopyUncertain && index === 0 ? 'The source relationship remains uncertain for this variant.' : 'The phrasing and thought are independent of the comparison sources.' },
         })),
       });
     } else throw new Error(`Unexpected extra paid stage: ${options.task}`);
@@ -113,6 +116,10 @@ describe('production original adapter', () => {
     const judgeCall = harness.generate.mock.calls[2][0];
     expect(JSON.parse(judgeCall.prompt).activeAutopostQualityMargin).toBe(getPublishingV2AutopostQualityMargin('geoffwoo'));
     expect(judgeCall.system).toContain('frontierLead');
+    expect(JSON.parse(judgeCall.prompt).originalEditorialContext).toEqual(JSON.parse(harness.generate.mock.calls[1][0].prompt).context);
+    expect(JSON.parse(judgeCall.prompt).learnedEditorialStrategy).toBeUndefined();
+    expect(judgeCall.jsonSchema.properties.scores.items.required).not.toContain('repairDecision');
+    expect(judgeCall.jsonSchema.properties.scores.items.required).toContain('sourceCopyAssessment');
     expect(result[0]).toMatchObject({ pipelineVersion: 'v2', contentProvenance: 'generated_v2',
       qualityPolicyVersion: getPublishingV2QualityPolicyVersion('original', 'geoffwoo'),
       finalCriticVersion: getPublishingV2FinalCriticVersion('original', 'geoffwoo'),
@@ -142,6 +149,59 @@ describe('production original adapter', () => {
     expect(getGeneratedPublishIssue({ ...result[0], content: 'Changed after judgment.' }, { accountHandle: 'geoffwoo' }))
       .toContain('changed after assessment');
     expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['idea_generation', 'tweet_writing', 'copy_judgment']);
+  });
+
+  it('does not let lexical diagnostics bypass an explicit semantic copy rejection', async () => {
+    const input = await setup(); harness.copyVerdict = 'block';
+    expect(await generateOriginalProduction(input)).toEqual([]);
+    expect(harness.generate).toHaveBeenCalledTimes(3);
+    const stored = await getDraftCandidates(input.agentId);
+    expect(stored.every(draft => draft.rejectionCodes.includes('source_copy'))).toBe(true);
+  });
+
+  it('retains paid drafts when substantive copying is uncertain rather than treating uncertainty as approval', async () => {
+    const input = await setup(); harness.copyVerdict = 'uncertain';
+    await expect(generateOriginalProduction(input)).rejects.toThrow('copy_judgment_failed');
+    expect((await getDraftCandidates(input.agentId)).every(draft => draft.status === 'pending_assessment')).toBe(true);
+    expect(input.jobSession!.job.checkpoints['assessed:idea-0']).toBeUndefined();
+    expect(harness.generate).toHaveBeenCalledTimes(3);
+  });
+
+  it('selects a qualified sibling while retaining an uncertain variant without negative taste feedback', async () => {
+    const input = await setup(); harness.firstCopyUncertain = true;
+    const result = await generateOriginalProduction(input);
+    expect(result).toHaveLength(1);
+    expect(result[0].finalCriticScores?.sourceCopyAssessment?.verdict).toBe('clear');
+    const judgedCandidates = JSON.parse(harness.generate.mock.calls[2][0].prompt).candidates;
+    const uncertainId = judgedCandidates[0].id;
+    expect(result[0].draftCandidateId).not.toBe(uncertainId);
+    const stored = await getDraftCandidates(input.agentId);
+    const pending = stored.find(draft => draft.id === uncertainId)!;
+    expect(pending).toMatchObject({ status: 'pending_assessment', rejectionCodes: ['copy_judgment_failed'],
+      judgeBreakdown: { sourceCopyAssessment: { verdict: 'uncertain' } } });
+    expect(editorialRejectionCodes(pending.rejectionCodes)).toEqual([]);
+    expect(stored.filter(draft => draft.status === 'selected')).toHaveLength(1);
+    expect(stored.filter(draft => draft.status === 'reserve')).toHaveLength(1);
+    expect(await getLearningSignals(input.agentId)).toEqual([]);
+    expect((await getGenerationRuns(input.agentId, 1))[0].outcomeCode).toBe('completed');
+    expect(input.jobSession!.job.checkpoints['assessed:idea-0']).toBeDefined();
+    expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['idea_generation', 'tweet_writing', 'copy_judgment']);
+    const recovered = new GenerationJobSession(input.agentId, (await getGenerationJob(input.agentId))!);
+    expect(await generateOriginalProduction({ ...input, jobSession: recovered })).toEqual(result);
+    expect(harness.generate).toHaveBeenCalledTimes(3);
+    expect((await getDraftCandidates(input.agentId)).find(draft => draft.id === uncertainId)?.status).toBe('pending_assessment');
+  });
+
+  it('preserves genuine editorial failure when the same variant also has an uncertain copy assessment', async () => {
+    const input = await setup(); harness.firstCopyUncertain = true; harness.finalOverall = .1;
+    expect(await generateOriginalProduction(input)).toEqual([]);
+    const uncertainId = JSON.parse(harness.generate.mock.calls[2][0].prompt).candidates[0].id;
+    const draft = (await getDraftCandidates(input.agentId)).find(candidate => candidate.id === uncertainId)!;
+    expect(draft.status).toBe('rejected');
+    expect(draft.rejectionCodes).toContain('copy_judgment_failed');
+    expect(editorialRejectionCodes(draft.rejectionCodes)).toContain('copy_judge_low_quality');
+    expect((await getGenerationRuns(input.agentId, 1))[0].outcomeCode).toBe('quality_empty');
+    expect(harness.generate).toHaveBeenCalledTimes(3);
   });
 
   it('retains paid drafts as pending after malformed final judgment, with no rewrite or editorial rejection', async () => {
@@ -186,4 +246,27 @@ it('rejects withdrawn, changed or expired live evidence even when the frozen sub
   ]) expect(() => validateOriginalSubjects([subject], [source], [changed], now)).toThrow('stale_evidence');
   expect(() => validateOriginalSubjects([subject], [source], [], now)).toThrow('stale_evidence');
   expect(() => validateOriginalSubjects([{ ...subject, subjectPacket: { ...subject.subjectPacket!, expiresAt: new Date(now).toISOString() } }], [source], [source], now)).toThrow('subject_expired');
+});
+
+it('revalidates only selected subject dependencies after ideation without accepting stale selected evidence', () => {
+  const now = Date.now();
+  const first = { id: 'source-first', contentHash: 'first-hash', fetchedAt: new Date(now - 1000).toISOString(), metadata: {} } as SourceDocument;
+  const unused = { ...first, id: 'source-unused', contentHash: 'unused-hash' };
+  const subjects = [first, unused].map(source => ({ id: source.id.replace('source-', 'subject-'),
+    sourceDocumentIds: [source.id], subjectPacket: { expiresAt: new Date(now + 60_000).toISOString() } } as GenerationBriefV2));
+  const selected = { briefId: 'subject-first' };
+  const frozen = [first, unused];
+  for (const live of [[first], [first, { ...unused, metadata: { withdrawn: true } }]]) {
+    expect(() => validateOriginalSubjects(subjects, frozen, live, now, selected)).not.toThrow();
+    expect(() => validateOriginalSubjects(subjects, frozen, live, now)).toThrow('stale_evidence');
+  }
+  const expiredUnused = [subjects[0], { ...subjects[1], subjectPacket: { ...subjects[1].subjectPacket!, expiresAt: new Date(now).toISOString() } }];
+  expect(() => validateOriginalSubjects(expiredUnused, frozen, frozen, now, selected)).not.toThrow();
+  expect(() => validateOriginalSubjects(expiredUnused, frozen, frozen, now)).toThrow('subject_expired');
+  for (const live of [[unused], [{ ...first, metadata: { withdrawn: true } }, unused], [{ ...first, contentHash: 'changed' }, unused]]) {
+    expect(() => validateOriginalSubjects(subjects, frozen, live, now, selected)).toThrow('stale_evidence');
+  }
+  expect(() => validateOriginalSubjects(subjects, frozen, frozen, now, { briefId: 'missing' })).toThrow('stale_evidence');
+  expect(() => validateOriginalSubjects([subjects[0], subjects[0]], frozen, frozen, now, selected)).toThrow('stale_evidence');
+  expect(() => validateOriginalSubjects([{ ...subjects[0], subjectPacket: { ...subjects[0].subjectPacket!, expiresAt: new Date(now).toISOString() } }], frozen, frozen, now, selected)).toThrow('subject_expired');
 });

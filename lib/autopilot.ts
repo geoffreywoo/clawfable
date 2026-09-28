@@ -52,6 +52,7 @@ import {
 import { generatePublishingBatchV2 } from './publishing-v2';
 import { getCommittedTweetCopyMemoryV2 } from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
+import { hasCurrentOriginalAssessmentReceipt } from './original-assessment-receipt';
 import { retainQualifiedTopicPackets } from './topic-intelligence-refresh';
 import { buildGenerationContext } from './generation-context';
 import { buildLearnings } from './performance';
@@ -473,8 +474,11 @@ function getQueuedClaimEvidenceIssue(
   return null;
 }
 
-function getQueuedSourceCopyIssue(tweet: Tweet): string | null {
+export function getQueuedSourceCopyIssue(tweet: Tweet): string | null {
   if (tweet.contentProvenance !== 'generated_v2') return null;
+  // The same immutable sources already received a semantic copy judgment.
+  // Source freshness and recent-post duplicates are checked separately on this tick.
+  if (hasCurrentOriginalAssessmentReceipt(tweet)) return null;
   const sourceTexts = [
     ...(tweet.sourceEvidenceTexts || []),
     ...(tweet.generationEvidenceReferences || []).map((entry) => entry.content),

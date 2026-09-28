@@ -68,7 +68,7 @@ export async function getReliableGenerationStatus(agentId:string) {
   const trace=runs.find(r=>r.id===job?.id);
   const failureDiagnostics=generationFailureDiagnostics(job?.id,drafts,job?.checkpoints?.selectedIdeas as string[] | undefined);
   return {publishableDepth:publishable.length,targetDepth:5,blocker,nextAction,
-    productionFlow: agentId === '13' ? {version:'simple-original-1',stages:['subjects','ideas','drafts','assessment','queue'],maximumModelCallsPerAttempt:3,automaticRewrites:0,activeJobFlow:job?.checkpoints.originalProductionVersion || 'legacy-existing-job',editorialPolicy:'current-production-unmodified'} : null,
+    productionFlow: agentId === '13' ? {version:'simple-original-2',stages:['subjects','ideas','drafts','assessment','queue'],maximumModelCallsPerAttempt:3,automaticRewrites:0,activeJobFlow:job?.checkpoints.originalProductionVersion || 'legacy-existing-job',editorialPolicy:'current-production-score-thresholds',sourceCopyPolicy:'semantic-assessment-with-receipt',qualification:'one-shared-final-decision'} : null,
     rejectionCounts:failureDiagnostics.assessedDrafts ? failureDiagnostics.assessedRejectionCounts : failureDiagnostics.hasActiveSelection ? failureDiagnostics.currentPreflightRejectionCounts : trace?.rejectionCounts || {},
     failureDiagnostics,historicalRejectionCounts:trace?.rejectionCounts || {},
     publication:dispatch?{tweetId:dispatch.tweetId,state:dispatch.state,xTweetId:dispatch.receipt?.tweetId || null,nextReconcileAt:dispatch.nextReconcileAt}:null,

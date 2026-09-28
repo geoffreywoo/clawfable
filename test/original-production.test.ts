@@ -34,7 +34,10 @@ async function setup() {
   const session = new GenerationJobSession(agentId, (await claimGenerationJob(agentId, {}, 'policy'))!);
   const deps = {
     loadSubjects: vi.fn(async () => [{ id: 'subject', valid: true }]),
-    validateSubjects: vi.fn(async (subjects: Subject[]) => { if (subjects.some(subject => !subject.valid)) throw new Error('subject_expired'); }),
+    validateSubjects: vi.fn(async (subjects: Subject[], selected?: IdeaCandidate) => {
+      const required = selected ? subjects.filter(subject => subject.id === selected.briefId) : subjects;
+      if (required.some(subject => !subject.valid)) throw new Error('subject_expired');
+    }),
     ideate: vi.fn(async () => [idea('first'), idea('reserve')]),
     write: vi.fn(async (selected: IdeaCandidate) => [draft(selected.id)]),
     assess: vi.fn(async (drafts: Draft[]) => qualify(drafts)),
@@ -78,9 +81,12 @@ describe('single-path original production', () => {
   it('replays both the final candidate and mutated assessment without rejudging', async () => {
     const args = await setup();
     const first = await runOriginalProduction(args);
+    const previousPersistenceCalls = args.deps.persistDrafts.mock.calls.length;
     expect(await runOriginalProduction(args)).toEqual(first);
     expect(args.deps.assess).toHaveBeenCalledTimes(1);
     expect(args.deps.persistDrafts.mock.calls.at(-1)?.[0][0]).toMatchObject({ status: 'selected', judgeScore: 0.9 });
+    expect(args.deps.persistDrafts.mock.calls.slice(previousPersistenceCalls).flatMap(call => call[0]).every(item => item.status === 'selected')).toBe(true);
+    expect(args.deps.write).toHaveBeenCalledTimes(1);
   });
 
   it('advances a reserve only on the next attempt, with no internal writer loop', async () => {
@@ -128,6 +134,53 @@ describe('single-path original production', () => {
     expect(args.deps.ideate).toHaveBeenCalledTimes(1);
     expect(args.deps.write).toHaveBeenCalledTimes(1);
     expect(args.deps.assess).toHaveBeenCalledTimes(1);
+  });
+
+  it('finishes a valid paid draft when an unused shortlisted subject becomes stale', async () => {
+    const args = await setup();
+    args.deps.loadSubjects.mockResolvedValue([{ id: 'subject', valid: true }, { id: 'unused', valid: true }]);
+    args.deps.ideate.mockResolvedValue([idea('first'), { ...idea('reserve'), briefId: 'unused' }]);
+    args.deps.assess.mockRejectedValueOnce(new Error('provider_pending'));
+    let withdrawn = '';
+    args.deps.validateSubjects.mockImplementation(async (subjects, selected) => {
+      const required = selected ? subjects.filter(subject => subject.id === selected.briefId) : subjects;
+      if (required.some(subject => subject.id === withdrawn)) throw new Error('stale_evidence');
+    });
+    await expect(runOriginalProduction(args)).rejects.toThrow('provider_pending');
+    withdrawn = 'unused';
+    const result = await runOriginalProduction(args);
+    expect(result.outcome).toBe('completed');
+    expect(result.selected[0].ideaId).toBe('first');
+    expect(args.deps.ideate).toHaveBeenCalledTimes(1);
+    expect(args.deps.write).toHaveBeenCalledTimes(1);
+    expect(args.deps.assess).toHaveBeenCalledTimes(2);
+    expect(args.deps.validateSubjects.mock.calls.filter(call => call[1] === undefined)).toHaveLength(1);
+    expect(args.deps.validateSubjects.mock.calls.slice(1).every(call => call[1]?.briefId === 'subject')).toBe(true);
+  });
+
+  it('blocks a withdrawn selected subject while preserving its paid draft and unspent reserve', async () => {
+    const args = await setup();
+    args.deps.loadSubjects.mockResolvedValue([{ id: 'subject', valid: true }, { id: 'unused', valid: true }]);
+    args.deps.ideate.mockResolvedValue([idea('first'), { ...idea('reserve'), briefId: 'unused' }]);
+    args.deps.assess.mockRejectedValueOnce(new Error('provider_pending'));
+    await expect(runOriginalProduction(args)).rejects.toThrow('provider_pending');
+    args.deps.validateSubjects.mockImplementation(async (_subjects, selected) => {
+      if (selected?.briefId === 'subject') throw new Error('stale_evidence');
+    });
+    await expect(runOriginalProduction(args)).rejects.toThrow('stale_evidence');
+    expect(args.deps.assess).toHaveBeenCalledTimes(1);
+    expect(args.deps.write).toHaveBeenCalledTimes(1);
+    expect(args.session.job.checkpoints['drafts_ready:first']).toBeDefined();
+    expect(args.session.job.checkpoints.reserveIdeas).toEqual(['reserve']);
+    expect(args.session.job.checkpoints.attemptedIdeas).toBeUndefined();
+  });
+
+  it('validates every shortlisted subject before purchasing new ideation', async () => {
+    const args = await setup();
+    args.deps.loadSubjects.mockResolvedValue([{ id: 'subject', valid: true }, { id: 'unused', valid: false }]);
+    await expect(runOriginalProduction(args)).rejects.toThrow('subject_expired');
+    expect(args.deps.ideate).not.toHaveBeenCalled();
+    expect(args.deps.write).not.toHaveBeenCalled();
   });
 
   it.each([1, 2])('stops if evidence is withdrawn after %i completed generation stages', async completedStages => {

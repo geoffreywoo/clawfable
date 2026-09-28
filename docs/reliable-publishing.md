@@ -156,3 +156,21 @@ Exact frozen replay clears the incorrect attribution code on `draft-1gmcnab`, wh
 A separate offline, explicitly annotated copy diagnostic examined six frozen company drafts. All six have raw copy flags; none is a full-source duplicate. Matching qualified measurement/value and named-entity spans explains five flags. One retains copied reporting syntax. Eight synthetic controls preserve copied creative prose, full-copy detection, nonmeasurement prose, wrong-value/measurement diagnostics and missing attribution. This is not a general fact extractor, calibrated acceptance policy or proof of publishability. Raw production copy scores and thresholds remain unchanged. Evidence is in ignored `source-copy-diagnostic-input.json`, `source-copy-diagnostic-replay.json`, and `attribution-repair-replay.json` under `.gstack/reliable-publishing/`. The canary remains stopped; no new ideas, drafts or judgments were purchased for this follow-up.
 
 Attribution follow-up validation: 1,966 tests across 179 files, typecheck and production build passed. The focused safety suite includes absent/competing publishers, indirect backing/acquisition/subsidiary references, modal and negated statements, quoted or questioned reporting, nonprimary/non-X sources, intervening sentences, paragraph breaks and ambiguous trailing entities.
+
+
+## Qualification consolidation — `simple-original-2`
+
+The original worker now follows `subjects → ideas → one idea → three drafts → one assessment → one selection → queue`. `qualifyOriginalDrafts` ends after the shared final decision; legacy batch quotas, trend mixing, portfolio scheduling and repair loops are outside this path. The old path remains for other accounts and already-paid legacy jobs. There is no extra model call or automatic rewrite.
+
+The audit found four execution/qualification defects:
+
+- Every distinctive four-word source overlap exceeded the copy-risk veto, including exact attributed financial terminology. Raw matches are now diagnostics. The same batch judge must explicitly decide substantive copying; full-source near-duplicates still block. Missing, malformed or uncertain judgments retain pending paid drafts. A copying clearance never verifies a fact.
+- Queue and posting applied another source-text similarity veto after assessment. A current server-owned receipt now reuses the same semantic decision, bound to the exact copy, comparison texts, factual packet, policy and critic. Source expiration/withdrawal, changed source hashes, owner restrictions and recent-post duplication remain live checks.
+- An expired unused subject invalidated a paid draft from a different valid subject. All inputs are checked before ideation; later stages validate only the selected idea's dependencies.
+- Replaying a completed assessment repersisted the earlier pending draft. Completed checkpoint replay now preserves the assessed disposition without re-entering writing.
+
+`final-copy-policy.ts` owns the numeric decision once. Preflight uses optimistic unknown model scores to stop guaranteed failures; final assessment supplies actual scores. The standalone question quota was also removed: a batch of one must not turn a learned mix preference into an absolute ban on questions.
+
+The final judge receives the exact compact writer context rather than rebuilding a second author profile from learned criticism and old rejection banks. Original judging no longer requests unused repair instructions. Comparison source text is explicitly untrusted and separate from qualified factual support; extracted claims are not treated as original source prose.
+
+This release preserves the active subjective score thresholds. It does **not** activate the evaluation-only single-score contract, claim owner calibration has passed, or remove the legacy AI frontier requirements. Those requirements still differ from the intended candidate editorial policy. The frozen owner review remains the prerequisite for replacing that policy. No expired draft is revived, canary counter reset, budget topped up, or X post authorized by a diagnostic clearance.
