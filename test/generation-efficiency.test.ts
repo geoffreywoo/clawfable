@@ -58,7 +58,7 @@ function examples(n=30):QualityCalibrationExample[]{return ['approved','rejected
 describe('owner calibration',()=>{
  it('keeps floors without enough independent owner labels',()=>{expect(calibrateQualityCutoffs(examples(19)).reason).toBe('insufficient_owner_labels');});
  it('recovers approvals on untouched holdout without passing rejected examples',()=>{
-   const result=calibrateQualityCutoffs(examples()); expect(result.activated).toBe(true); expect(result.cutoffs).toEqual({aiAmbition:0.88,qualityMargin:0.86});
+   const result=calibrateQualityCutoffs(examples()); expect(result.activated).toBe(true); expect(result.cutoffs).toEqual({aiAmbition:0.85,qualityMargin:0.86});
    expect(result.trainIds.some(id=>result.holdoutIds.includes(id))).toBe(false);
  });
  it('excludes prompt/evaluation leakage and contradictory lineage labels',()=>{

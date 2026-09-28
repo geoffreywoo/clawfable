@@ -1,16 +1,20 @@
-import { readFile,writeFile,mkdir } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
-import { calibrateQualityCutoffs, type QualityCalibrationExample } from '../lib/quality-calibration';
-async function main(){
- const filename=process.argv[2];if(!filename)throw new Error('Supply a private JSON file of verified owner-labelled, scored calibration examples.');
- const examples=JSON.parse(await readFile(filename,'utf8')) as QualityCalibrationExample[];
- const report=calibrateQualityCutoffs(examples); const evidenceHash=createHash('sha256').update(JSON.stringify(examples)).digest('hex');
- await mkdir('.gstack/quality-calibration',{recursive:true,mode:0o700});
- await writeFile('.gstack/quality-calibration/result.json',JSON.stringify({...report,evidenceHash},null,2),{mode:0o600});
- if(process.argv.includes('--activate')){
-   if(!report.activated)throw new Error(`Cannot activate: ${report.reason}`);
-   await writeFile('lib/geoffrey-quality-calibration.json',JSON.stringify({version:report.version,activated:true,evidenceHash,cutoffs:report.cutoffs},null,2)+'\n');
- }
- console.log(JSON.stringify({activated:report.activated,reason:report.reason,counts:report.counts,cutoffs:report.cutoffs}));
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { compareEditorialPolicies, type EditorialManifest, type EditorialEvaluationRow } from '../lib/editorial-calibration';
+import { getPublishingV2QualityPolicyVersion } from '../lib/publishing-quality-policy';
+import { getModelChainForTask } from '../lib/ai';
+
+async function main() {
+  const filename = process.argv[2];
+  if (!filename) throw new Error('Supply the private frozen manifest, complete policy assessment rows, and factual safety evaluation.');
+  if (process.argv.includes('--activate')) throw new Error('Automatic cutoff activation is retired. Review a complete held-out policy evaluation before a production release.');
+  const input = JSON.parse(await readFile(filename, 'utf8')) as { manifest: EditorialManifest; rows: EditorialEvaluationRow[]; safety: Array<{ case: string; candidateAccepted: boolean }> };
+  if (!input.manifest || !input.rows || !input.safety) throw new Error('Full-policy evaluation required; two-cutoff score files are not activation evidence.');
+  const baseline = { model: getModelChainForTask('copy_judgment', 'publishing_v2_astra')[0].model,
+    promptVersion: process.env.AI_MODEL_POLICY === 'astra_all' ? 'budget-copy-judge-2-astra' : 'budget-copy-judge-1',
+    policyVersion: getPublishingV2QualityPolicyVersion('original', 'geoffwoo') };
+  const report = compareEditorialPolicies(input.manifest, input.rows, input.safety, baseline);
+  await mkdir('.gstack/quality-calibration', { recursive: true, mode: 0o700 });
+  await writeFile('.gstack/quality-calibration/result.json', JSON.stringify(report, null, 2), { mode: 0o600 });
+  console.log(JSON.stringify(report));
 }
-main().catch(e=>{console.error(e.message);process.exitCode=1});
+main().catch(e => { console.error(e.message); process.exitCode = 1; });

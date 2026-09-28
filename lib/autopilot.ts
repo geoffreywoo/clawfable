@@ -1619,9 +1619,9 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
     const latestGeneration = durableState
       ? recentGenerations.find(run => run.id === durableState[0]?.id)
       : recentGenerations[0];
-    const failures = durableState ? generationFailureDiagnostics(durableState[0]?.id, await getDraftCandidates(agentId, 600)) : null;
+    const failures = durableState ? generationFailureDiagnostics(durableState[0]?.id, await getDraftCandidates(agentId, 600), durableState[0]?.checkpoints?.selectedIdeas as string[] | undefined) : null;
     const emptyQueueReason = durableState
-      ? originalQueueBlockerReason(durableState[0], durableState[1], failures?.assessedDrafts ? failures.assessedRejectionCounts : latestGeneration?.rejectionCounts)
+      ? originalQueueBlockerReason(durableState[0], durableState[1], failures?.assessedDrafts ? failures.assessedRejectionCounts : failures?.hasActiveSelection ? failures.currentPreflightRejectionCounts : latestGeneration?.rejectionCounts)
       : latestGeneration?.outcomeCode === 'budget_exhausted'
       ? 'AI generation budget limit reached. Queue refill is paused; existing spending limits remain in effect.'
       : 'Queue empty after auto-repair and generation attempts';

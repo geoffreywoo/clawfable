@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
+import { PUBLISHING_V2_GEOFFREY_AI_AMBITION, PUBLISHING_V2_GEOFFREY_AUTOPOST_QUALITY_MARGIN } from './publishing-quality-policy';
 
 export const QUALITY_CALIBRATION_VERSION = 'geoffrey-owner-calibration-2';
 export interface QualityCalibrationExample {
   id: string;
   group: string; // Shared premise/lineage identity; a group may never cross a split.
   label: 'approved' | 'rejected';
-  labelSource: 'owner_approval' | 'owner_final_edit' | 'owner_editorial_rejection';
+  labelSource: 'owner_approval' | 'owner_final_edit' | 'owner_editorial_rejection' | 'owner_self_written';
   isAi: boolean;
   aiAmbition: number;
   qualityMargin: number;
@@ -14,7 +15,7 @@ export interface QualityCalibrationExample {
   usedAsEvaluationBrief: boolean;
 }
 export interface CalibratedCutoffs { aiAmbition: number; qualityMargin: number; }
-export const DEFAULT_GEOFFREY_CUTOFFS: CalibratedCutoffs = { aiAmbition: 0.9, qualityMargin: 0.87 };
+export const DEFAULT_GEOFFREY_CUTOFFS: CalibratedCutoffs = { aiAmbition: PUBLISHING_V2_GEOFFREY_AI_AMBITION, qualityMargin: PUBLISHING_V2_GEOFFREY_AUTOPOST_QUALITY_MARGIN };
 function accepted(x: QualityCalibrationExample, cutoffs: CalibratedCutoffs) {
   return x.otherGatesPass && x.qualityMargin >= cutoffs.qualityMargin && (!x.isAi || x.aiAmbition >= cutoffs.aiAmbition);
 }
@@ -52,7 +53,7 @@ export function calibrateQualityCutoffs(examples: QualityCalibrationExample[]) {
   let distance=0;
   for(let a=-5;a<=5;a++) for(let q=-5;q<=5;q++) {
     if(a!==0 && !aiEligible) continue;
-    const cutoffs={aiAmbition:Number((0.9+a/100).toFixed(2)),qualityMargin:Number((0.87+q/100).toFixed(2))};
+    const cutoffs={aiAmbition:Number((DEFAULT_GEOFFREY_CUTOFFS.aiAmbition+a/100).toFixed(2)),qualityMargin:Number((DEFAULT_GEOFFREY_CUTOFFS.qualityMargin+q/100).toFixed(2))};
     const result=counts(train,cutoffs); const delta=Math.abs(a)+Math.abs(q);
     if(result.rejectionsAccepted>base.baselineTrain.rejectionsAccepted) continue;
     if(result.approvalsRecovered>best || (result.approvalsRecovered===best && delta<distance)) {

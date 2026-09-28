@@ -65,9 +65,9 @@ export async function getReliableGenerationStatus(agentId:string) {
     : blocker ? 'Resume the saved stage at nextAttemptAt; inspect repeated failures without discarding paid artifacts.'
     : publishable.length>=5 ? 'Reserve target met; wait for consumption.' : 'Continue the next unfinished generation stage.';
   const trace=runs.find(r=>r.id===job?.id);
-  const failureDiagnostics=generationFailureDiagnostics(job?.id,drafts);
+  const failureDiagnostics=generationFailureDiagnostics(job?.id,drafts,job?.checkpoints?.selectedIdeas as string[] | undefined);
   return {publishableDepth:publishable.length,targetDepth:5,blocker,nextAction,
-    rejectionCounts:failureDiagnostics.assessedDrafts ? failureDiagnostics.assessedRejectionCounts : trace?.rejectionCounts || {},
+    rejectionCounts:failureDiagnostics.assessedDrafts ? failureDiagnostics.assessedRejectionCounts : failureDiagnostics.hasActiveSelection ? failureDiagnostics.currentPreflightRejectionCounts : trace?.rejectionCounts || {},
     failureDiagnostics,historicalRejectionCounts:trace?.rejectionCounts || {},
     publication:dispatch?{tweetId:dispatch.tweetId,state:dispatch.state,xTweetId:dispatch.receipt?.tweetId || null,nextReconcileAt:dispatch.nextReconcileAt}:null,
     job:job?{id:job.id,version:job.version,policy:job.policy,stage:job.stage,status:job.status,blocker:job.blocker,nextAttemptAt:job.nextAttemptAt,expiresAt:job.expiresAt}:null,

@@ -68,5 +68,5 @@ export function collectOwnerCalibrationData(input: { signals: LearningSignal[]; 
       otherGatesPass:!draft.rejectionCodes.some(code=>!['final_ai_bullishness_below_floor','final_quality_margin','copy_not_selected'].includes(code)),
       usedAsPromptAnchor:false,usedAsEvaluationBrief:false});
   }
-  return {examples,missingScores,rawLabels:{approved:new Set(labels.filter(l=>l.label==='approved').map(l=>l.content)).size,rejected:new Set(labels.filter(l=>l.label==='rejected').map(l=>l.content)).size},knownLabels:{approved:new Set(eligibleLabels.filter(l=>l.label==='approved').map(l=>l.content)).size,rejected:new Set(eligibleLabels.filter(l=>l.label==='rejected').map(l=>l.content)).size}};
+  return {examples,missingScores,lineageGroups:Object.fromEntries(input.drafts.map(d=>[d.id,root(`draft:${d.id}`)])),labels:eligibleLabels.map(label=>({...label,group:root(textKey(label.content))})),rawLabels:{approved:new Set(labels.filter(l=>l.label==='approved').map(l=>l.content)).size,rejected:new Set(labels.filter(l=>l.label==='rejected').map(l=>l.content)).size},knownLabels:{approved:new Set(eligibleLabels.filter(l=>l.label==='approved').map(l=>l.content)).size,rejected:new Set(eligibleLabels.filter(l=>l.label==='rejected').map(l=>l.content)).size}};
 }

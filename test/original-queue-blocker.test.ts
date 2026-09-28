@@ -42,3 +42,13 @@ it('distinguishes provider deferral from editorial rejection and names the retry
   expect(reason).toContain('2026-09-26T19:10:00.000Z');
   expect(reason).not.toContain('editorial');
 });
+
+it('keeps earlier reserve attempts out of the latest assessed blocker, including a pending new judge', () => {
+  const drafts = [{id:'old',ideaId:'old-idea',generationRunId:'job',judgeScore:.4,rejectionCodes:['final_frontier_lead_below_floor']},
+    {id:'new',ideaId:'new-idea',generationRunId:'job',judgeScore:.5,rejectionCodes:['copy_judge_voice_mismatch']}] as any;
+  expect(generationFailureDiagnostics('job',drafts,['new-idea']).assessedRejectionCounts).toEqual({copy_judge_voice_mismatch:1});
+  const pending=generationFailureDiagnostics('job',drafts,['next-idea']);
+  expect(pending.hasActiveSelection).toBe(true);
+  expect(pending.assessedRejectionCounts).toEqual({});
+  expect(pending.historicalAssessedRejectionCounts.final_frontier_lead_below_floor).toBe(1);
+});

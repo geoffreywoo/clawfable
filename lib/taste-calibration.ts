@@ -119,7 +119,9 @@ export function buildTasteCalibrationQueue(tweets: Tweet[], now = new Date(), ow
   const items = [...selected.values()];
   const labels = ownerEvidence ? collectOwnerCalibrationData({ ...ownerEvidence, tweets, drafts: [], ideas: [] }).knownLabels : null;
   const missing = labels ? { approvals: Math.max(0,20-labels.approved), rejections: Math.max(0,20-labels.rejected) } : null;
-  const request = missing && (missing.approvals || missing.rejections)
+  const request = labels && tweets.some(t => t.agentId === '13')
+    ? ` Owner decisions recorded: ${labels.approved} approvals and ${labels.rejected} rejections. Scoring changes require improved results on separate, previously unseen groups of approved and rejected generated drafts. Self-written posts are evaluated separately.`
+    : missing && (missing.approvals || missing.rejections)
     ? ` To calibrate autopost scoring, we still need ${missing.approvals} clear approvals and ${missing.rejections} clear rejections. Use the taste buttons below; automatic posts do not count.` : '';
   return {
     generatedAt: now.toISOString(),
