@@ -1,4 +1,4 @@
-import { candidateEditorialDecision, editorialHash, editorialPrompt, parseEditorialAssessment, type EditorialAssessment } from './editorial-contract';
+import { candidateEditorialDecision, editorialHash, editorialAssessmentRequest, parseEditorialAssessment, type EditorialAssessment } from './editorial-contract';
 import { getEditorialSafetyFixtures } from './editorial-safety-fixtures';
 
 /** Raw returned assessments and spending identities, never hand-entered pass booleans. */
@@ -7,6 +7,7 @@ export interface EditorialSafetyEvaluation {
   suiteHash: string;
   contentHash: string;
   contextHash: string;
+  assessmentContextHash?: string;
   candidateVersion: string;
   model: string;
   requestKey: string;
@@ -25,11 +26,12 @@ export function inspectEditorialSafetyResults(rows: EditorialSafetyEvaluation[],
     // receipt to that exact final-judge request, not an unrelated paid call.
     const pair = inputs.find(item => item.id === suite.expectations.find(item => item.id === input?.id)?.pairedId);
     const requests = input ? [[input], ...(pair ? [[input, pair], [pair, input]] : [])] : [];
-    const requestMatches = requests.some(items => row.requestKey === editorialHash([
-      editorialPrompt('final', input!.context), items.map(({ id, content }) => ({ id, content })), model,
-    ]));
+    const requestMatches = requests.some(items => row.requestKey === editorialAssessmentRequest({
+      stage: 'final', context: input!.context, variants: items, model, assessmentContext: input!.assessmentContext,
+    }).requestKey);
     if (!input || seen.has(row.id) || row.suiteHash !== suite.hash || row.contentHash !== input.contentHash
       || row.contextHash !== input.contextHash || row.candidateVersion !== suite.candidateVersion
+      || !input.assessmentContextHash || row.assessmentContextHash !== input.assessmentContextHash
       || row.candidateVersion !== candidateVersion || row.model !== model || !requestMatches
       || !Array.isArray(row.spendAttemptIds) || !row.spendAttemptIds.length
       || !row.spendAttemptIds.every(id => typeof id === 'string' && id.trim()) || !parseEditorialAssessment(row.assessment)) {

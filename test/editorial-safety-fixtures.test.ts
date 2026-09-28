@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getEditorialSafetyFixtures } from '@/lib/editorial-safety-fixtures';
 import { REQUIRED_EDITORIAL_SAFETY_CASES } from '@/lib/editorial-calibration';
-import { editorialHash, editorialPrompt } from '@/lib/editorial-contract';
+import { editorialHash, editorialAssessmentRequest } from '@/lib/editorial-contract';
 import { assessClaimEvidence } from '@/lib/claim-evidence';
 import { getGeneratedTweetIssue, isNearDuplicate } from '@/lib/survivability';
 
@@ -9,6 +9,7 @@ describe('synthetic editorial safety fixtures', () => {
   it('provides every required case once, with distinct opaque identities and stable freezeable hashes', () => {
     const suite = getEditorialSafetyFixtures(), again = getEditorialSafetyFixtures();
     expect(suite).toEqual(again);
+    expect(suite.version).toBe('editorial-safety-fixtures-2');
     expect(suite.negativeCases.map(row => row.case)).toEqual([...REQUIRED_EDITORIAL_SAFETY_CASES]);
     expect(suite.positiveControls).toHaveLength(6);
     expect(suite.expectations).toHaveLength(12);
@@ -20,6 +21,7 @@ describe('synthetic editorial safety fixtures', () => {
       expect(row.id).toMatch(/^es-[0-9a-f]{24}$/);
       expect(row.contentHash).toBe(editorialHash(row.content));
       expect(row.contextHash).toBe(editorialHash(row.context));
+      expect(row.assessmentContextHash).toBe(editorialHash(row.assessmentContext));
     }
     expect(suite).toMatchObject({ evaluationOnly: true, synthetic: true });
   });
@@ -30,11 +32,18 @@ describe('synthetic editorial safety fixtures', () => {
       const positive = suite.positiveControls[index];
       expect(negative.context).toEqual(positive.context);
       expect(negative.contextHash).toBe(positive.contextHash);
+      expect(negative.assessmentContext).toEqual(positive.assessmentContext);
+      expect(negative.assessmentContextHash).toBe(positive.assessmentContextHash);
       expect(suite.expectations.find(row => row.id === negative.id)).toMatchObject({ pairedId: positive.id, expectedHardBlocker: negative.case });
       expect(suite.expectations.find(row => row.id === positive.id)).toMatchObject({ pairedId: negative.id, expectedHardBlocker: null });
-      const prompt = editorialPrompt('final', negative.context);
-      // This is the existing candidate evaluator's payload shape. Metadata must not be spread into candidates.
-      const payload = JSON.stringify({ context: prompt.context, candidates: [{ id: negative.id, content: negative.content }] });
+      const request = editorialAssessmentRequest({ stage: 'final', context: negative.context,
+        variants: [negative], model: 'fixture-judge', assessmentContext: negative.assessmentContext });
+      expect(request.system).toContain('ownerRestrictions bind');
+      expect(request.system).toContain('stylePreferences inform editorial quality');
+      // Activation assessment uses the native projection; generic context and
+      // the answer key remain auditable fields outside the model request.
+      const payload = request.prompt;
+      expect(JSON.parse(payload)).toEqual({ ...negative.assessmentContext, candidates: [{ id: negative.id, content: negative.content }] });
       expect(payload).not.toMatch(/expectedHardBlocker|pairedId|rationale|unsupported_fact|fabricated_experience|owner_restriction|substantive_duplicate|invalid_payload|missing_attribution/);
       expect(payload).not.toMatch(/geoffwoo|geoffreywoo|Cognition|owner-review|holdout/i);
     });
@@ -44,8 +53,47 @@ describe('synthetic editorial safety fixtures', () => {
     const suite = getEditorialSafetyFixtures(), before = suite.hash;
     suite.negativeCases[0].content = 'changed';
     suite.negativeCases[0].context.supportedFacts.push('changed');
+    suite.negativeCases[0].assessmentContext.originalEditorialContext.supportedFacts.push('changed');
+    suite.negativeCases[0].assessmentContext.selectedThought.publicMove = 'changed';
     expect(getEditorialSafetyFixtures().hash).toBe(before);
     expect(getEditorialSafetyFixtures().negativeCases[0].context.supportedFacts).not.toContain('changed');
+    expect(getEditorialSafetyFixtures().negativeCases[0].assessmentContext.originalEditorialContext.supportedFacts).not.toContain('changed');
+    expect(suite.positiveControls[0].assessmentContext.selectedThought.publicMove).not.toBe('changed');
+  });
+
+  it('retains raw v1 identities while binding new native context to the suite hash', () => {
+    const suite = getEditorialSafetyFixtures();
+    [suite.negativeCases, suite.positiveControls].forEach((rows, member) => rows.forEach((row, index) => {
+      expect(row.id).toBe(`es-${editorialHash(['editorial-safety-fixtures-1', index, member, row.content, row.context]).slice(0, 24)}`);
+    }));
+    const altered = structuredClone(suite);
+    altered.negativeCases[0].assessmentContext.selectedThought.publicMove += ' Changed.';
+    const { hash: _hash, ...body } = altered;
+    expect(editorialHash(body)).not.toBe(suite.hash);
+  });
+
+  it('preserves every factual boundary and explicitly distinguishes preferences from restrictions', () => {
+    const suite = getEditorialSafetyFixtures();
+    for (const row of [...suite.negativeCases, ...suite.positiveControls]) {
+      const { originalEditorialContext: native, selectedThought, sourceComparators } = row.assessmentContext;
+      for (const field of ['contentMode', 'supportedFacts', 'unresolvedClaims', 'voiceExamples', 'previousPremises'] as const)
+        expect(native[field]).toEqual(row.context[field]);
+      expect(native.author.accountHandle).toBe('synthetic-workshop-author');
+      expect(native.author.summary).toContain('fictional');
+      expect(native.subject.sourceIds).toEqual([]);
+      expect(Date.parse(native.subject.expiresAt)).toBeLessThan(Date.parse('2026-01-01T00:00:00Z'));
+      expect(native.subject.permittedModes).toEqual([row.context.contentMode]);
+      expect(selectedThought.contentMode).toBe(row.context.contentMode);
+      expect(selectedThought.evidenceIds).toEqual([]);
+      expect(sourceComparators).toEqual([]);
+      expect(native.stylePreferences.join(' ')).not.toContain('Never name or recommend');
+    }
+    const restriction = suite.negativeCases[2].assessmentContext.originalEditorialContext;
+    expect(restriction.ownerRestrictions).toEqual(['Never name or recommend the fictional product TEST-LAMP-Q9 in a public post.']);
+    expect(restriction.stylePreferences).toEqual(['Write concise personal opinions about fictional reading lamps.']);
+    const ordinary = suite.negativeCases[0].assessmentContext.originalEditorialContext;
+    expect(ordinary.ownerRestrictions).toEqual(['Publish only complete post text.']);
+    expect(ordinary.stylePreferences).toEqual(['Write concise observations about the fictional workshop described below.']);
   });
 
   it('contradicts an independently documented count without changing the control factual boundary', () => {

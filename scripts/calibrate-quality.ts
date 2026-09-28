@@ -10,7 +10,8 @@ async function main() {
   // Private bundle: { manifest, rows, safety, reviews?: FrozenOwnerReview[],
   //   supplements?: EditorialHoldoutSupplement[], supplementReviews?: FrozenOwnerReview[] }.
   // Each row/review retains its source manifest hash; scored rows require
-  // evaluatorVersion 'durable-original-2', and supplemental rows require contextHash.
+  // evaluatorVersion 'durable-original-3' plus the shared assessmentContextHash;
+  // supplemental rows also require their frozen contextHash.
   // See lib/editorial-review-bundle.ts for the frozen schema.
   const input = JSON.parse(await readFile(filename, 'utf8')) as EditorialReviewBundle;
   if (!input.manifest || !input.rows || !input.safety) throw new Error('Full-policy evaluation required; two-cutoff score files are not activation evidence.');

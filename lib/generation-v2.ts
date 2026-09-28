@@ -6229,11 +6229,25 @@ function copyScore(entry: Record<string, unknown>, validIds: Set<string>): CopyJ
 }
 
 /** Untrusted wording comparators are never promoted into factual support. */
-export function draftSourceCopyInputs(evaluation: DraftEvaluation) {
+export function draftSourceCopyInputs(evaluation: Pick<DraftEvaluation, 'sourceDocuments'>) {
   return evaluation.sourceDocuments.flatMap(document => [
     { id: `${document.id}:title`, text: document.title },
     { id: `${document.id}:excerpt`, text: document.excerpt },
   ]).filter(source => source.text?.trim());
+}
+
+/** Shared semantic input; policy instructions and decision thresholds stay with each judge. */
+export function originalAssessmentContext(
+  context: OriginalEditorialContext,
+  evaluation: Pick<DraftEvaluation, 'idea' | 'brief' | 'sourceDocuments'>,
+) {
+  return {
+    originalEditorialContext: originalModelContext(context),
+    selectedThought: { id: evaluation.idea.id, publicMove: ideaPublicMove(evaluation.idea),
+      contentMode: evaluation.idea.contentMode, evidenceIds: evaluation.idea.evidenceIds,
+      evidenceMode: evaluation.brief.evidenceMode },
+    sourceComparators: draftSourceCopyInputs(evaluation),
+  };
 }
 
 async function judgeDrafts(
@@ -6327,6 +6341,8 @@ async function judgeDraftsOnce(
       judgmentSchema.properties.scores.items.required.push('repairDecision');
       judgmentSchema.properties.scores.items.properties.repairDecision = REPAIR_DECISION_SCHEMA;
     }
+    const originalContextPayload = input.originalEditorialContext
+      ? originalAssessmentContext(input.originalEditorialContext, shuffled[0]) : null;
     const result = await (input.originalModelCall || trackedGenerate)('copy_judgment', {
       task: 'copy_judgment',
       modelStack: usesBudgetJudge(input) ? budgetJudgeStack() : input.previewJudgeModelStack || input.modelStack,
@@ -6336,12 +6352,10 @@ async function judgeDraftsOnce(
       jsonSchema: judgmentSchema,
         system: `${!input.originalModelCall && usesBudgetJudge(input) ? 'Return repairDecision with disposition pass, repair, or abandon. A repair must name exactly one failing dimension and offendingSpan copied from the draft, a permittedChange supported by the approved premise/evidence, valid evidenceIds (empty for opinion), and exact spans to preserve. Repair only voice, clarity, or expression of already-supported specificity. Missing evidence, weak premise, insufficient ambition or originality means abandon. Never demand financing risk, invented contract terms, unsupported mechanisms, or extra explanation merely to make a concise opinion sound complete. Preserve the stance and factual boundary; do not solve grounding by adding uncertainty and then penalize that uncertainty. ' : ''}${candidateContextInstruction} Use the voice examples only as evidence of the author's diction, compression, capitalization, slang, sentence rhythm, public posture, and demonstrated range from blunt one-liners to rough multi-paragraph thoughts. ${operatorPlausibilityInstruction} A famous company or person name is not specificity by itself: if the same logic survives swapping the proper noun, specificity and operatorPlausibility must be below 0.65. For AI and robotics posts, score frontierLead for whether the post starts from the current frontier and advances a concrete consequence roughly 6-12 months beyond informed consensus. ${frontierBaselineInstruction} Score aiBullishness for whether rapid capability improvement and adoption produce an ambitious organizational, economic, capital, software, labor, power, or cultural implication; generic AGI hype does not qualify. ${geoffreyAIAmbitionJudgeInstruction} Score trajectoryConviction for an owned aggressive near-term call rather than a hedge, distant 2030 escape hatch, or timid product wish. Score forecastGrounding for a falsifiable timing anchor, named actor, threshold behavior, observable curve, or sourced mechanism. Never reward invented data. Score exponentialIntuition for a nonlinear capability, cost, reliability, fleet-data, or adoption threshold and its second-order consequence instead of a linear extrapolation. For posts outside AI and robotics, set all five trajectory scores to 1. Score cringeRisk from 0 to 1 for topic-swapped AI advice, recycled startup aphorisms, manufactured mic drops, consultant cadence, cute metaphor punchlines, fake personal habits, or copy that performs a persona. Treat an invented emotional reaction, vocabulary change, attention pattern, or ceremonial first-person stance as persona performance, not native voice. Treat modal affect forecasts such as "X will make Y emotionally dangerous" or "X can make Y feel embarrassing" as synthetic persona or status writing and score cringeRisk at least 0.5 unless a concrete sourced event and non-interchangeable literal mechanism make the wording necessary. Any recognizable template, generic maxim, or balanced abstraction followed by "that is exactly when" should score at least 0.5. Score manualAnchorReskinRisk from 0 to 1 for reuse of any native anchor's premise, scene, metaphor, causal claim, distinctive opening, or sentence skeleton; matching only capitalization or rhythm is not reuse. A semantic paraphrase or extension of an anchor must score at least 0.8 even when the words differ. Apply factualSafety by evidenceMode. For verified_source, check every factual premise and direction of inference against the supplied evidence: reversed actors, invented causality, pricing, necessity, market behavior, or numerical comparisons that change a figure's subject, denominator, geography, period, or measurement type require factualSafety below 0.5. For operator_opinion, empty evidence is expected and must not lower factualSafety. A subjective judgment, question, prediction, or explicitly modal speculation can receive full factualSafety without a citation when it does not present an invented event, measured or current number, quote, customer, measurement, external mechanism, or first-person behavior as established fact. An unmistakably subjective valuation, price, timing forecast, or amount the author would pay or bet is allowed when the draft preserves the approved posture and number. When operatorTopicContext is present, preserve each entity role and remember that roles do not prove a relationship. Treat an investor, person, institution, or location described as a model, product, repository, host, or technology as factualSafety below 0.5. Reintroducing a stripped event term as a premise also requires factualSafety below 0.5. When portfolioCompanyContext is present, reject generic praise, ad copy, criticism, fabricated access, or portfolio disclosure; reward only constructive, company-specific conviction that names the company and remains inside the approved factual packet. Prefer the post that makes the sharper worthwhile point in that native register. A direct named reaction, prediction, desire, valuation call, weird speculation, or high-context question can have high insight without explaining a framework or closing the argument; do not penalize a native post for leaving context implicit. When briefIntent asks for a named timing or comparison answer, a concrete one-line first-person pick can be fully formed; do not lower insight or recommend an unsupported mechanism merely because it is brief. Give low overall and voiceFit scores to consultant scaffolding, stacked abstractions, generic advice, forced tests or filters, commodity-versus-moat slogans, or slogan-like closers even when the underlying claim is correct. Both candidates may fail. Do not reward polish, completeness, or length by itself. For every score, diagnosis must be one concrete sentence: name the exact phrase or rhetorical move that makes the draft native or non-native, then target the lowest substantive dimension with the smallest useful rewrite direction without writing replacement copy. Diagnosis and scores must agree. Say that no substantive rewrite is needed, no rewrite is needed, or the post is already fully formed only when every scored hard dimension clears its floor and the combined quality is strong enough to clear ${autopostBarLabel}; otherwise name the exact substantive weakness represented by the lowest score. A diagnosis must never recommend only capitalization, punctuation, spelling, grammar, or formatting; those cosmetic changes cannot rescue a weak post. When a direct line is credible but thin outside a timing/comparison brief, ask for one subject-specific mechanism or consequence already permitted by the approved idea rather than more polish. Compare variants of the same idea first, then compare idea winners. Candidate order carries no signal; never favor a candidate for its position. ${input.originalModelCall ? `${SOURCE_COPY_JUDGE_GUIDANCE} Use sourceComparators only for copying, never as additional factual evidence. The originalEditorialContext is the exact writer context; do not infer extra owner preferences from model criticism or operational history. Keep the active production score policy unchanged.` : ''} Return the requested JSON only.${options.retryNudge ? ` ${options.retryNudge}` : ''}`,
       prompt: JSON.stringify(input.originalEditorialContext ? {
-        originalEditorialContext: originalModelContext(input.originalEditorialContext),
+        originalEditorialContext: originalContextPayload.originalEditorialContext,
         activeAutopostQualityMargin: getRequiredFinalQualityMarginV2(input),
-        selectedThought: { id: shuffled[0].idea.id, publicMove: ideaPublicMove(shuffled[0].idea),
-          contentMode: shuffled[0].idea.contentMode, evidenceIds: shuffled[0].idea.evidenceIds,
-          evidenceMode: shuffled[0].brief.evidenceMode },
-        sourceComparators: draftSourceCopyInputs(shuffled[0]),
+        selectedThought: originalContextPayload.selectedThought,
+        sourceComparators: originalContextPayload.sourceComparators,
         candidates: shuffled.map(entry => ({ id: entry.draft.id, ideaId: entry.idea.id, post: entry.draft.content })),
       } : {
         author: {

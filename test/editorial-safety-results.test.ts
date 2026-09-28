@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { inspectEditorialSafetyResults, type EditorialSafetyEvaluation } from '@/lib/editorial-safety-results';
 import { getEditorialSafetyFixtures } from '@/lib/editorial-safety-fixtures';
-import { EDITORIAL_DIMENSIONS, editorialHash, editorialPrompt, type EditorialAssessment } from '@/lib/editorial-contract';
+import { EDITORIAL_DIMENSIONS, editorialAssessmentRequest, type EditorialAssessment } from '@/lib/editorial-contract';
 
 const model = 'active-test-judge';
 function fixture(includeControls = false) {
   const suite = getEditorialSafetyFixtures();
   const inputs = [...suite.negativeCases, ...(includeControls ? suite.positiveControls : [])];
   const rows: EditorialSafetyEvaluation[] = inputs.map(input => ({ id: input.id, suiteHash: suite.hash,
-    contentHash: input.contentHash, contextHash: input.contextHash, candidateVersion: suite.candidateVersion,
-    model, requestKey: editorialHash([editorialPrompt('final', input.context), [{ id: input.id, content: input.content }], model]), spendAttemptIds: [`spend:${input.id}`],
+    contentHash: input.contentHash, contextHash: input.contextHash, assessmentContextHash: input.assessmentContextHash, candidateVersion: suite.candidateVersion,
+    model, requestKey: editorialAssessmentRequest({stage:'final',context:input.context,variants:[input],model,assessmentContext:input.assessmentContext}).requestKey, spendAttemptIds: [`spend:${input.id}`],
     assessment: { editorialScore: .99, explanation: 'Controlled test response.', diagnostics: [],
       hardBlockers: suite.negativeCases.some(item => item.id === input.id) ? [input.case] : [],
       dimensions: Object.fromEntries(EDITORIAL_DIMENSIONS.map(d => [d, { score: .99, explanation: d }])) as EditorialAssessment['dimensions'] } }));
@@ -32,7 +32,7 @@ describe('auditable editorial safety outcomes', () => {
     expect(value.inspect().invalidIds).toContain(value.rows[0].id);
   });
 
-  it.each(['suiteHash', 'contentHash', 'contextHash', 'candidateVersion', 'model', 'requestKey', 'spendAttemptIds'] as const)
+  it.each(['suiteHash', 'contentHash', 'contextHash', 'assessmentContextHash', 'candidateVersion', 'model', 'requestKey', 'spendAttemptIds'] as const)
     ('refuses changed or absent %s provenance', key => {
       const value = fixture();
       (value.rows[0] as any)[key] = key === 'spendAttemptIds' ? [] : key === 'requestKey' ? '' : 'changed';
@@ -60,10 +60,16 @@ describe('auditable editorial safety outcomes', () => {
 
   it('binds the exact standalone or paired request and refuses unrelated paid request identities', () => {
     const value = fixture(true), first = value.suite.negativeCases[0], control = value.suite.positiveControls[0];
-    const key = editorialHash([editorialPrompt('final', first.context), [first, control].map(({ id, content }) => ({ id, content })), model]);
+    const key = editorialAssessmentRequest({stage:'final',context:first.context,variants:[first,control],model,assessmentContext:first.assessmentContext}).requestKey;
     value.rows[0].requestKey = key; value.rows[6].requestKey = key;
     expect(value.inspect().passed).toBe(true);
     value.rows[0].requestKey = 'unrelated-paid-request';
+    expect(value.inspect().passed).toBe(false);
+  });
+
+  it('cannot establish native policy safety from generic-format diagnostic requests', () => {
+    const value = fixture(), input = value.suite.negativeCases[0];
+    value.rows[0].requestKey = editorialAssessmentRequest({stage:'final',context:input.context,variants:[input],model}).requestKey;
     expect(value.inspect().passed).toBe(false);
   });
 

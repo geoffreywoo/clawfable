@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { preflightDraft, qualifyOriginalDrafts, draftSourceCopyInputs, type GenerateTweetBatchV2Input } from '@/lib/generation-v2';
+import { preflightDraft, qualifyOriginalDrafts, draftSourceCopyInputs, originalAssessmentContext, getRequiredFinalQualityMarginV2, type GenerateTweetBatchV2Input } from '@/lib/generation-v2';
 import { buildOriginalEditorialContext } from '@/lib/original-editorial-context';
+import { originalModelContext } from '@/lib/original-prompts';
 
 const sourceText = 'Acme has crossed $1B in annualized revenue run rate. Customers are building new applications with the software.';
 const content = 'i expect acme’s next big growth story to be customers giving its software more work, not just more customers signing up.\n\nthe company says it has crossed $1B in annualized revenue run rate.';
@@ -108,6 +109,42 @@ describe('original source-copy integration', () => {
       { id: 'source-a:title', text: sourceText }, { id: 'source-a:excerpt', text: sourceText },
     ]);
     expect(evaluation.sourceDocuments[0].claims[0].text).toContain('The company says');
+  });
+
+  it('shares the exact baseline semantic projection without changing production serialization or input artifacts', async () => {
+    const { evaluation, input } = fixture(content, true, 'anotherowner', withNativeVoice);
+    const context = input.originalEditorialContext!;
+    const before = structuredClone({ context, idea: evaluation.idea, brief: evaluation.brief, sourceDocuments: evaluation.sourceDocuments });
+    const projected = originalAssessmentContext(context, evaluation);
+    expect(projected).toEqual({ originalEditorialContext: originalModelContext(context),
+      selectedThought: { id: 'idea-a', publicMove: 'I expect customers to give Acme more work.', contentMode: 'prediction',
+        evidenceIds: ['source-a'], evidenceMode: 'verified_source' },
+      sourceComparators: [{ id: 'source-a:title', text: sourceText }, { id: 'source-a:excerpt', text: sourceText }],
+    });
+    expect({ context, idea: evaluation.idea, brief: evaluation.brief, sourceDocuments: evaluation.sourceDocuments }).toEqual(before);
+    judge(input, { verdict: 'clear', explanation: 'An independent thought with an attributed fact.' });
+    await qualifyOriginalDrafts({ evaluations: [evaluation], input, calls: [], blocks: [] });
+    const captured = vi.mocked(input.originalModelCall!).mock.calls[0][1];
+    // Preserve the pre-extraction order: context, baseline cutoff, thought,
+    // source comparators, then candidates. This JSON is part of paid-call identity.
+    expect(captured.prompt).toBe(JSON.stringify({
+      originalEditorialContext: originalModelContext(context),
+      activeAutopostQualityMargin: getRequiredFinalQualityMarginV2(input),
+      selectedThought: { id: 'idea-a', publicMove: 'I expect customers to give Acme more work.', contentMode: 'prediction',
+        evidenceIds: ['source-a'], evidenceMode: 'verified_source' },
+      sourceComparators: [{ id: 'source-a:title', text: sourceText }, { id: 'source-a:excerpt', text: sourceText }],
+      candidates: [{ id: 'draft-a', ideaId: 'idea-a', post: content }],
+    }));
+    const payload = JSON.parse(captured.prompt!);
+    expect({ originalEditorialContext: payload.originalEditorialContext,
+      selectedThought: payload.selectedThought, sourceComparators: payload.sourceComparators }).toEqual(projected);
+  });
+
+  it('preserves the existing public-move fallback without creating missing factual context', () => {
+    const { evaluation, input } = fixture();
+    evaluation.idea.publicMove = undefined;
+    expect(originalAssessmentContext(input.originalEditorialContext!, evaluation).selectedThought.publicMove).toBe(evaluation.idea.claim);
+    expect(draftSourceCopyInputs({ sourceDocuments: [] })).toEqual([]);
   });
 
   it('can qualify a preflight-eligible attributed fact when the same final editor clears copying and quality', async () => {

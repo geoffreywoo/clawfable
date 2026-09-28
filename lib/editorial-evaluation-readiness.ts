@@ -2,12 +2,12 @@ import type { EditorialBaseline } from './editorial-calibration';
 import { REQUIRED_EDITORIAL_SAFETY_CASES } from './editorial-calibration';
 import { editorialHash, type EditorialContext } from './editorial-contract';
 import { composeEditorialReviewBundle, type EditorialReviewBundle } from './editorial-review-bundle';
-import type { assessExistingDraftUnderProductionPolicy, GenerateTweetBatchV2Input } from './generation-v2';
-import { ORIGINAL_EDITORIAL_CONTEXT_VERSION, type OriginalEditorialContext } from './original-editorial-context';
+import type { assessExistingDraftUnderProductionPolicy, originalAssessmentContext, GenerateTweetBatchV2Input } from './generation-v2';
+import { ORIGINAL_EDITORIAL_CONTEXT_VERSION, contextForOriginalMode, type OriginalEditorialContext } from './original-editorial-context';
 import { isCurrentSourceEvidence } from './source-validity';
 import { getEditorialSafetyFixtures } from './editorial-safety-fixtures';
 
-export const EDITORIAL_READINESS_VERSION = 'editorial-evaluation-readiness-2';
+export const EDITORIAL_READINESS_VERSION = 'editorial-evaluation-readiness-3';
 export interface EditorialReadinessEntry {
   id: string;
   input: GenerateTweetBatchV2Input;
@@ -21,6 +21,8 @@ export interface EditorialSafetyInput {
   contentHash: string;
   context: EditorialContext;
   contextHash: string;
+  assessmentContext?: ReturnType<typeof originalAssessmentContext>;
+  assessmentContextHash?: string;
 }
 export interface EditorialEvaluationQuote {
   quotedInputHash: string;
@@ -84,7 +86,9 @@ export function inspectEditorialEvaluationReadiness(bundle: EditorialReviewBundl
         || !Array.isArray(full.subject.permittedModes)) rowBlockers.push('missing_full_context');
       else {
         if (!full.subject.permittedModes.includes(artifact.idea?.contentMode || full.contentMode)) rowBlockers.push('content_mode_not_permitted');
-        if (editorialHash(sharedFields.map(key => full[key])) !== editorialHash(sharedFields.map(key => context?.[key]))) rowBlockers.push('policy_context_mismatch');
+        const effective = full.subject.permittedModes.includes(artifact.idea?.contentMode || full.contentMode)
+          ? contextForOriginalMode(full, artifact.idea?.contentMode || full.contentMode) : full;
+        if (editorialHash(sharedFields.map(key => effective[key])) !== editorialHash(sharedFields.map(key => context?.[key]))) rowBlockers.push('policy_context_mismatch');
         if (!(Date.parse(full.subject.expiresAt) > now)) rowBlockers.push('stale_context');
       }
       const packet = artifact.brief?.subjectPacket;

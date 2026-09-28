@@ -1,9 +1,10 @@
 import { generateText } from './ai';
 import { cachedAiValue } from './ai-value-cache';
 import { type AiSpendContext, type AiSpendLedger } from './ai-budget';
-import { CANDIDATE_EDITORIAL_VERSION, EDITORIAL_ASSESSMENT_SCHEMA, editorialPrompt, editorialHash, parseEditorialAssessment, deterministicEditorialBlockers, type EditorialContext } from './editorial-contract';
+import { CANDIDATE_EDITORIAL_VERSION, EDITORIAL_ASSESSMENT_SCHEMA, editorialPrompt, editorialAssessmentRequest, editorialHash, parseEditorialAssessment, deterministicEditorialBlockers, type EditorialContext } from './editorial-contract';
 import { getEditorialManifest, getFrozenOwnerReview, resolveFrozenOwnerReview, type EditorialEvaluationRow } from './editorial-calibration';
-import { assessExistingDraftUnderProductionPolicy, getProductionEditorialBaseline, type GenerateTweetBatchV2Input } from './generation-v2';
+import { assessExistingDraftUnderProductionPolicy, getProductionEditorialBaseline, originalAssessmentContext, type GenerateTweetBatchV2Input } from './generation-v2';
+import { contextForOriginalMode, type OriginalEditorialContext } from './original-editorial-context';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 import { EDITORIAL_EVALUATOR_VERSION as EVALUATOR_VERSION, validateEditorialSupplement, type EditorialHoldoutSupplement, type EditorialReviewBundle } from './editorial-review-bundle';
 import { editorialReadinessInputHash, inspectEditorialEvaluationReadiness, type EditorialReadinessEntry, type EditorialSafetyInput, type EditorialEvaluationQuote } from './editorial-evaluation-readiness';
@@ -37,21 +38,18 @@ export async function writeEditorialEvaluationVariants(input: { agentId: string;
   }));
 }
 
-/** One batch assessment, with the same context object used by the candidate writer and idea assessor. */
+/** One batch assessment; paired finals use the original writer's shared semantic context. */
 export async function evaluateEditorialVariants(input: { agentId: string; stage: 'idea' | 'final'; context: EditorialContext;
-  variants: Array<{ id: string; content: string }>; model: string; spendContext: AiSpendContext }) {
+  variants: Array<{ id: string; content: string }>; model: string; spendContext: AiSpendContext;
+  /** Exact production semantic projection; excluded from generic fixture requests. */
+  assessmentContext?: ReturnType<typeof originalAssessmentContext> }) {
   const spendContext = editorialEvaluationSpendContext(input.agentId, input.spendContext);
-  const prompt = editorialPrompt(input.stage, input.context);
-  // Structural typing permits fixture metadata on variants. Keep answer keys
-  // out of both the request and its cache identity. Existing {id, content}
-  // requests keep their keys; previously contaminated requests are not reused.
-  const variants = input.variants.map(({ id, content }) => ({ id, content }));
-  const key = editorialHash([prompt, variants, input.model]);
+  const request = editorialAssessmentRequest(input), { variants, requestKey: key } = request;
   const cached = await cachedAiValue(input.agentId, 'editorial-candidate-evaluation', key, async () => {
     const result = await generateText({
       task: 'copy_judgment', modelChain: [{ provider: 'openai', model: input.model }], maxTokens: 2200, timeoutMs: 90000,
       spendContext: { ...spendContext, requestKey: key },
-      system: prompt.system, prompt: JSON.stringify({ context: prompt.context, candidates: variants }),
+      system: request.system, prompt: request.prompt,
       jsonSchema: { type: 'object', additionalProperties: false, required: ['assessments'], properties: {
         assessments: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'assessment'],
           properties: { id: { type: 'string' }, assessment: EDITORIAL_ASSESSMENT_SCHEMA } } },
@@ -62,9 +60,10 @@ export async function evaluateEditorialVariants(input: { agentId: string; stage:
     try { parsed = JSON.parse(result.text); } catch { parsed = null; }
     const rows = (parsed as { assessments?: Array<{ id: string; assessment: unknown }> })?.assessments;
     const complete = Array.isArray(rows) && rows.length === variants.length
-      && variants.every(v => rows.filter(r => r.id === v.id).length === 1);
+      && variants.every(v => rows.filter(r => r?.id === v.id).length === 1);
     return { result, requestKey: key, contextHash: editorialHash(input.context), contractVersion: CANDIDATE_EDITORIAL_VERSION,
-      assessments: variants.map(v => ({ id: v.id, assessment: complete ? parseEditorialAssessment(rows.find(r => r.id === v.id)?.assessment) : null })) };
+      ...(input.assessmentContext ? { assessmentContextHash: editorialHash(input.assessmentContext) } : {}),
+      assessments: variants.map(v => ({ id: v.id, assessment: complete ? parseEditorialAssessment(rows.find(r => r?.id === v.id)?.assessment) : null })) };
   });
   // Legacy cached responses may predate requestKey receipts. This identity is
   // derived from the exact same cache material, never from an unkeyed ledger row.
@@ -93,8 +92,10 @@ export async function rescoreFrozenEditorialExample(input: GenerateTweetBatchV2I
   const example = frozen ? resolveFrozenOwnerReview(frozen, origin.hash, await getFrozenOwnerReview(input.agentId, origin.hash, exampleId)) : undefined;
   if (!manifest || !example || example.content !== artifact.draft.content) throw new Error('frozen_example_required');
   if (!example.label) throw new Error('owner_review_pending');
-  const originalContext = artifact.originalEditorialContext || input.originalEditorialContext
-    || (artifact.brief as { editorialContext?: EditorialContext } | null)?.editorialContext;
+  const savedOriginalContext = artifact.originalEditorialContext || input.originalEditorialContext
+    || (artifact.brief as { editorialContext?: OriginalEditorialContext } | null)?.editorialContext;
+  const originalContext = savedOriginalContext
+    ? contextForOriginalMode(savedOriginalContext, artifact.idea?.contentMode || savedOriginalContext.contentMode) : undefined;
   if (originalContext) {
     const sharedFields: Array<keyof EditorialContext> = ['contentMode', 'ownerGuidance', 'supportedFacts', 'unresolvedClaims', 'voiceExamples', 'previousPremises'];
     if (editorialHash(sharedFields.map(key => originalContext[key])) !== editorialHash(sharedFields.map(key => context[key])))
@@ -121,6 +122,9 @@ export async function rescoreFrozenEditorialExample(input: GenerateTweetBatchV2I
     throw new Error('editorial_preparation_input_changed');
   if (preparation.budgetQuote.maximumCommitmentUsd > Math.min(budget.runLimitUsd!, budget.campaignLimitUsd!))
     throw new Error('editorial_preparation_exceeds_budget_limits');
+  if (!originalContext) throw new Error('production_editorial_context_required');
+  const assessmentContext = originalAssessmentContext(originalContext, { idea: artifact.idea,
+    brief: artifact.brief, sourceDocuments: artifact.documents });
   // Bind every behavior-bearing input; transport/callbacks and spending are not editorial evidence.
   const inputFields: Array<keyof GenerateTweetBatchV2Input> = ['agentId', 'requestedTopic', 'voiceProfile', 'analysis', 'learnings',
     'style', 'recentPosts', 'allTweets', 'memory', 'signals', 'trending', 'modelStack', 'generationPolicy',
@@ -140,12 +144,12 @@ export async function rescoreFrozenEditorialExample(input: GenerateTweetBatchV2I
     ['copy_judge_unavailable', 'malformed_copy_judgment', 'copy_judgment_failed'].includes(code))) return { disposition: 'pending_assessment' as const };
   if (baseline.promptVersion !== manifest.baseline.promptVersion || (baseline.draft.judgeModel && baseline.draft.judgeModel !== model)) throw new Error('active_judge_changed');
   const candidate = await evaluateEditorialVariants({ agentId: input.agentId, spendContext, stage: 'final', context,
-    variants: [{ id: exampleId, content: example.content }], model });
+    variants: [{ id: exampleId, content: example.content }], model, assessmentContext });
   const assessment = candidate.assessments[0]?.assessment;
   if (!assessment) return { disposition: 'pending_assessment' as const };
   const ledger = await getAiOperationalState<AiSpendLedger>(input.agentId, 'spend');
-  const row: EditorialEvaluationRow & { contextHash: string; evaluatorVersion: string } = { id: exampleId, manifestHash: origin.hash, contentHash: example.contentHash,
-    contextHash: editorialHash(context), evaluatorVersion: EVALUATOR_VERSION,
+  const row: EditorialEvaluationRow & { contextHash: string; assessmentContextHash: string; evaluatorVersion: string } = { id: exampleId, manifestHash: origin.hash, contentHash: example.contentHash,
+    contextHash: editorialHash(context), assessmentContextHash: editorialHash(assessmentContext), evaluatorVersion: EVALUATOR_VERSION,
     candidateVersion: CANDIDATE_EDITORIAL_VERSION, model: candidate.result.model,
     baseline: { ...manifest.baseline, accepted: baseline.accepted, rejectionCodes: baseline.draft.rejectionCodes }, candidate: assessment,
     deterministicBlockers: deterministicEditorialBlockers(baseline.draft.rejectionCodes),

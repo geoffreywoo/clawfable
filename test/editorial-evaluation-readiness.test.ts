@@ -62,6 +62,16 @@ describe('complete editorial evaluation preparation', () => {
     expect(result.rows[0].blockers).toContain(kind === 'changed-guidance' ? 'policy_context_mismatch' : 'missing_full_context');
   });
 
+  it('compares the selected thought mode used by the production judge, not its subject default', () => {
+    const value = fixture(), full = (value.entry.artifact.brief as any).editorialContext;
+    full.subject.permittedModes.push('prediction');
+    (value.entry.artifact.brief.subjectPacket as any).permittedModes.push('prediction');
+    value.entry.artifact.idea.contentMode = 'prediction';
+    expect(inspectEditorialEvaluationReadiness(value.bundle, value.entries, quoted(value)).rows[0].blockers).toContain('policy_context_mismatch');
+    value.entry.context = { ...value.entry.context, contentMode: 'prediction' };
+    expect(inspectEditorialEvaluationReadiness(value.bundle, value.entries, quoted(value)).ready).toBe(true);
+  });
+
   it.each(['expired', 'missing-source', 'withdrawn'] as const)('blocks %s evidence without modifying its timestamps', kind => {
     const value = fixture(), packet = value.entry.artifact.brief.subjectPacket!;
     if (kind === 'expired') packet.expiresAt = new Date(now - 1).toISOString();

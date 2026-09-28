@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { EDITORIAL_EVALUATOR_VERSION, compareEditorialReviewBundle, composeEditorialReviewBundle, validateEditorialSupplement, type EditorialHoldoutSupplement, type EditorialReviewBundle } from '@/lib/editorial-review-bundle';
 import { REQUIRED_EDITORIAL_SAFETY_CASES, type EditorialManifest, type FrozenOwnerReview } from '@/lib/editorial-calibration';
-import { CANDIDATE_EDITORIAL_VERSION, EDITORIAL_DIMENSIONS, editorialHash, editorialPrompt, type EditorialAssessment } from '@/lib/editorial-contract';
+import { CANDIDATE_EDITORIAL_VERSION, EDITORIAL_DIMENSIONS, editorialHash, editorialAssessmentRequest, type EditorialAssessment } from '@/lib/editorial-contract';
 import { getEditorialSafetyFixtures } from '@/lib/editorial-safety-fixtures';
 
 const baseline = { model: 'active-judge', promptVersion: 'frozen-prompt', policyVersion: 'frozen-policy' };
@@ -41,13 +41,14 @@ function addScores(bundle: EditorialReviewBundle) {
   const view = composeEditorialReviewBundle(bundle);
   bundle.rows = view.examples.map(example => ({ id: example.id, ...view.provenance.examples.find(p => p.id === example.id)!,
     contentHash: example.contentHash, evaluatorVersion: EDITORIAL_EVALUATOR_VERSION, candidateVersion: bundle.manifest.candidateVersion, model: baseline.model,
+    assessmentContextHash: editorialHash(['synthetic-shared-context', example.id]),
     baseline: { ...baseline, accepted: false, rejectionCodes: ['final_quality_margin'] },
     candidate: assessment(example.label === 'approved' ? .9 : .2), deterministicBlockers: [], spendAttemptIds: ['original-receipt'] }));
   bundle.safety = REQUIRED_EDITORIAL_SAFETY_CASES.map(caseName => ({ case: caseName, candidateAccepted: false }));
   const suite = getEditorialSafetyFixtures();
   bundle.safetyEvaluations = suite.negativeCases.map(input => ({ id: input.id, suiteHash: suite.hash,
-    contentHash: input.contentHash, contextHash: input.contextHash, candidateVersion: suite.candidateVersion,
-    model: baseline.model, requestKey: editorialHash([editorialPrompt('final', input.context), [{ id: input.id, content: input.content }], baseline.model]), spendAttemptIds: [`receipt:${input.id}`],
+    contentHash: input.contentHash, contextHash: input.contextHash, assessmentContextHash: input.assessmentContextHash, candidateVersion: suite.candidateVersion,
+    model: baseline.model, requestKey: editorialAssessmentRequest({stage:'final',context:input.context,variants:[input],model:baseline.model,assessmentContext:input.assessmentContext}).requestKey, spendAttemptIds: [`receipt:${input.id}`],
     assessment: { ...assessment(.9), hardBlockers: [input.case] } }));
   return bundle;
 }
@@ -194,6 +195,11 @@ describe('frozen editorial review bundle', () => {
     expect(report.eligibleForActivation).toBe(false);
     expect(report.reason).toBe('factual_safety_unverified_or_regressed');
     expect(report.safetyValidation.complete).toBe(false);
+  });
+
+  it('rejects scores without the shared semantic-context receipt', () => {
+    const input = addScores(fixture()); delete input.rows[0].assessmentContextHash;
+    expect(() => compareEditorialReviewBundle(input)).toThrow('missing_shared_assessment_context');
   });
 
   it('rejects string truthiness in supplied baseline and safety decisions', () => {

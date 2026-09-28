@@ -1,6 +1,9 @@
 import {beforeEach, expect, it, vi} from 'vitest';
 import {editorialHash, editorialPrompt} from '@/lib/editorial-contract';
 import {getEditorialSafetyFixtures} from '@/lib/editorial-safety-fixtures';
+import {originalModelContext} from '@/lib/original-prompts';
+import {EDITORIAL_EVALUATOR_VERSION} from '@/lib/editorial-review-bundle';
+import {generateText} from '@/lib/ai';
 const state=vi.hoisted(()=>({calls:[] as any[],baseline:[] as any[],store:new Map<string,any>(),manifest:null as any,pending:false,legacyCandidateCache:false,preparationBlocked:false}));
 vi.mock('@/lib/ai',()=>({getModelChainForTask:()=>[{provider:'openai',model:'test-judge'}],generateText:vi.fn(async (options:any)=>{
  state.calls.push(options);
@@ -12,7 +15,7 @@ vi.mock('@/lib/ai-value-cache',()=>({cachedAiValue:async (_a:any,operation:any,_
  if(state.legacyCandidateCache&&operation==='editorial-candidate-evaluation')delete result.requestKey;
  return result;
 }}));
-vi.mock('@/lib/generation-v2',()=>({getProductionEditorialBaseline:()=>({model:'test-judge',promptVersion:'test-prompt',policyVersion:'test-policy'}),assessExistingDraftUnderProductionPolicy:async (input:any,artifact:any)=>{
+vi.mock('@/lib/generation-v2',()=>({originalAssessmentContext:(context:any,entry:any)=>({originalEditorialContext:originalModelContext(context),selectedThought:{id:entry.idea.id,publicMove:entry.idea.publicMove,contentMode:entry.idea.contentMode,evidenceIds:entry.idea.evidenceIds,evidenceMode:entry.brief.evidenceMode},sourceComparators:entry.sourceDocuments.flatMap((d:any)=>[{id:`${d.id}:title`,text:d.title},{id:`${d.id}:excerpt`,text:d.excerpt}]).filter((s:any)=>s.text?.trim())}),getProductionEditorialBaseline:()=>({model:'test-judge',promptVersion:'test-prompt',policyVersion:'test-policy'}),assessExistingDraftUnderProductionPolicy:async (input:any,artifact:any)=>{
  state.baseline.push(input);return {accepted:false,draft:{...artifact.draft,status:state.pending?'pending_assessment':'rejected',rejectionCodes:[state.pending?'copy_judgment_failed':'final_quality_margin'],judgeModel:'test-judge'},promptVersion:'test-prompt'};
 }}));
 vi.mock('@/lib/publishing-quality-policy',()=>({getPublishingV2QualityPolicyVersion:()=> 'test-policy'}));
@@ -32,8 +35,13 @@ beforeEach(()=>{state.calls=[];state.baseline=[];state.store.clear();state.manif
 // its own real-artifact regression suite; here its successful result is explicit.
 const preparationFor=(input:any,id:string,artifact:any,context:any)=>({bundle:{manifest:state.manifest,rows:[],safety:[]},
  entries:[{id,input,artifact,context}],safetyCases:[],budgetQuote:{quotedInputHash:'fixture',remainingUsd:1,maximumCommitmentUsd:.5}});
-const preparedRescore=(input:any,manifestId:string,id:string,artifact:any,context:any)=>
- rescoreFrozenEditorialExample(input,manifestId,id,artifact,context,undefined,preparationFor(input,id,artifact,context));
+const fullContext=(context:any)=>({...context,contextVersion:'original-editorial-context-2',author:{accountHandle:'test',summary:'A synthetic test author.',topics:['work']},
+ subject:{subject:'Quiet work',sourceIds:[],observedAt:'2026-09-28T00:00:00Z',expiresAt:'2099-01-01T00:00:00Z',permittedModes:['opinion','prediction']},
+ ownerRestrictions:[],stylePreferences:[],forecastExpectations:[],exampleRefs:[],exampleUse:'Diction only',excludedApplicationSections:[]});
+const preparedRescore=(input:any,manifestId:string,id:string,artifact:any,context:any)=>{
+ const complete={idea:{id:'idea',publicMove:artifact.draft.content,contentMode:'opinion',evidenceIds:[]},brief:{evidenceMode:'operator_opinion'},documents:[],originalEditorialContext:fullContext(context),...artifact};
+ return rescoreFrozenEditorialExample(input,manifestId,id,complete,context,undefined,preparationFor(input,id,complete,context));
+};
 it('requires explicit account, campaign and run limits before any paid call',async()=>{
  for(const spendContext of [undefined,{...budget,evaluation:false},{...budget,agentId:'other'},{...budget,campaignId:undefined},{...budget,campaignLimitUsd:NaN},{...budget,runLimitUsd:undefined}]){
   await expect(evaluateEditorialVariants({agentId:'13',context,variants:[{id:'x',content:'opinion'}],model:'test-judge',stage:'final',spendContext} as any)).rejects.toThrow('bounded_evaluation_budget_required');
@@ -47,6 +55,13 @@ it('preserves the campaign and caller run across writing and assessment, includi
  expect(state.calls).toHaveLength(2);
  for(const call of state.calls)expect(call.spendContext).toMatchObject(spendContext);
  expect(editorialEvaluationSpendContext('13',{...budget,runLimitUsd:10}).runLimitUsd).toBe(3);
+});
+it('retains malformed assessment rows as pending paid output',async()=>{
+ const text=JSON.stringify({assessments:[null]});
+ vi.mocked(generateText).mockResolvedValueOnce({model:'test-judge',provider:'openai',text} as any);
+ const result=await evaluateEditorialVariants({agentId:'13',context,variants:[{id:'x',content:'opinion'}],model:'test-judge',stage:'final',spendContext:budget});
+ expect(result.result.text).toBe(text);
+ expect(result.assessments).toEqual([{id:'x',assessment:null}]);
 });
 it('projects safety variants before hashing and sending actual provider options, without leaking their answer key',async()=>{
  const suite=getEditorialSafetyFixtures();
@@ -109,7 +124,7 @@ it('rejects altered frozen supplemental evidence before any paid arm',async()=>{
 it('refuses different factual or owner context between policy arms',async()=>{
  const content='a frozen opinion';
  state.manifest={hash:'shared-context',baseline:{model:'test-judge',promptVersion:'test-prompt',policyVersion:'test-policy'},examples:[{id:'x',content,contentHash:editorialHash(content),label:'approved'}]};
- const originalEditorialContext={...context,supportedFacts:['An additional claim absent from the frozen candidate context.']};
+ const originalEditorialContext=fullContext({...context,supportedFacts:['An additional claim absent from the frozen candidate context.']});
  await expect(rescoreFrozenEditorialExample({agentId:'13',spendContext:budget,originalEditorialContext} as any,'shared-context','x',{draft:{content}} as any,context)).rejects.toThrow('editorial_policy_context_mismatch');
  expect(state.calls).toHaveLength(0);expect(state.baseline).toHaveLength(0);
 });
@@ -118,7 +133,7 @@ it('never attributes unrelated unkeyed spend to a legacy cached candidate assess
  state.legacyCandidateCache=true;
  const content='a cached source-free opinion';
  state.manifest={hash:'legacy-cache',baseline:{model:'test-judge',promptVersion:'test-prompt',policyVersion:'test-policy'},examples:[{id:'x',content,contentHash:editorialHash(content),label:'approved'}]};
- state.store.set('spend',{attempts:{unrelated:{id:'unrelated'},baseline:{id:'baseline',requestKey:'editorial-evaluation:durable-original-2:legacy-cache:x:actual-prompt'}}});
+ state.store.set('spend',{attempts:{unrelated:{id:'unrelated'},baseline:{id:'baseline',requestKey:`editorial-evaluation:${EDITORIAL_EVALUATOR_VERSION}:legacy-cache:x:actual-prompt`}}});
  const result=await preparedRescore({agentId:'13',spendContext:budget} as any,'legacy-cache','x',{draft:{content}} as any,context);
  expect(result).toMatchObject({spendAttemptIds:['baseline']});
 });

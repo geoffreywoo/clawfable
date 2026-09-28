@@ -2,7 +2,7 @@ import { compareEditorialPolicies, resolveFrozenOwnerReview, type EditorialBasel
 import { EDITORIAL_HARD_BLOCKERS, editorialHash, type EditorialContext } from './editorial-contract';
 import { inspectEditorialSafetyResults, type EditorialSafetyEvaluation } from './editorial-safety-results';
 
-export const EDITORIAL_EVALUATOR_VERSION = 'durable-original-2';
+export const EDITORIAL_EVALUATOR_VERSION = 'durable-original-3';
 
 /** Frozen before review; labels belong in separate, hash-bound FrozenOwnerReview records. */
 export interface EditorialHoldoutSupplement {
@@ -23,7 +23,7 @@ export interface EditorialHoldoutSupplement {
 }
 
 /** Private CLI JSON. Rows retain their original parent/supplement manifestHash.
- * Every scored row requires evaluatorVersion 'durable-original-2'; legacy judge
+ * Every scored row requires evaluatorVersion 'durable-original-3'; legacy judge
  * results cannot establish the active durable policy's behavior. Supplement rows
  * additionally require the frozen example's contextHash.
  * reviews and supplementReviews use the existing FrozenOwnerReview schema;
@@ -34,7 +34,7 @@ export interface EditorialReviewBundle {
   reviews?: FrozenOwnerReview[];
   supplements?: EditorialHoldoutSupplement[];
   supplementReviews?: FrozenOwnerReview[];
-  rows: Array<EditorialEvaluationRow & { contextHash?: string; evaluatorVersion?: string }>;
+  rows: Array<EditorialEvaluationRow & { contextHash?: string; assessmentContextHash?: string; evaluatorVersion?: string }>;
   /** Legacy summaries remain readable but cannot establish safety for activation. */
   safety: Array<{ case: string; candidateAccepted: boolean }>;
   safetyEvaluations?: EditorialSafetyEvaluation[];
@@ -100,6 +100,7 @@ export function composeEditorialReviewBundle(input: EditorialReviewBundle) {
   const scoredIds = new Set<string>();
   for (const row of rows) {
     if (row?.evaluatorVersion !== EDITORIAL_EVALUATOR_VERSION) fail('outdated_evaluator');
+    if (typeof row.assessmentContextHash !== 'string' || !/^[a-f0-9]{64}$/.test(row.assessmentContextHash)) fail('missing_shared_assessment_context');
     const example = examples.get(row?.id), origin = origins.get(row?.id);
     if (!example || !origin || row.manifestHash !== origin.manifestHash || row.contentHash !== example.contentHash
       || (origin.contextHash && row.contextHash !== origin.contextHash) || row.candidateVersion !== manifest.candidateVersion
@@ -122,7 +123,7 @@ export function composeEditorialReviewBundle(input: EditorialReviewBundle) {
     supplementHashes: supplements.map(s => s.hash),
     examples: [...origins.values()],
     reviews: [...reviewById.values()].map(r => ({ id: r.id, manifestHash: r.manifestHash, contentHash: r.contentHash, reviewHash: editorialHash(r) })),
-    rows: rows.map(r => ({ id: r.id, manifestHash: r.manifestHash, contentHash: r.contentHash, evaluatorVersion: r.evaluatorVersion,
+    rows: rows.map(r => ({ id: r.id, manifestHash: r.manifestHash, contentHash: r.contentHash, evaluatorVersion: r.evaluatorVersion, assessmentContextHash: r.assessmentContextHash,
       ...(r.contextHash ? { contextHash: r.contextHash } : {}) })),
   };
   const evaluationViewHash = editorialHash({ version: 'editorial-review-view-1', parent: manifest.hash,
