@@ -1,7 +1,7 @@
 import { compareEditorialPolicies, resolveFrozenOwnerReview, type EditorialBaseline, type EditorialEvaluationRow, type EditorialManifest, type FrozenOwnerReview } from './editorial-calibration';
 import { EDITORIAL_HARD_BLOCKERS, editorialHash, type EditorialContext } from './editorial-contract';
 
-export const EDITORIAL_EVALUATOR_VERSION = 'durable-original-1';
+export const EDITORIAL_EVALUATOR_VERSION = 'durable-original-2';
 
 /** Frozen before review; labels belong in separate, hash-bound FrozenOwnerReview records. */
 export interface EditorialHoldoutSupplement {
@@ -22,7 +22,7 @@ export interface EditorialHoldoutSupplement {
 }
 
 /** Private CLI JSON. Rows retain their original parent/supplement manifestHash.
- * Every scored row requires evaluatorVersion 'durable-original-1'; legacy judge
+ * Every scored row requires evaluatorVersion 'durable-original-2'; legacy judge
  * results cannot establish the active durable policy's behavior. Supplement rows
  * additionally require the frozen example's contextHash.
  * reviews and supplementReviews use the existing FrozenOwnerReview schema;

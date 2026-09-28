@@ -57,6 +57,7 @@ import {
 import {
   estimateAiUsageCostUsd,
   generateText,
+  getModelChainForTask,
   hasTextGenerationProvider,
   PUBLISHING_V2_CONTROL_MODEL_STACK,
   PUBLISHING_V2_GPT_CONTROL_MODEL_STACK,
@@ -5794,7 +5795,8 @@ export function preflightDraft({
     allowForecastTimingNumbers: true,
   }).issue;
   const sourceAttributionIssue = brief.evidenceMode === 'verified_source'
-    ? getSourceAttributionIssueV2(content, documents, Boolean(input.jobSession || input.durableGeneration && input.agentId === '13'))
+    ? getSourceAttributionIssueV2(content, documents, Boolean(input.jobSession
+      || input.agentId === '13' && (input.durableGeneration || input.originalModelCall)))
     : null;
   const recentDuplicate = isNearDuplicate(content, [
     ...input.recentPosts,
@@ -7684,6 +7686,19 @@ export function finalizeTrace(trace: GenerationRunTrace): GenerationRunTrace {
   };
 }
 
+/** Resolve the evaluation adapter's production critic before buying an assessment. */
+export function getProductionEditorialBaseline(input: GenerateTweetBatchV2Input): { model: string; promptVersion: string; policyVersion: string } {
+  const effectiveInput: GenerateTweetBatchV2Input = { ...input, mode: 'live', surface: 'original', persistArtifacts: false,
+    previewJudgeModelStack: undefined };
+  const budgetJudge = usesBudgetJudge(effectiveInput);
+  const policy = getGenerationPolicyVersions(input.voiceProfile, 'original');
+  return {
+    model: getModelChainForTask('copy_judgment', budgetJudge ? budgetJudgeStack() : input.modelStack)[0].model,
+    promptVersion: budgetJudge ? (process.env.AI_MODEL_POLICY === 'astra_all' ? 'budget-copy-judge-2-astra' : 'budget-copy-judge-1') : policy.finalCriticVersion,
+    policyVersion: policy.qualityPolicyVersion,
+  };
+}
+
 /** Evaluation adapter: run the actual production preflight and complete final policy without writing or queueing. */
 export async function assessExistingDraftUnderProductionPolicy(input: GenerateTweetBatchV2Input, artifact: {
   draft: DraftCandidate; idea: IdeaCandidate; brief: GenerationBriefV2; documents: SourceDocument[]; blocks?: SemanticBlock[];
@@ -7732,10 +7747,10 @@ export async function assessExistingDraftUnderProductionPolicy(input: GenerateTw
   await qualifyOriginalDrafts({ evaluations: [evaluation], input: evaluationInput, calls, blocks: artifact.blocks || [] });
   validateEvidence();
   evaluation.draft = normalizeCandidateDisposition(evaluation.draft);
+  const baseline = getProductionEditorialBaseline(input);
   return { accepted: Boolean(evaluation.qualifiedCandidate), draft: evaluation.draft, calls, requestKey,
-    policyVersion: getGenerationPolicyVersions(input.voiceProfile, 'original').qualityPolicyVersion,
-    promptVersion: evaluation.draft.judgePolicyVersion || (usesBudgetJudge(evaluationInput) ? (process.env.AI_MODEL_POLICY === 'astra_all' ? 'budget-copy-judge-2-astra' : 'budget-copy-judge-1')
-      : getGenerationPolicyVersions(input.voiceProfile, 'original').finalCriticVersion),
+    policyVersion: baseline.policyVersion,
+    promptVersion: evaluation.draft.judgePolicyVersion || baseline.promptVersion,
     finalCriticVersion: getGenerationPolicyVersions(input.voiceProfile, 'original').finalCriticVersion,
   };
 }

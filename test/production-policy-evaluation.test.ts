@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { assessExistingDraftUnderProductionPolicy, buildGenerationWritingConstraintsV2, getGenerationPolicyVersions,
+import { assessExistingDraftUnderProductionPolicy, buildGenerationWritingConstraintsV2, getGenerationPolicyVersions, getProductionEditorialBaseline, preflightDraft,
   type GenerateTweetBatchV2Input } from '@/lib/generation-v2';
 import { buildOriginalEditorialContext } from '@/lib/original-editorial-context';
 import { originalModelContext } from '@/lib/original-prompts';
-import type { GenerateTextOptions } from '@/lib/ai';
+import { getModelChainForTask, type GenerateTextOptions } from '@/lib/ai';
 import type { SourceDocument } from '@/lib/types';
 import * as storage from '@/lib/kv-storage';
 
@@ -64,11 +64,33 @@ function fixture() {
   return { input, artifact };
 }
 
+const savedCognitionDraft = 'smart move by @cognition to make its milestone post a customer showcase. it says it crossed $1B in annualized revenue run rate and highlights customers building with Devin.\n\nmaking your customer look like a genius is a better pitch than making your product look like one.';
+function attributionFixture(content = savedCognitionDraft) {
+  const { input, artifact } = fixture();
+  input.agentId = input.spendContext!.agentId = artifact.idea.agentId = artifact.draft.agentId = '13';
+  const claim = 'The company says it crossed $1B in annualized revenue run rate and highlights customers building with Devin.';
+  artifact.documents = [{ id: 'cognition-source', sourceType: 'x', isPrimary: true, publisher: '@cognition',
+    title: 'Cognition customer showcase', excerpt: claim, entities: ['Cognition', 'Devin'],
+    claims: [{ id: 'cognition-claim', text: claim }], fetchedAt: new Date(Date.now() - 1000).toISOString(), metadata: {},
+  } as SourceDocument];
+  Object.assign(artifact.brief, { title: 'Cognition customer showcase', evidenceMode: 'verified_source',
+    sourceDocumentIds: ['cognition-source'], evidenceIds: ['cognition-source'],
+    evidence: [{ sourceDocumentId: 'cognition-source', claimId: 'cognition-claim', publisher: '@cognition', claim,
+      publishedAt: new Date(Date.now() - 1000).toISOString() }] });
+  artifact.brief.subjectPacket!.sourceIds = ['cognition-source'];
+  artifact.brief.subjectPacket!.supportedFacts = [claim];
+  artifact.originalEditorialContext!.subject.sourceIds = ['cognition-source'];
+  artifact.originalEditorialContext!.supportedFacts = [claim];
+  artifact.draft.content = content;
+  artifact.idea.publicMove = 'Making the customer look good is a useful way to announce a milestone.';
+  return { input, artifact };
+}
+
 beforeEach(() => {
   vi.clearAllMocks(); harness.malformed = false; harness.copyVerdict = 'clear'; harness.overall = .99;
   harness.generate.mockImplementation(async (options: GenerateTextOptions) => {
     const payload = JSON.parse(options.prompt!);
-    return { provider: 'openai', model: 'gpt-6-astra', inputTokens: 100, outputTokens: 100,
+    return { provider: 'openai', model: getModelChainForTask(options.task!, options.modelStack)[0].model, inputTokens: 100, outputTokens: 100,
       text: JSON.stringify(harness.malformed ? { ranking: [], scores: [] } : {
         ranking: payload.candidates.map((row: any) => row.id), scores: payload.candidates.map((row: any) => ({
           id: row.id, overall: harness.overall, voiceFit: .99, operatorPlausibility: .99, frontierLead: 1, aiBullishness: 1,
@@ -80,9 +102,54 @@ beforeEach(() => {
       }) };
   });
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('production policy evaluation uses standalone-original qualification', () => {
+  it.each([
+    { modelPolicy: '', efficient: false, stack: 'publishing_v2_astra', prompt: null },
+    { modelPolicy: '', efficient: true, stack: 'publishing_v2_astra', prompt: 'budget-copy-judge-1' },
+    { modelPolicy: 'astra_all', efficient: true, stack: 'publishing_v2_astra', prompt: 'budget-copy-judge-2-astra' },
+    // A preview-only budget-judge shortcut must not leak into forced live evaluation.
+    { modelPolicy: '', efficient: true, stack: 'publishing_v2_gpt_control', prompt: null },
+  ] as const)('resolves the actual production baseline before calling a model: %j', async ({ modelPolicy, efficient, stack, prompt }) => {
+    vi.stubEnv('AI_MODEL_POLICY', modelPolicy);
+    vi.stubEnv('GEOFFREY_EFFICIENT_GENERATION', 'false');
+    const { input, artifact } = fixture();
+    input.modelStack = stack;
+    input.generationPolicy = efficient ? 'budget_v1' : undefined;
+    input.previewJudgeModelStack = stack === 'publishing_v2_astra' ? 'publishing_v2_gpt_control' : 'publishing_v2_astra';
+    input.surface = 'reply';
+    const expected = getProductionEditorialBaseline(input);
+    expect(harness.generate).not.toHaveBeenCalled();
+    expect(expected.promptVersion).toBe(prompt || getGenerationPolicyVersions(input.voiceProfile, 'original').finalCriticVersion);
+    const result = await assessExistingDraftUnderProductionPolicy(input, artifact);
+    expect(harness.generate).toHaveBeenCalledTimes(1);
+    expect({ model: result.draft.judgeModel, promptVersion: result.promptVersion, policyVersion: result.policyVersion }).toEqual(expected);
+    expect(harness.generate.mock.calls[0][0].modelStack).toBe(prompt && modelPolicy !== 'astra_all' ? 'publishing_v2_gpt_control' : stack);
+  });
+
+  it.each([
+    [savedCognitionDraft, false],
+    ['@cognition and Devin are in the update. It says revenue reached $1B.', true],
+  ])('matches durable primary-X attribution for frozen copy: %s', async (content, blocked) => {
+    const { input, artifact } = attributionFixture(content);
+    const durable = preflightDraft({ ...artifact, draft: { ...artifact.draft, status: 'generated', rejectionCodes: [] },
+      anchors: [], blocks: [], input: { ...input, durableGeneration: true, originalModelCall: vi.fn() } });
+    const evaluated = await assessExistingDraftUnderProductionPolicy(input, artifact);
+    expect(durable.draft.rejectionCodes.includes('source_attribution_dropped')).toBe(blocked);
+    expect(evaluated.draft.rejectionCodes.includes('source_attribution_dropped')).toBe(blocked);
+    expect(evaluated.draft.content).toBe(content);
+    if (blocked) expect(harness.generate).not.toHaveBeenCalled();
+  });
+
+  it('keeps attribution behavior unchanged for accounts outside the durable rollout', async () => {
+    const { input, artifact } = attributionFixture();
+    input.agentId = input.spendContext!.agentId = artifact.idea.agentId = artifact.draft.agentId = '14';
+    const evaluated = await assessExistingDraftUnderProductionPolicy(input, artifact);
+    expect(evaluated.draft.rejectionCodes).toContain('source_attribution_dropped');
+    expect(harness.generate).not.toHaveBeenCalled();
+  });
+
   it('uses one real final assessment without legacy question quotas or raw phrase vetoes', async () => {
     const { input, artifact } = fixture();
     expect(buildGenerationWritingConstraintsV2({ ...input, count: 1 }).maxQuestionDraftsInBatch).toBe(0);

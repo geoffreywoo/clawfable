@@ -1,12 +1,19 @@
-import { generateText, getModelChainForTask } from './ai';
+import { generateText } from './ai';
 import { cachedAiValue } from './ai-value-cache';
 import { type AiSpendContext, type AiSpendLedger } from './ai-budget';
 import { CANDIDATE_EDITORIAL_VERSION, EDITORIAL_ASSESSMENT_SCHEMA, editorialPrompt, editorialHash, parseEditorialAssessment, deterministicEditorialBlockers, type EditorialContext } from './editorial-contract';
 import { getEditorialManifest, getFrozenOwnerReview, resolveFrozenOwnerReview, type EditorialEvaluationRow } from './editorial-calibration';
-import { assessExistingDraftUnderProductionPolicy, type GenerateTweetBatchV2Input } from './generation-v2';
+import { assessExistingDraftUnderProductionPolicy, getProductionEditorialBaseline, type GenerateTweetBatchV2Input } from './generation-v2';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
-import { getPublishingV2QualityPolicyVersion } from './publishing-quality-policy';
-import { EDITORIAL_EVALUATOR_VERSION as EVALUATOR_VERSION, validateEditorialSupplement, type EditorialHoldoutSupplement } from './editorial-review-bundle';
+import { EDITORIAL_EVALUATOR_VERSION as EVALUATOR_VERSION, validateEditorialSupplement, type EditorialHoldoutSupplement, type EditorialReviewBundle } from './editorial-review-bundle';
+import { editorialReadinessInputHash, inspectEditorialEvaluationReadiness, type EditorialReadinessEntry, type EditorialSafetyInput, type EditorialEvaluationQuote } from './editorial-evaluation-readiness';
+
+export interface EditorialEvaluationPreparation {
+  bundle: EditorialReviewBundle;
+  entries: EditorialReadinessEntry[];
+  safetyCases: EditorialSafetyInput[];
+  budgetQuote: EditorialEvaluationQuote;
+}
 
 /** Evaluation shares the caller's bounded run and campaign across every row and resume. */
 export function editorialEvaluationSpendContext(agentId: string, context?: AiSpendContext): AiSpendContext {
@@ -36,7 +43,7 @@ export async function evaluateEditorialVariants(input: { agentId: string; stage:
   const spendContext = editorialEvaluationSpendContext(input.agentId, input.spendContext);
   const prompt = editorialPrompt(input.stage, input.context);
   const key = editorialHash([prompt, input.variants, input.model]);
-  return cachedAiValue(input.agentId, 'editorial-candidate-evaluation', key, async () => {
+  const cached = await cachedAiValue(input.agentId, 'editorial-candidate-evaluation', key, async () => {
     const result = await generateText({
       task: 'copy_judgment', modelChain: [{ provider: 'openai', model: input.model }], maxTokens: 2200, timeoutMs: 90000,
       spendContext: { ...spendContext, requestKey: key },
@@ -55,11 +62,16 @@ export async function evaluateEditorialVariants(input: { agentId: string; stage:
     return { result, requestKey: key, contextHash: editorialHash(input.context), contractVersion: CANDIDATE_EDITORIAL_VERSION,
       assessments: input.variants.map(v => ({ id: v.id, assessment: complete ? parseEditorialAssessment(rows.find(r => r.id === v.id)?.assessment) : null })) };
   });
+  // Legacy cached responses may predate requestKey receipts. This identity is
+  // derived from the exact same cache material, never from an unkeyed ledger row.
+  if (cached.requestKey && cached.requestKey !== key) throw new Error('cached_editorial_request_mismatch');
+  return { ...cached, requestKey: key };
 }
 
 /** Never runs generation or queues a post. Both paid assessments are recoverable independently. */
 export async function rescoreFrozenEditorialExample(input: GenerateTweetBatchV2Input, manifestId: string, exampleId: string,
-  artifact: Parameters<typeof assessExistingDraftUnderProductionPolicy>[1], context: EditorialContext, supplementId?: string) {
+  artifact: Parameters<typeof assessExistingDraftUnderProductionPolicy>[1], context: EditorialContext, supplementId?: string,
+  preparation?: EditorialEvaluationPreparation) {
   const budget = editorialEvaluationSpendContext(input.agentId, input.spendContext);
   const manifest = await getEditorialManifest(input.agentId, manifestId);
   if (!manifest) throw new Error('frozen_example_required');
@@ -84,9 +96,27 @@ export async function rescoreFrozenEditorialExample(input: GenerateTweetBatchV2I
     if (editorialHash(sharedFields.map(key => originalContext[key])) !== editorialHash(sharedFields.map(key => context[key])))
       throw new Error('editorial_policy_context_mismatch');
   }
-  const model = getModelChainForTask('copy_judgment', input.modelStack)[0]?.model;
-  if (model !== manifest.baseline.model || getPublishingV2QualityPolicyVersion('original', 'geoffwoo') !== manifest.baseline.policyVersion)
+  const activeBaseline = getProductionEditorialBaseline(input), model = activeBaseline.model;
+  if (activeBaseline.model !== manifest.baseline.model || activeBaseline.promptVersion !== manifest.baseline.promptVersion
+    || activeBaseline.policyVersion !== manifest.baseline.policyVersion)
     throw new Error('active_policy_changed');
+  // A valid first row must not buy work for an incomplete or unfunded comparison.
+  // Recheck the whole immutable preparation before any context lock or model call.
+  if (!preparation) throw new Error('whole_editorial_evaluation_preparation_required');
+  if (preparation.bundle.manifest.hash !== manifest.hash
+    || (supplement && !preparation.bundle.supplements?.some(item => item.hash === supplement.hash)))
+    throw new Error('editorial_preparation_manifest_mismatch');
+  const readiness = inspectEditorialEvaluationReadiness(preparation.bundle, preparation.entries, {
+    safetyCases: preparation.safetyCases, budgetQuote: preparation.budgetQuote, activeBaseline,
+  });
+  if (!readiness.ready) throw new Error(`editorial_evaluation_not_ready:${[
+    ...new Set([...readiness.blockers, ...readiness.rows.flatMap(row => row.blockers)]),
+  ].join(',')}`);
+  const preparedRow = readiness.rows.find(row => row.id === exampleId);
+  if (preparedRow?.inputHash !== editorialReadinessInputHash({ id: exampleId, input, artifact, context }))
+    throw new Error('editorial_preparation_input_changed');
+  if (preparation.budgetQuote.maximumCommitmentUsd > Math.min(budget.runLimitUsd!, budget.campaignLimitUsd!))
+    throw new Error('editorial_preparation_exceeds_budget_limits');
   // Bind every behavior-bearing input; transport/callbacks and spending are not editorial evidence.
   const inputFields: Array<keyof GenerateTweetBatchV2Input> = ['agentId', 'requestedTopic', 'voiceProfile', 'analysis', 'learnings',
     'style', 'recentPosts', 'allTweets', 'memory', 'signals', 'trending', 'modelStack', 'generationPolicy',
@@ -100,7 +130,7 @@ export async function rescoreFrozenEditorialExample(input: GenerateTweetBatchV2I
   if (existing) return existing;
   const requestKey = `editorial-evaluation:${EVALUATOR_VERSION}:${origin.hash}:${exampleId}`;
   const spendContext = { ...budget, requestKey };
-  const baseline = await cachedAiValue(input.agentId, 'editorial-baseline-evaluation-durable-1', [origin.hash, exampleId, assessmentInputHash],
+  const baseline = await cachedAiValue(input.agentId, `editorial-baseline-evaluation-${EVALUATOR_VERSION}`, [origin.hash, exampleId, assessmentInputHash],
     () => assessExistingDraftUnderProductionPolicy({ ...input, spendContext }, artifact));
   if (baseline.draft.status === 'pending_assessment' || baseline.draft.rejectionCodes.some(code =>
     ['copy_judge_unavailable', 'malformed_copy_judgment', 'copy_judgment_failed'].includes(code))) return { disposition: 'pending_assessment' as const };

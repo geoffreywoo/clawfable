@@ -1,23 +1,38 @@
 import {beforeEach, expect, it, vi} from 'vitest';
 import {editorialHash} from '@/lib/editorial-contract';
-const state=vi.hoisted(()=>({calls:[] as any[],baseline:[] as any[],store:new Map<string,any>(),manifest:null as any,pending:false}));
+const state=vi.hoisted(()=>({calls:[] as any[],baseline:[] as any[],store:new Map<string,any>(),manifest:null as any,pending:false,legacyCandidateCache:false,preparationBlocked:false}));
 vi.mock('@/lib/ai',()=>({getModelChainForTask:()=>[{provider:'openai',model:'test-judge'}],generateText:vi.fn(async (options:any)=>{
  state.calls.push(options);
  const payload=JSON.parse(options.prompt);
  return {model:'test-judge',provider:'openai',text:JSON.stringify(options.task==='tweet_writing'?{drafts:['a','b','c']}:{assessments:payload.candidates.map((c:any)=>({id:c.id,assessment:{editorialScore:.8,explanation:'Test opinion.',hardBlockers:[],diagnostics:[],dimensions:Object.fromEntries(['voice','clarity','substance','interest','originality'].map(d=>[d,{score:.8,explanation:d}]))}}))})};
 })}));
-vi.mock('@/lib/ai-value-cache',()=>({cachedAiValue:async (_a:any,_o:any,_m:any,fn:any)=>fn()}));
-vi.mock('@/lib/generation-v2',()=>({assessExistingDraftUnderProductionPolicy:async (input:any,artifact:any)=>{
+vi.mock('@/lib/ai-value-cache',()=>({cachedAiValue:async (_a:any,operation:any,_m:any,fn:any)=>{
+ const result=await fn();
+ if(state.legacyCandidateCache&&operation==='editorial-candidate-evaluation')delete result.requestKey;
+ return result;
+}}));
+vi.mock('@/lib/generation-v2',()=>({getProductionEditorialBaseline:()=>({model:'test-judge',promptVersion:'test-prompt',policyVersion:'test-policy'}),assessExistingDraftUnderProductionPolicy:async (input:any,artifact:any)=>{
  state.baseline.push(input);return {accepted:false,draft:{...artifact.draft,status:state.pending?'pending_assessment':'rejected',rejectionCodes:[state.pending?'copy_judgment_failed':'final_quality_margin'],judgeModel:'test-judge'},promptVersion:'test-prompt'};
 }}));
 vi.mock('@/lib/publishing-quality-policy',()=>({getPublishingV2QualityPolicyVersion:()=> 'test-policy'}));
 vi.mock('@/lib/kv-storage',()=>({getAiOperationalState:async (_a:string,key:string)=>state.store.get(key)||null,mutateAiOperationalState:async (_a:string,key:string,fn:any)=>{const m=fn(state.store.get(key)||null);state.store.set(key,m.value);return m.result;}}));
 vi.mock('@/lib/editorial-calibration',()=>({getEditorialManifest:async()=>state.manifest,getFrozenOwnerReview:async()=>null,resolveFrozenOwnerReview:(e:any)=>e}));
+vi.mock('@/lib/editorial-evaluation-readiness',async importOriginal=>{
+ const real=await importOriginal<typeof import('@/lib/editorial-evaluation-readiness')>();
+ return {...real,inspectEditorialEvaluationReadiness:(_bundle:any,entries:any[])=>({ready:!state.preparationBlocked,
+  blockers:state.preparationBlocked?['missing_safety_inputs']:[],rows:entries.map(entry=>({id:entry.id,inputHash:real.editorialReadinessInputHash(entry),blockers:[]}))})};
+});
 import {editorialEvaluationSpendContext,evaluateEditorialVariants,rescoreFrozenEditorialExample,writeEditorialEvaluationVariants} from '@/lib/editorial-evaluation';
 
 const context={contentMode:'opinion' as const,ownerGuidance:['No invented experience.'],supportedFacts:[],unresolvedClaims:[],voiceExamples:[],previousPremises:[]};
 const budget={agentId:'13',operation:'quality-evaluation',runId:'same-evaluation-run',runLimitUsd:3,evaluation:true,campaignId:'same-campaign',campaignLimitUsd:6,allocationPolicy:true};
-beforeEach(()=>{state.calls=[];state.baseline=[];state.store.clear();state.manifest=null;state.pending=false;});
+beforeEach(()=>{state.calls=[];state.baseline=[];state.store.clear();state.manifest=null;state.pending=false;state.legacyCandidateCache=false;state.preparationBlocked=false;});
+// These tests isolate spending/cache behavior. Full preparation validation has
+// its own real-artifact regression suite; here its successful result is explicit.
+const preparationFor=(input:any,id:string,artifact:any,context:any)=>({bundle:{manifest:state.manifest,rows:[],safety:[]},
+ entries:[{id,input,artifact,context}],safetyCases:[],budgetQuote:{quotedInputHash:'fixture',remainingUsd:1,maximumCommitmentUsd:.5}});
+const preparedRescore=(input:any,manifestId:string,id:string,artifact:any,context:any)=>
+ rescoreFrozenEditorialExample(input,manifestId,id,artifact,context,undefined,preparationFor(input,id,artifact,context));
 it('requires explicit account, campaign and run limits before any paid call',async()=>{
  for(const spendContext of [undefined,{...budget,evaluation:false},{...budget,agentId:'other'},{...budget,campaignId:undefined},{...budget,campaignLimitUsd:NaN},{...budget,runLimitUsd:undefined}]){
   await expect(evaluateEditorialVariants({agentId:'13',context,variants:[{id:'x',content:'opinion'}],model:'test-judge',stage:'final',spendContext} as any)).rejects.toThrow('bounded_evaluation_budget_required');
@@ -35,7 +50,7 @@ it('preserves the campaign and caller run across writing and assessment, includi
 it('shares one bounded run across both policy arms and multiple frozen rows',async()=>{
  const examples=['first','second'].map(id=>({id,content:`opinion ${id}`,contentHash:editorialHash(`opinion ${id}`),label:'approved',labelSource:'owner_approval'}));
  state.manifest={hash:'manifest',baseline:{model:'test-judge',promptVersion:'test-prompt',policyVersion:'test-policy'},examples};
- for(const e of examples)await rescoreFrozenEditorialExample({agentId:'13',voiceProfile:{},learnings:{},modelStack:'publishing_v2_astra',spendContext:budget} as any,'manifest',e.id,{draft:{content:e.content}} as any,context);
+ for(const e of examples)await preparedRescore({agentId:'13',voiceProfile:{},learnings:{},modelStack:'publishing_v2_astra',spendContext:budget} as any,'manifest',e.id,{draft:{content:e.content}} as any,context);
  expect(state.baseline).toHaveLength(2);expect(state.calls).toHaveLength(2);
  for(const call of [...state.baseline,...state.calls])expect(call.spendContext).toMatchObject(budget);
  expect(new Set([...state.baseline,...state.calls].map(c=>c.spendContext.runId))).toEqual(new Set(['same-evaluation-run']));
@@ -44,7 +59,7 @@ it('shares one bounded run across both policy arms and multiple frozen rows',asy
 it('does not buy candidate scoring or learn a rejection when baseline assessment is pending',async()=>{
  state.pending=true;const content='a saved opinion';
  state.manifest={hash:'pending',baseline:{model:'test-judge',promptVersion:'test-prompt',policyVersion:'test-policy'},examples:[{id:'x',content,contentHash:editorialHash(content),label:'approved'}]};
- const result=await rescoreFrozenEditorialExample({agentId:'13',voiceProfile:{},spendContext:budget} as any,'pending','x',{draft:{content}} as any,context);
+ const result=await preparedRescore({agentId:'13',voiceProfile:{},spendContext:budget} as any,'pending','x',{draft:{content}} as any,context);
  expect(result).toEqual({disposition:'pending_assessment'});expect(state.calls).toHaveLength(0);
  expect([...state.store.keys()].some(key=>key.startsWith('editorial-score:'))).toBe(false);
 });
@@ -52,8 +67,8 @@ it('rejects changes to duplicate history before reusing a completed assessment',
  const content='another saved opinion';
  state.manifest={hash:'history',baseline:{model:'test-judge',promptVersion:'test-prompt',policyVersion:'test-policy'},examples:[{id:'x',content,contentHash:editorialHash(content),label:'approved'}]};
  const input={agentId:'13',voiceProfile:{},spendContext:budget,recentPosts:[],allTweets:[]};
- await rescoreFrozenEditorialExample(input as any,'history','x',{draft:{content}} as any,context);
- await expect(rescoreFrozenEditorialExample({...input,recentPosts:[content]} as any,'history','x',{draft:{content}} as any,context)).rejects.toThrow('frozen_assessment_context_changed');
+ await preparedRescore(input as any,'history','x',{draft:{content}} as any,context);
+ await expect(preparedRescore({...input,recentPosts:[content]} as any,'history','x',{draft:{content}} as any,context)).rejects.toThrow('frozen_assessment_context_changed');
  expect(state.baseline).toHaveLength(1);expect(state.calls).toHaveLength(1);
 });
 it('rejects altered frozen supplemental evidence before any paid arm',async()=>{
@@ -73,4 +88,31 @@ it('refuses different factual or owner context between policy arms',async()=>{
  const originalEditorialContext={...context,supportedFacts:['An additional claim absent from the frozen candidate context.']};
  await expect(rescoreFrozenEditorialExample({agentId:'13',spendContext:budget,originalEditorialContext} as any,'shared-context','x',{draft:{content}} as any,context)).rejects.toThrow('editorial_policy_context_mismatch');
  expect(state.calls).toHaveLength(0);expect(state.baseline).toHaveLength(0);
+});
+
+it('never attributes unrelated unkeyed spend to a legacy cached candidate assessment',async()=>{
+ state.legacyCandidateCache=true;
+ const content='a cached source-free opinion';
+ state.manifest={hash:'legacy-cache',baseline:{model:'test-judge',promptVersion:'test-prompt',policyVersion:'test-policy'},examples:[{id:'x',content,contentHash:editorialHash(content),label:'approved'}]};
+ state.store.set('spend',{attempts:{unrelated:{id:'unrelated'},baseline:{id:'baseline',requestKey:'editorial-evaluation:durable-original-2:legacy-cache:x:actual-prompt'}}});
+ const result=await preparedRescore({agentId:'13',spendContext:budget} as any,'legacy-cache','x',{draft:{content}} as any,context);
+ expect(result).toMatchObject({spendAttemptIds:['baseline']});
+});
+
+it.each(['missing','blocked','changed','over-budget'])('requires %s preparation to be resolved before either paid arm or a context lock',async kind=>{
+ const content='another reviewed opinion',artifact={draft:{content}} as any,input={agentId:'13',spendContext:budget} as any;
+ state.manifest={hash:'guard',baseline:{model:'test-judge',promptVersion:'test-prompt',policyVersion:'test-policy'},examples:[{id:'x',content,contentHash:editorialHash(content),label:'approved'}]};
+ const preparation=kind==='missing'?undefined:preparationFor(input,'x',artifact,context);
+ if(kind==='blocked')state.preparationBlocked=true;
+ if(kind==='changed')preparation!.entries[0].input={...input,recentPosts:['different history']};
+ if(kind==='over-budget')preparation!.budgetQuote.maximumCommitmentUsd=3.01;
+ await expect(rescoreFrozenEditorialExample(input,'guard','x',artifact,context,undefined,preparation)).rejects.toThrow();
+ expect(state.calls).toEqual([]);expect(state.baseline).toEqual([]);expect(state.store.size).toBe(0);
+});
+
+it('detects a changed active prompt before purchasing a baseline judgment',async()=>{
+ const content='a saved opinion';
+ state.manifest={hash:'stale-prompt',baseline:{model:'test-judge',promptVersion:'retired-prompt',policyVersion:'test-policy'},examples:[{id:'x',content,contentHash:editorialHash(content),label:'approved'}]};
+ await expect(preparedRescore({agentId:'13',spendContext:budget},'stale-prompt','x',{draft:{content}},context)).rejects.toThrow('active_policy_changed');
+ expect(state.calls).toEqual([]);expect(state.baseline).toEqual([]);expect(state.store.size).toBe(0);
 });
