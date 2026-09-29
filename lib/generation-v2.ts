@@ -7713,6 +7713,43 @@ export function getProductionEditorialBaseline(input: GenerateTweetBatchV2Input)
   };
 }
 
+/** Offline projection, not a replay of missing generation history. Missing idea
+ * confidence inputs take their maximum, so this can only favor the old policy.
+ * No model call or publication side effect occurs here.
+ */
+export function legacyEditorialAcceptanceUpperBound(input: GenerateTweetBatchV2Input, evaluation: DraftEvaluation, rawScore: unknown) {
+  const score = copyScore(rawScore as Record<string, unknown>, new Set([evaluation.draft.id]));
+  if (!score) throw new Error('malformed_legacy_editorial_assessment');
+  const optimistic = { ...evaluation, idea: { ...evaluation.idea, identityScore: 1, evidenceScore: 1, noveltyScore: 1 } };
+  const sourceCopyAssessment = bindSourceCopyAssessment((rawScore as any).sourceCopyAssessment,
+    evaluation.draft.content, draftSourceCopyInputs(evaluation));
+  if (!sourceCopyAssessment) throw new Error('malformed_legacy_source_assessment');
+  score.sourceCopyAssessment = sourceCopyAssessment;
+  const codes = uniqueStrings([...evaluation.draft.rejectionCodes, ...finalQualityRejectionCodes(score, optimistic, input)]);
+  return { acceptedUpperBound: codes.length === 0, rejectionCodes: codes,
+    confidenceInputBounds: { identityScore: [0, 1], evidenceScore: [0, 1] } };
+}
+
+/** Keep the active legacy system/schema and decision implementation. Only encode
+ * multiple independent contexts in one request; each policy receives identical
+ * reconstructed semantic inputs. This never claims to restore historic scores.
+ */
+export async function legacyEditorialBatchRequest(input: GenerateTweetBatchV2Input, evaluations: DraftEvaluation[],
+  items: import('./editorial-batch').EditorialBatchItem[]) {
+  const { editorialBatchPayload, INDEPENDENT_EDITORIAL_BATCH_INSTRUCTION } = await import('./editorial-batch');
+  let captured: Parameters<typeof trackedGenerate>[1] | undefined;
+  const stop = new Error('capture_only');
+  try {
+    await judgeDraftsOnce(evaluations.map(e => ({ ...e, draft: { ...e.draft, status: 'generated' } })), {
+      ...input, originalModelCall: async (_stage, options) => { captured = options; throw stop; },
+    }, [], []);
+  } catch (error) { if (error !== stop) throw error; }
+  if (!captured || items.length !== evaluations.length || items.some(item => !evaluations.some(e => e.draft.id === item.id && e.draft.content === item.content)))
+    throw new Error('legacy_batch_identity_mismatch');
+  return { ...captured, system: `${captured.system}\n${INDEPENDENT_EDITORIAL_BATCH_INSTRUCTION}\nApply the unchanged legacy policy above to every candidate.`,
+    prompt: JSON.stringify({ ...editorialBatchPayload(items), activeAutopostQualityMargin: getRequiredFinalQualityMarginV2(input) }) };
+}
+
 /** Evaluation adapter: run the actual production preflight and complete final policy without writing or queueing. */
 export async function assessExistingDraftUnderProductionPolicy(input: GenerateTweetBatchV2Input, artifact: {
   draft: DraftCandidate; idea: IdeaCandidate; brief: GenerationBriefV2; documents: SourceDocument[]; blocks?: SemanticBlock[];

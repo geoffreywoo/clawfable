@@ -8,6 +8,24 @@ import { contextForOriginalMode, type OriginalEditorialContext } from './origina
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 import { EDITORIAL_EVALUATOR_VERSION as EVALUATOR_VERSION, validateEditorialSupplement, type EditorialHoldoutSupplement, type EditorialReviewBundle } from './editorial-review-bundle';
 import { editorialReadinessInputHash, inspectEditorialEvaluationReadiness, type EditorialReadinessEntry, type EditorialSafetyInput, type EditorialEvaluationQuote } from './editorial-evaluation-readiness';
+import { editorialBatchRequest, parseEditorialBatch, type EditorialBatchItem } from './editorial-batch';
+
+/** Resumable labelled-text evaluation. The ledger reserves the next call and
+ * settles actual usage; a complete passing report is required for activation,
+ * not a promise that every future call consumes its maximum token allowance.
+ */
+export async function scoreEditorialBatch(input: { agentId: string; items: EditorialBatchItem[]; model: string; spendContext: AiSpendContext }) {
+  const spendContext = editorialEvaluationSpendContext(input.agentId, input.spendContext);
+  const request = editorialBatchRequest(input.items, input.model);
+  const result = await cachedAiValue(input.agentId, 'editorial-text-batch', request.requestKey, () => generateText({
+    task: 'copy_judgment', modelChain: [{ provider: 'openai', model: input.model }],
+    system: request.system, prompt: request.prompt, jsonSchema: request.jsonSchema,
+    maxTokens: 8192, openAiReasoningEffort: 'low', timeoutMs: 120_000,
+    spendContext: { ...spendContext, requestKey: request.requestKey },
+  }));
+  return { result, requestKey: request.requestKey,
+    assessments: parseEditorialBatch(result.text, input.items.map(item => item.id)) };
+}
 
 export interface EditorialEvaluationPreparation {
   bundle: EditorialReviewBundle;
