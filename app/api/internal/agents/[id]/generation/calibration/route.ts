@@ -16,6 +16,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (body.stage === 'reconcile') return NextResponse.json({ stage: body.stage, reconciliation: value.reconciliation }, { headers: { 'Cache-Control': 'private, no-store' } });
     return NextResponse.json({ stage: body.stage, requestKey: value.requestKey, model: value.result.model,
       assessed: value.assessments?.length ?? null, pending: body.stage === 'candidate' && !value.assessments,
+      complete: value.complete ?? body.stage === 'baseline', completedBatches: value.completedBatches, totalBatches: value.totalBatches,
       inputTokens: value.result.inputTokens, outputTokens: value.result.outputTokens,
       estimatedCostUsd: value.result.estimatedCostUsd }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {

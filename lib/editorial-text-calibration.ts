@@ -24,6 +24,10 @@ export interface TextCalibrationProjection {
 }
 const namespace = (hash: string) => `text-calibration-projection:${hash}`;
 export const textCalibrationResultKey = (hash: string, stage: 'candidate' | 'baseline') => `text-calibration-result:${hash}:${stage}`;
+export const TEXT_CALIBRATION_EXECUTION_VERSION = 'six-assessments-per-call-1';
+export function textCalibrationChunks(items: EditorialBatchItem[]) {
+  return Array.from({ length: Math.ceil(items.length / 6) }, (_, index) => items.slice(index * 6, index * 6 + 6));
+}
 
 export function validateTextCalibrationProjection(projection: TextCalibrationProjection, bundle: EditorialReviewBundle) {
   const { hash, ...body } = projection;
@@ -71,7 +75,33 @@ export async function runTextCalibrationStage(hash: string, stage: 'candidate' |
   const spendContext = { agentId: '13', operation: 'quality-evaluation', runId: 'editorial-text-calibration-2026-09-29',
     runLimitUsd: 3, campaignId: 'reliable-originals-2026-09-26', campaignLimitUsd: 6, evaluation: true };
   let value: any;
-  if (stage === 'candidate') value = await scoreEditorialBatch({ agentId: '13', items: p.items, model: p.model, spendContext });
+  if (stage === 'candidate') {
+    const chunks = textCalibrationChunks(p.items);
+    const completed = [];
+    // One bounded call per HTTP invocation. Every completed batch survives a
+    // later timeout or budget stop; resuming never rebuys its judgments.
+    for (let index = 0; index < chunks.length; index++) {
+      const chunkKey = `${key}:${TEXT_CALIBRATION_EXECUTION_VERSION}:${index}`;
+      let chunk = await getAiOperationalState<any>('13', chunkKey);
+      if (!chunk) {
+        chunk = await scoreEditorialBatch({ agentId: '13', items: chunks[index], model: p.model, spendContext });
+        await mutateAiOperationalState<any, void>('13', chunkKey, old => ({ value: old || chunk, result: undefined }));
+        completed.push(chunk);
+        if (index < chunks.length - 1 || !chunk.assessments) return {
+          ...chunk, executionVersion: TEXT_CALIBRATION_EXECUTION_VERSION,
+          complete: false, completedBatches: completed.filter(c => c.assessments).length, totalBatches: chunks.length,
+        };
+      } else {
+        completed.push(chunk);
+        if (!chunk.assessments) return { ...chunk, executionVersion: TEXT_CALIBRATION_EXECUTION_VERSION,
+          complete: false, completedBatches: index, totalBatches: chunks.length };
+      }
+    }
+    value = { ...completed[completed.length - 1], executionVersion: TEXT_CALIBRATION_EXECUTION_VERSION,
+      complete: true, completedBatches: chunks.length, totalBatches: chunks.length,
+      assessments: completed.flatMap(chunk => chunk.assessments), batches: completed,
+      requestKey: editorialHash(completed.map(chunk => chunk.requestKey)) };
+  }
   else {
     const candidate = await getAiOperationalState<any>('13', textCalibrationResultKey(hash, 'candidate'));
     if (!candidate?.assessments) throw new Error('candidate_assessment_pending');
