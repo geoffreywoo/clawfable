@@ -36,4 +36,10 @@ describe('authenticated calibration execution', () => {
     run.mockRejectedValue(new Error('secret provider detail'));
     expect(await (await POST(request({ projectionHash: hash, stage: 'candidate' }), params())).json()).toEqual({ error: 'calibration_failed' });
   });
+  it('allows receipt reconciliation without scoring or exposing response content', async () => {
+    run.mockResolvedValue({ reconciliation: { settled: 1, unavailable: 0 } });
+    const response = await POST(request({ projectionHash: hash, stage: 'reconcile' }), params());
+    expect(await response.json()).toEqual({ stage: 'reconcile', reconciliation: { settled: 1, unavailable: 0 } });
+    expect(run).toHaveBeenCalledWith(hash, 'reconcile');
+  });
 });

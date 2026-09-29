@@ -1,4 +1,4 @@
-import { generateText } from './ai';
+import { generateText, reconcileAiProviderAttempts } from './ai';
 import { cachedAiValue } from './ai-value-cache';
 import { editorialBatchRequest, type EditorialBatchItem } from './editorial-batch';
 import { editorialHash } from './editorial-contract';
@@ -58,12 +58,13 @@ export async function saveTextCalibrationProjection(projection: TextCalibrationP
  * Independent paid stages are cached before this receipt is saved. No queue,
  * policy activation, source renewal, or canary mutation is possible here.
  */
-export async function runTextCalibrationStage(hash: string, stage: 'candidate' | 'baseline') {
+export async function runTextCalibrationStage(hash: string, stage: 'candidate' | 'baseline' | 'reconcile') {
   const stored = await getAiOperationalState<{ projection: TextCalibrationProjection; bundle: EditorialReviewBundle }>('13', namespace(hash));
   if (!stored) throw new Error('text_calibration_projection_missing');
   const { projection: p, bundle } = stored;
   validateTextCalibrationProjection(p, bundle);
   if (editorialHash(getProductionEditorialBaseline(p.baselineInput)) !== editorialHash(p.baselinePolicy)) throw new Error('active_policy_changed');
+  if (stage === 'reconcile') return { reconciliation: await reconcileAiProviderAttempts('13') };
   const key = textCalibrationResultKey(hash, stage);
   const existing = await getAiOperationalState<any>('13', key);
   if (existing) return existing;

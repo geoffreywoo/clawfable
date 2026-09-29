@@ -8,11 +8,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (authError) return NextResponse.json({ error: authError.message }, { status: authError.status });
   if ((await params).id !== '13') return NextResponse.json({ error: 'account_not_enabled' }, { status: 404 });
   const body = await request.json().catch(() => null);
-  if (!body || !/^[a-f0-9]{64}$/.test(body.projectionHash) || !['candidate', 'baseline'].includes(body.stage)
+  if (!body || !/^[a-f0-9]{64}$/.test(body.projectionHash) || !['candidate', 'baseline', 'reconcile'].includes(body.stage)
     || Object.keys(body).some(key => !['projectionHash', 'stage'].includes(key)))
     return NextResponse.json({ error: 'invalid_calibration_request' }, { status: 400 });
   try {
     const value = await runTextCalibrationStage(body.projectionHash, body.stage);
+    if (body.stage === 'reconcile') return NextResponse.json({ stage: body.stage, reconciliation: value.reconciliation }, { headers: { 'Cache-Control': 'private, no-store' } });
     return NextResponse.json({ stage: body.stage, requestKey: value.requestKey, model: value.result.model,
       assessed: value.assessments?.length ?? null, pending: body.stage === 'candidate' && !value.assessments,
       inputTokens: value.result.inputTokens, outputTokens: value.result.outputTokens,
