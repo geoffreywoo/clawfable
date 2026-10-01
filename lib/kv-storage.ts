@@ -1063,6 +1063,7 @@ function normalizeTweetRecord(tweet: Tweet): Tweet {
   return {
     ...tweet,
     id: String(tweet.id),
+    agentId: String(tweet.agentId),
     originalContent: tweet.originalContent ?? tweet.content,
     editCount: tweet.editCount ?? 0,
     lastEditedAt: tweet.lastEditedAt ?? null,

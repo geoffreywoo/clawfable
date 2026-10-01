@@ -10,6 +10,9 @@ import { isMaturePerformance } from '@/lib/performance-signals';
 import { deriveMaturePerformanceRewards } from '@/lib/performance-rewards';
 import { computeActionRewards, computeEarlyVelocityScore } from '@/lib/virality-signals';
 import { normalizeUsername } from '@/lib/internal-accounts';
+import { getGeneratedPublishIssue } from '@/lib/generation-origin';
+import { hasCurrentProductionEditorialReceipt } from '@/lib/original-assessment-receipt';
+import { editorialTweet } from './fixtures/original-editorial-receipt';
 
 const storageCode = ts.transpileModule(readFileSync('lib/kv-storage.ts', 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -146,6 +149,29 @@ describe('storage across independent server instances', () => {
     expect(server.hashes.get(`user:${userId}`)?.id).toBe(userId);
     expect(await server.get('user:username:exactidowner')).toBe(userId);
     expect((await independentStorage(server).getUserByUsername('exactidowner'))?.id).toBe(userId);
+  });
+
+  it('normalizes numeric account IDs from KV without invalidating the bound editorial receipt', async () => {
+    const server = redisServer(), storage = independentStorage(server);
+    const approved = editorialTweet({ id: '12409' });
+    await server.hset('tweet:12409', approved as any);
+    await server.lpush('agent:13:queue', '12409');
+    await server.lpush('agent:13:tweets', '12409');
+    expect((await server.hgetall('tweet:12409'))?.agentId).toBe(13);
+    const reads = [await storage.getTweet('12409', { fresh: true }),
+      ...(await storage.getQueuedTweets('13')), ...(await storage.getTweets('13'))];
+    expect(reads).toHaveLength(3);
+    for (const tweet of reads) {
+      expect(tweet.agentId).toBe('13');
+      expect(tweet.assessmentReceipt).toEqual(approved.assessmentReceipt);
+      expect(hasCurrentProductionEditorialReceipt(tweet)).toBe(true);
+      expect(getGeneratedPublishIssue(tweet, { agentId: '13', accountHandle: 'geoffwoo' })).toBeNull();
+      expect(getGeneratedPublishIssue(tweet, { agentId: '14', accountHandle: 'geoffwoo' })).toContain('another account');
+    }
+    await server.hset('tweet:12409', { agentId: '14' });
+    const differentAccount = await storage.getTweet('12409', { fresh: true });
+    expect(differentAccount.agentId).toBe('14');
+    expect(hasCurrentProductionEditorialReceipt(differentAccount)).toBe(false);
   });
 
   it('preserves a refund when another server updates the customer email from an older cached user', async () => {
