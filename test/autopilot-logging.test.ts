@@ -266,6 +266,7 @@ import {
   QUEUE_SEMANTIC_DUPLICATE_THRESHOLD,
   archiveStaleNetworkTopicQueue,
   refillQueue,
+  inspectPublishableOriginalQueue,
   refreshQueuedTweetsForCurrentQualityPolicy,
   runAutopilot,
   selfHealAutopilotQueue,
@@ -1691,6 +1692,38 @@ describe('autopilot remote debug logging', () => {
     expect(result).toEqual({ before: 1, after: 1, certified: 1, quarantined: 0, deferred: 0 });
     expect(mocks.generateText).not.toHaveBeenCalled();
     expect(mocks.updateTweet).not.toHaveBeenCalled();
+  });
+
+  it('reports the batch company-slot winner without a deferred rival veto and preserves the published cap', async () => {
+    const agent = { ...baseAgent, id: '13', handle: 'geoffwoo' };
+    const first = editorialTweet({ id: 'company-first', candidateScore: 75,
+      content: "i prefer @Microsoft's plain product pages over its glossy launch videos.", topic: 'software' });
+    const winner = editorialTweet({ id: 'company-winner', candidateScore: 86,
+      content: 'the @NVIDIA setup guide is where i would start reading.', topic: 'computing' });
+    const queue = [first, winner];
+    const context = { ...refillReadyContext, allTweets: queue };
+    mocks.buildGenerationContext.mockResolvedValue(context);
+    expect((await inspectPublishableOriginalQueue(agent)).map(tweet => tweet.id)).toEqual([winner.id]);
+    expect(context.allTweets).toEqual(queue);
+
+    const publishedCompany = { ...first, id: 'published-company', status: 'posted' as const,
+      content: 'ChatGPT is becoming the default interface for work.', xTweetId: 'published-x-id',
+      postedAt: '2026-10-01T10:00:00.000Z' };
+    const standalonePosts = ['the launch checklist fits on paper', 'a quiet walk helps me think',
+      'small teams can move a decision faster', 'a useful notebook stays on my desk'].map((content, index) => ({
+      ...first, id: `published-standalone-${index}`, content, topic: 'daily life', status: 'posted' as const,
+      xTweetId: `standalone-x-${index}`, postedAt: `2026-10-01T${11 + index}:00:00.000Z`,
+    }));
+    mocks.buildGenerationContext.mockResolvedValue({ ...context,
+      allTweets: [...queue, publishedCompany, ...standalonePosts.slice(0, 3)] });
+    expect(await inspectPublishableOriginalQueue(agent)).toEqual([]);
+    mocks.buildGenerationContext.mockResolvedValue({ ...context,
+      allTweets: [...queue, publishedCompany, ...standalonePosts] });
+    expect((await inspectPublishableOriginalQueue(agent)).map(tweet => tweet.id)).toEqual([winner.id]);
+    expect(mocks.updateTweet).not.toHaveBeenCalled();
+    expect(mocks.addLearningSignal).not.toHaveBeenCalled();
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.postTweet).not.toHaveBeenCalled();
   });
 
   it('defers excess company-led drafts for the mix window without quarantining them', async () => {

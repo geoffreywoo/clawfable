@@ -751,7 +751,13 @@ export async function inspectPublishableOriginalQueue(agent: Agent): Promise<Twe
   const queue = context.allTweets.filter(tweet => tweet.status === 'queued' && isAutopostableQueuedTweet(tweet));
   const {valid} = await rescoreQueuedTweetsForCurrentPolicy(agent,queue,context,{readOnly:true});
   const history = context.allTweets.filter(tweet => tweet.xTweetId && ['posted','deleted_from_x'].includes(tweet.status)).slice(0,50).map(tweet => tweet.content);
-  return valid.filter(tweet => clearsQueuedPostPreflight(agent,tweet,history,context));
+  // Rescoring already assigned the company slot. Deferred queued rivals cannot
+  // reserve it again during inspection; retain every published history row.
+  const validIds = new Set(valid.map(tweet => tweet.id));
+  const postableContext = { ...context, allTweets: context.allTweets.filter(tweet => (
+    tweet.status !== 'queued' || validIds.has(tweet.id)
+  )) };
+  return valid.filter(tweet => clearsQueuedPostPreflight(agent,tweet,history,postableContext));
 }
 
 export async function refreshQueuedTweetsForCurrentQualityPolicy(
