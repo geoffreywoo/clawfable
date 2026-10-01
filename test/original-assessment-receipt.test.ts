@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { Tweet } from '@/lib/types';
-import { createOriginalAssessmentReceipt, getOriginalAssessmentReceiptIssue, hasCurrentOriginalAssessmentReceipt } from '@/lib/original-assessment-receipt';
+import { createOriginalAssessmentReceipt, getOriginalAssessmentReceiptIssue, hasCurrentOriginalAssessmentReceipt, hasCurrentProductionEditorialReceipt } from '@/lib/original-assessment-receipt';
 import { getGeneratedPublishIssue } from '@/lib/generation-origin';
 import { getQueuedSourceCopyIssue } from '@/lib/autopilot';
 import { bindSourceCopyAssessment } from '@/lib/source-copy-assessment';
 import { PUBLISHING_V2_FINAL_CRITIC_VERSION, PUBLISHING_V2_QUALITY_POLICY_VERSION } from '@/lib/publishing-quality-policy';
+
+import { editorialTweet } from './fixtures/original-editorial-receipt';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const now = Date.now();
@@ -109,5 +111,51 @@ describe('original assessment receipt', () => {
     candidate.generationEvidenceReferences![0].expiresAt = expiresAt;
     candidate.assessmentReceipt!.evidence = [];
     expect(() => createOriginalAssessmentReceipt(candidate, candidate.assessmentReceipt!)).toThrow(/hashes and expiration/);
+  });
+});
+
+
+describe('production editorial approval receipt', () => {
+  it('publishes a .75 decision without legacy quality or diagnostic-score floors', () => {
+    const tweet = editorialTweet();
+    expect(tweet.finalCriticScores).toBeNull();
+    expect(hasCurrentProductionEditorialReceipt(tweet)).toBe(true);
+    expect(hasCurrentOriginalAssessmentReceipt(tweet)).toBe(true);
+    expect(getGeneratedPublishIssue(tweet, { accountHandle: 'geoffwoo' })).toBeNull();
+    expect(getQueuedSourceCopyIssue(tweet)).toBeNull();
+    tweet.finalCriticScores = { qualityMargin: .1 } as Tweet['finalCriticScores'];
+    expect(getGeneratedPublishIssue(tweet, { accountHandle: 'geoffwoo' })).toBeNull();
+  });
+
+  it.each([
+    ['copy', (tweet: Tweet) => { tweet.content += ' Changed.'; }],
+    ['account', (tweet: Tweet) => { tweet.agentId = 'different'; }],
+    ['run', (tweet: Tweet) => { tweet.generationRunId = 'different'; }],
+    ['idea', (tweet: Tweet) => { tweet.ideaId = 'different'; }],
+    ['voice', (tweet: Tweet) => { tweet.voiceCorpusVersion = 'different'; }],
+    ['context', (tweet: Tweet) => { tweet.assessmentReceipt!.editorialDecision!.contextHash = 'f'.repeat(64); }],
+    ['explanation', (tweet: Tweet) => { tweet.assessmentReceipt!.editorialDecision!.assessment.explanation = 'Changed rationale'; }],
+    ['threshold', (tweet: Tweet) => { tweet.assessmentReceipt!.editorialDecision!.threshold = .5; }],
+    ['score', (tweet: Tweet) => { tweet.assessmentReceipt!.editorialDecision!.assessment.editorialScore = .74; }],
+    ['blockers', (tweet: Tweet) => { tweet.assessmentReceipt!.editorialDecision!.assessment.hardBlockers = ['substantive_duplicate']; }],
+    ['malformed assessment', (tweet: Tweet) => { tweet.assessmentReceipt!.editorialDecision!.assessment = {} as any; }],
+    ['evaluation-only', (tweet: Tweet) => { tweet.assessmentReceipt!.evaluationOnly = true; }],
+    ['evidence', (tweet: Tweet) => { tweet.sourceEvidenceTexts = ['An unassessed factual claim.']; }],
+    ['expiration', (tweet: Tweet) => { tweet.assessmentReceipt!.validUntil = new Date(Date.now() - 1).toISOString(); }],
+  ] as const)('rejects mutated %s', (_label, mutate) => {
+    const tweet = editorialTweet();
+    mutate(tweet);
+    expect(hasCurrentProductionEditorialReceipt(tweet)).toBe(false);
+    expect(getGeneratedPublishIssue(tweet, { accountHandle: 'geoffwoo' })).toBeTruthy();
+  });
+
+  it('requires complete editorial approval and current voice even on the new policy', () => {
+    const tweet = editorialTweet();
+    expect(getGeneratedPublishIssue(tweet, { currentVoiceCorpusVersion: 'changed-voice' })).toContain('current voice corpus');
+    expect(getGeneratedPublishIssue(tweet, { agentId: 'another-account' })).toContain('another account');
+    delete tweet.agentId;
+    expect(getGeneratedPublishIssue(tweet, { agentId: 'another-account' })).toContain('another account');
+    delete tweet.assessmentReceipt;
+    expect(getGeneratedPublishIssue(tweet)).toBeTruthy();
   });
 });

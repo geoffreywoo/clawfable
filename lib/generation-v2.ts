@@ -4,10 +4,11 @@ import { assessSourceCopy, bindSourceCopyAssessment, SOURCE_COPY_ASSESSMENT_VERS
 import { createOriginalAssessmentReceipt } from './original-assessment-receipt';
 import { finalCopyRejectionCodes } from './final-copy-policy';
 import { originalModelRequestKey, runOriginalModelStage } from './original-model-stage';
-import { EDITORIAL_PRINCIPLES as DURABLE_EDITORIAL_CONTRACT } from './editorial-contract';
+import { EDITORIAL_PRINCIPLES as DURABLE_EDITORIAL_CONTRACT, editorialAssessmentRequest, EDITORIAL_ASSESSMENT_SCHEMA, parseEditorialAssessment, candidateEditorialDecision, editorialHash } from './editorial-contract';
+import { ORIGINAL_EDITORIAL_POLICY_VERSION, ORIGINAL_EDITORIAL_CRITIC_VERSION, ORIGINAL_EDITORIAL_QUALITY_THRESHOLD, originalEditorialPreflightBlockers, type OriginalEditorialDecision } from './original-editorial-policy';
 import { buildSubjectPacket, type SubjectPacket } from './subject-packet';
 import { attributedSourceClaim, isCurrentSourceEvidence } from './source-validity';
-import { GenerationJobSession, claimGenerationJob, jobFingerprint, GENERATION_JOB_VERSION, getGenerationCanary, getGenerationJob, recordGenerationCanary, generationCanaryAttemptId, reconcileGenerationCanaryAssessments } from './generation-job';
+import { GenerationJobSession, claimGenerationJob, jobFingerprint, GENERATION_JOB_VERSION, retireGenerationCanary } from './generation-job';
 import { editorialRejectionCodes, normalizeCandidateDisposition } from './candidate-disposition';
 import { PUBLISHING_V2_GEOFFREY_AI_AMBITION } from './publishing-quality-policy';
 import { EFFICIENT_GENERATION_POLICY, REPAIR_DECISION_SCHEMA, parseRepairDecision, canRepairDraft, preservesRepairDecision, substantiveBriefDigest, claimGenerationBriefs, failedBriefKeys, recordBriefAttempts, qualityGenerationPauseUntil, type RepairDecision } from './generation-efficiency';
@@ -608,6 +609,8 @@ export interface GenerateTweetBatchV2Input {
   originalModelCall?: typeof trackedGenerate;
   /** Exact writer context. The original judge must not rebuild a different author. */
   originalEditorialContext?: OriginalEditorialContext;
+  /** Internal durable-original contract; never selected by a public request. */
+  originalEditorialPolicy?: typeof ORIGINAL_EDITORIAL_POLICY_VERSION;
   count: number;
   requestedTopic?: string | null;
   voiceProfile: VoiceProfile;
@@ -5926,6 +5929,13 @@ export function preflightDraft({
       sourceCopyRisk: taste.sourceCopyRisk, policySafety: 1 - taste.truthfulnessRisk,
       technicalCredibility: taste.technicalCredibilityScore },
   }));
+  if (input.originalEditorialPolicy === ORIGINAL_EDITORIAL_POLICY_VERSION && input.agentId === '13') {
+    // Style diagnostics explain the editorial decision; only factual, owner,
+    // copying and payload restrictions can stop the paid judge prematurely.
+    const hardCodes = codes.filter(code => originalEditorialPreflightBlockers([code]).length > 0);
+    draft.diagnosticCodes = uniqueStrings([...(draft.diagnosticCodes || []), ...codes.filter(code => !hardCodes.includes(code))]);
+    codes.splice(0, codes.length, ...hardCodes);
+  }
   if (codes.length > 0) {
     draft.status = 'rejected';
     draft.rejectionCodes = uniqueStrings(codes);
@@ -6944,6 +6954,9 @@ async function assessFinalDrafts({
 
 /** Standalone originals stop after one shared assessment and one ranked choice. */
 export async function qualifyOriginalDrafts(options: { evaluations: DraftEvaluation[]; input: GenerateTweetBatchV2Input; calls: GenerationModelCallTrace[]; blocks: SemanticBlock[] }): Promise<RankedProtocolTweet[]> {
+  if (options.input.agentId === '13' && options.input.originalEditorialPolicy === ORIGINAL_EDITORIAL_POLICY_VERSION) {
+    return qualifyContinuousOriginalDrafts(options);
+  }
   const { selectionPool } = await assessFinalDrafts(options);
   const winner = selectionPool[0];
   for (const evaluation of selectionPool) {
@@ -6952,6 +6965,118 @@ export async function qualifyOriginalDrafts(options: { evaluations: DraftEvaluat
     evaluation.draft.failureCategory = evaluation === winner ? undefined : 'selection';
   }
   return winner?.qualifiedCandidate ? [winner.qualifiedCandidate] : [];
+}
+
+/** One completed editorial verdict. The dimensions are explanations, never extra vetoes. */
+export async function qualifyContinuousOriginalDrafts({ evaluations, input, calls }: {
+  evaluations: DraftEvaluation[]; input: GenerateTweetBatchV2Input; calls: GenerationModelCallTrace[];
+}): Promise<RankedProtocolTweet[]> {
+  if (input.agentId !== '13' || !input.originalModelCall || !input.originalEditorialContext
+    || input.originalEditorialPolicy !== ORIGINAL_EDITORIAL_POLICY_VERSION) throw new Error('original_editorial_context_required');
+  const eligible = evaluations.filter(entry => entry.draft.status !== 'rejected');
+  if (!eligible.length) return [];
+  const model = getModelChainForTask('copy_judgment', input.modelStack)[0]?.model;
+  if (!model) throw new Error('copy_judgment_failed');
+  const assessmentContext = originalAssessmentContext(input.originalEditorialContext, eligible[0]);
+  const request = editorialAssessmentRequest({ stage: 'final', context: input.originalEditorialContext,
+    variants: eligible.map(entry => ({ id: entry.draft.id, content: entry.draft.content })), model, assessmentContext });
+  const system = `${request.system}\nPublication cutoff: ${ORIGINAL_EDITORIAL_QUALITY_THRESHOLD}. A score at or above the cutoff means a worthwhile, naturally on-voice thought ready to publish. Below the cutoff means it needs a substantive change. Assess each variant independently. Return each supplied id exactly once. ${ORIGINAL_EDITORIAL_CRITIC_VERSION}.`;
+  const requestKey = editorialHash([system, request.prompt, model]);
+  const result = await input.originalModelCall('copy_judgment', { task: 'copy_judgment', modelStack: input.modelStack,
+    system, prompt: request.prompt, openAiReasoningEffort: 'medium', maxTokens: 2200, timeoutMs: 90_000,
+    jsonSchema: { type: 'object', additionalProperties: false, required: ['assessments'], properties: {
+      assessments: { type: 'array', minItems: eligible.length, maxItems: eligible.length,
+        items: { type: 'object', additionalProperties: false, required: ['id', 'assessment'],
+          properties: { id: { type: 'string', enum: eligible.map(entry => entry.draft.id) }, assessment: EDITORIAL_ASSESSMENT_SCHEMA } } },
+    } },
+  }, calls);
+  const raw = parseJsonRoot(result.text)?.assessments;
+  const complete = Array.isArray(raw) && raw.length === eligible.length
+    && eligible.every(entry => raw.filter(row => row?.id === entry.draft.id).length === 1);
+  const assessments = eligible.map(entry => ({ entry, assessment: complete
+    ? parseEditorialAssessment(raw.find(row => row.id === entry.draft.id)?.assessment) : null }));
+  if (assessments.some(row => !row.assessment)) {
+    for (const entry of eligible) {
+      entry.draft.status = 'pending_assessment'; entry.draft.failureCategory = 'malformed_assessment';
+      entry.draft.rejectionCodes = ['malformed_copy_judgment'];
+    }
+    throw new Error('malformed_output');
+  }
+  const qualified: DraftEvaluation[] = [];
+  for (const { entry, assessment } of assessments) {
+    const decision: OriginalEditorialDecision = { assessment: assessment!, threshold: ORIGINAL_EDITORIAL_QUALITY_THRESHOLD,
+      contextHash: editorialHash(assessmentContext), assessmentHash: editorialHash(assessment), requestKey,
+      provider: result.provider, model: result.model,
+      policyVersion: ORIGINAL_EDITORIAL_POLICY_VERSION, criticVersion: ORIGINAL_EDITORIAL_CRITIC_VERSION };
+    Object.assign(entry.draft, { editorialDecision: decision, judgeScore: assessment!.editorialScore,
+      judgeProvider: result.provider, judgeModel: result.model, judgePolicyVersion: ORIGINAL_EDITORIAL_CRITIC_VERSION,
+      judgeNotes: assessment!.explanation, judgeRawNotes: assessment!.explanation, judgeBreakdown: null,
+      updatedAt: new Date().toISOString() });
+    const verdict = candidateEditorialDecision(assessment, decision.threshold, originalEditorialPreflightBlockers(entry.draft.rejectionCodes));
+    if (!verdict.accepted) {
+      entry.draft.status = 'rejected'; entry.draft.failureCategory = 'editorial';
+      entry.draft.rejectionCodes = verdict.blockers.length ? verdict.blockers.map(code => `editorial_${code}`) : ['editorial_below_threshold'];
+      continue;
+    }
+    entry.draft.rejectionCodes = []; qualified.push(entry);
+  }
+  qualified.sort((a, b) => b.draft.editorialDecision!.assessment.editorialScore - a.draft.editorialDecision!.assessment.editorialScore);
+  qualified.forEach((entry, index) => {
+    entry.draft.status = index === 0 ? 'selected' : 'reserve';
+    entry.draft.failureCategory = index === 0 ? undefined : 'selection';
+  });
+  const winner = qualified[0];
+  if (!winner) return [];
+  const { draft, idea, brief, sourceDocuments } = winner;
+  const decision = draft.editorialDecision!, assessment = decision.assessment;
+  const score = assessment.editorialScore, dimensions = assessment.dimensions;
+  const featureTags = extractCandidateFeatureTags(draft.content, { topic: idea.topic, thesisHint: ideaPublicMove(idea) });
+  const slopScore = scoreSlopRisk(draft.content, featureTags), replyPotential = scoreReplyPotential(draft.content, featureTags);
+  const portfolioRef = brief.portfolioCompanyContext ? portfolioCompanyEvidenceReference(brief.portfolioCompanyContext) : null;
+  const generationRefs = brief.evidenceMode === 'verified_source'
+    ? [...publishingEvidenceReferences(sourceDocuments), ...(portfolioRef ? [portfolioRef] : [])]
+    : portfolioRef ? [portfolioRef] : [operatorTopicEvidenceReference(brief, input)];
+  const candidate: RankedProtocolTweet = {
+    content: draft.content, format: draft.format, targetTopic: idea.topic, rationale: assessment.explanation,
+    pipelineVersion: 'v2', generationSurface: 'original', contentProvenance: 'generated_v2', generationRunId: draft.generationRunId,
+    ideaId: idea.id, draftCandidateId: draft.id, storyClusterId: draft.storyClusterId,
+    generationTriggerId: input.triggerId || null, generationIdempotencyKey: input.idempotencyKey || null,
+    evidenceReferences: evidenceReferences(sourceDocuments), generationEvidenceReferences: generationRefs,
+    sourceEvidenceTexts: sourceClaims(sourceDocuments), sourceBrief: brief.sourceBrief, sourceLane: brief.sourceLane,
+    portfolioCompanyContext: brief.portfolioCompanyContext || null,
+    allowedMentionHandles: usedVerifiedMentionHandles(draft.content, verifiedEntityMentionsForIdea(brief, idea, draft.content)),
+    generationModelStack: draft.generationModelStack || input.modelStack, generationProvider: draft.generationProvider,
+    generationModel: draft.generationModel, judgeProvider: result.provider, judgeModel: result.model,
+    qualityPolicyVersion: ORIGINAL_EDITORIAL_POLICY_VERSION, voiceCorpusVersion: input.learnings?.voiceCorpus?.snapshotId || null,
+    finalCriticProvider: result.provider, finalCriticModel: result.model, finalCriticVerdict: 'allow',
+    finalCriticVersion: ORIGINAL_EDITORIAL_CRITIC_VERSION, finalCriticScores: null,
+    generationMode: input.style.autonomyMode, candidateScore: Math.round(score * 100), confidenceScore: score,
+    voiceScore: dimensions.voice.score, noveltyScore: dimensions.originality.score, surpriseScore: dimensions.interest.score,
+    creativeRiskScore: slopScore, slopScore, replyBaitScore: replyPotential, predictedEngagementScore: dimensions.interest.score,
+    freshnessScore: brief.freshnessScore, repetitionRiskScore: 1 - idea.noveltyScore, policyRiskScore: 0,
+    featureTags, coverageCluster: buildCoverageCluster(draft.content, idea.topic, ideaPublicMove(idea)),
+    judgeScore: score, judgeBreakdown: null, judgeNotes: assessment.explanation, mutationRound: 0,
+    rewardPrediction: 0, globalPriorWeight: 0, localPriorWeight: 0,
+    scoreProvenance: { localPrior: 0, globalPrior: 0, judge: score, predictedReward: 0,
+      noveltyCoverage: dimensions.originality.score, riskPenalty: 0 },
+    styleMode: 'standard', creativeLane: brief.evidenceMode === 'verified_source' ? 'trend_riff' : 'operator_take',
+    draftExperimentId: draft.id, experimentBatchId: draft.generationRunId, experimentHypothesis: ideaPublicMove(idea),
+    experimentHoldout: false, promptVariant: ORIGINAL_EDITORIAL_POLICY_VERSION,
+    targetAudienceSegment: inferAudienceSegment(draft.content, idea.topic), segmentHypothesis: '',
+    promptStrategy: inferPromptStrategy({ content: draft.content, sourceLane: brief.sourceLane, featureTags }),
+    mediaExperimentType: 'text_only', mediaBrief: null, portfolioRole: brief.evidenceMode === 'verified_source' ? 'proof' : 'contrarian',
+    relationshipTargetHandle: null, trendFitScore: brief.identityScore,
+    criticScores: { voice: dimensions.voice.score, audience: dimensions.interest.score, novelty: dimensions.originality.score,
+      slop: 1 - slopScore, factualRisk: 0, replyPotential }, actionRewardPrediction: zeroActionReward(0),
+  };
+  candidate.assessmentReceipt = createOriginalAssessmentReceipt({ ...candidate, agentId: input.agentId }, {
+    contentHash: jobFingerprint(candidate.content), policyVersion: ORIGINAL_EDITORIAL_POLICY_VERSION,
+    criticVersion: ORIGINAL_EDITORIAL_CRITIC_VERSION, assessedAt: new Date().toISOString(),
+    validUntil: brief.subjectPacket?.expiresAt, evidence: sourceDocuments.map(document => ({ sourceDocumentId: document.id, contentHash: document.contentHash })),
+    editorialDecision: decision,
+  });
+  winner.qualifiedCandidate = candidate;
+  return [candidate];
 }
 
 export async function selectFinalTweets({
@@ -7808,14 +7933,15 @@ export async function assessExistingDraftUnderProductionPolicy(input: GenerateTw
 
 export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Promise<RankedProtocolTweet[]> {
   if (!input.durableGeneration || input.agentId !== '13' || input.mode === 'preview' || input.persistArtifacts === false) return generateTweetBatchV2Internal(input);
-  let canary = await getGenerationCanary(input.agentId);
-  if (canary?.status === 'blocked') return [];
-  const previousJob = await getGenerationJob(input.agentId);
-  if (previousJob) canary = await reconcileGenerationCanaryAssessments(input.agentId, previousJob);
-  if (canary?.status === 'blocked') return [];
-  if (canary?.status === 'active') input = {...input,spendContext:{...input.spendContext,...aiSpendContext(input.agentId,'generation'),campaignId:canary.id,campaignLimitUsd:canary.limitUsd}};
+  const retiredCanary = await retireGenerationCanary(input.agentId);
+  const continuousSpend = (spend: AiSpendContext | undefined) => {
+    if (!spend || spend.campaignId !== retiredCanary?.id) return spend;
+    const { campaignId: _campaign, campaignLimitUsd: _limit, ...remaining } = spend;
+    return remaining;
+  };
+  input = { ...input, spendContext: continuousSpend(input.spendContext) };
   const authorIdentity = originalAuthorIdentity(input.voiceProfile);
-  const policy = jobFingerprint(['simple-original-3',SOURCE_COPY_ASSESSMENT_VERSION,ORIGINAL_EDITORIAL_CONTEXT_VERSION,ORIGINAL_PROMPT_VERSION,ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,SOURCE_ATTRIBUTION_DETECTOR_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,authorIdentity,input.learnings?.voiceCorpus?.snapshotId]);
+  const policy = jobFingerprint(['simple-original-4',ORIGINAL_EDITORIAL_POLICY_VERSION,ORIGINAL_EDITORIAL_CRITIC_VERSION,SOURCE_COPY_ASSESSMENT_VERSION,ORIGINAL_EDITORIAL_CONTEXT_VERSION,ORIGINAL_PROMPT_VERSION,ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,SOURCE_ATTRIBUTION_DETECTOR_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,authorIdentity,input.learnings?.voiceCorpus?.snapshotId]);
   const snapshot = JSON.parse(JSON.stringify({...input,onTrace:undefined,onArtifacts:undefined,jobSession:undefined,originalModelCall:undefined,originalEditorialContext:undefined}));
   const job = await claimGenerationJob(input.agentId,snapshot,policy,Date.now(),current=>{
     const saved=current.input as GenerateTweetBatchV2Input;
@@ -7827,44 +7953,30 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   });
   if (!job) return [];
   const session = new GenerationJobSession(input.agentId,job);
-  if ((await reconcileGenerationCanaryAssessments(input.agentId, job))?.status === 'blocked') {
-    await session.finish([], 'canary_empty_limit');
-    return [];
-  }
   if (job.status === 'assessed' && job.result?.length) { await session.finish(job.result,'completed'); return job.result as RankedProtocolTweet[]; }
   let outcome = 'provider_failure';
   try {
-    // New jobs use the small sequential engine. Finish already-paid legacy jobs
-    // on their existing checkpoints instead of silently discarding their work.
-    const simple = session.job.checkpoints.originalProductionVersion || Object.keys(session.job.checkpoints).length === 0;
-    await session.write(current => ({ ...current, checkpoints: { ...current.checkpoints,
-      canaryAttemptPrefix: canary?.status === 'active'
-        ? (canary.recoveries?.at(-1) ? `${canary.recoveries.at(-1)!.id}:${job.id}` : job.id) : undefined,
-    } }));
-    const runInput = {...job.input as GenerateTweetBatchV2Input,jobSession:session,
+    // The claim migration preserves raw paid stages and recoverable copy. All
+    // durable originals now resume through the same small production engine.
+    const frozenInput = job.input as GenerateTweetBatchV2Input;
+    const runInput = {...frozenInput,spendContext:continuousSpend(frozenInput.spendContext),jobSession:session,
       entitlement:input.entitlement,onArtifacts:input.onArtifacts,onTrace:(trace:GenerationRunTrace)=>{outcome=trace.outcomeCode || 'provider_failure'; input.onTrace?.(trace);}};
-    let result = simple
-      ? await (await import('./original-production-adapter')).generateOriginalProduction(runInput)
-      : await generateTweetBatchV2Internal(runInput);
+    let result = await (await import('./original-production-adapter')).generateOriginalProduction(runInput);
     const savedIdeas = session.job.checkpoints.ideas_ready as IdeaCandidate[] || [];
     const savedBriefs = session.job.checkpoints.briefs as GenerationBriefV2[] || [];
     const savedDocuments = (session.job.checkpoints.context as [SourceDocument[]] | undefined)?.[0] || [];
     result = result.map(item=>{
       const idea = savedIdeas.find(i=>i.id===item.ideaId);
       const brief = savedBriefs.find(b=>b.id===idea?.briefId);
-      return {...item,assessmentReceipt:createOriginalAssessmentReceipt(item,{contentHash:jobFingerprint(item.content),policyVersion:item.qualityPolicyVersion || '',criticVersion:item.finalCriticVersion || '',assessedAt:new Date().toISOString(),
+      return {...item,assessmentReceipt:createOriginalAssessmentReceipt({...item,agentId:input.agentId},{contentHash:jobFingerprint(item.content),policyVersion:item.qualityPolicyVersion || '',criticVersion:item.finalCriticVersion || '',assessedAt:new Date().toISOString(),
         validUntil:brief?.subjectPacket?.expiresAt,
         evidence:savedDocuments.filter(d=>brief?.sourceDocumentIds.includes(d.id)).map(d=>({sourceDocumentId:d.id,contentHash:d.contentHash})),
       })};
     });
-    await reconcileGenerationCanaryAssessments(input.agentId, session.job);
     await session.finish(result,outcome);
-    // A completed editorial failure is empty even when a reserve remains.
-    // Only unfinished operational stages are exempt from the canary stop.
-    if (!session.deferred && outcome==='quality_empty') await recordGenerationCanary(input.agentId,{empty:true,attemptId:generationCanaryAttemptId(canary,job.id,session.job.checkpoints.selectedIdeas as string[] || [])});
     return result;
   } catch (error) {
-    await session.finish([],error instanceof Error ? error.message : 'provider_failure').catch(()=>null);
+    await session.finish([],error instanceof Error ? error.message : 'provider_failure', error instanceof AiBudgetError ? { budgetScope: error.scope } : {}).catch(()=>null);
     throw error;
   }
 }

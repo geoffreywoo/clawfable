@@ -1,3 +1,4 @@
+import { ORIGINAL_EDITORIAL_POLICY_VERSION, ORIGINAL_EDITORIAL_CRITIC_VERSION } from './original-editorial-policy';
 import {
   buildGenerationBriefsV2, prioritizeCurrentInterestBriefsV2, normalizeIdeaCandidatesV2,
   normalizeDraftContentV2, preflightDraft, qualifyOriginalDrafts, collectOperatorAnchors,
@@ -23,7 +24,7 @@ import { stableResearchId } from './research-utils';
 import type { DraftCandidate, IdeaCandidate, GenerationModelCallTrace, GenerationRunTrace, SourceDocument } from './types';
 import type { RankedPublishingCandidate } from './publishing-candidate';
 
-export const ORIGINAL_PRODUCTION_VERSION = 'simple-original-3';
+export const ORIGINAL_PRODUCTION_VERSION = 'simple-original-4';
 type Subject = GenerationBriefV2 & { editorialContext: OriginalEditorialContext };
 function parseArray(text: string, field: string): Array<Record<string, any>> {
   try {
@@ -52,7 +53,8 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
   if (!session) throw new Error('generation_session_required');
   const startedAt = Date.now(), deadlineAt = startedAt + 240_000;
   const runId = session.job.id;
-  const policy = getGenerationPolicyVersions(input.voiceProfile, 'original');
+  const continuous = input.agentId === '13' && input.durableGeneration === true;
+  const policy = continuous ? { qualityPolicyVersion: ORIGINAL_EDITORIAL_POLICY_VERSION, finalCriticVersion: ORIGINAL_EDITORIAL_CRITIC_VERSION } : getGenerationPolicyVersions(input.voiceProfile, 'original');
   let ideas: IdeaCandidate[] = [], drafts: DraftCandidate[] = [];
   let trace: GenerationRunTrace = {
     schemaVersion: 2, id: runId, agentId: input.agentId, pipelineVersion: 'v2',
@@ -86,6 +88,7 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
   // Isolate the unchanged production decision policy behind one adapter. It
   // cannot retry, purchase rewrites, or silently switch to the candidate policy.
   const assessmentInput: GenerateTweetBatchV2Input = { ...input, count: 1,
+    ...(continuous ? { originalEditorialPolicy: ORIGINAL_EDITORIAL_POLICY_VERSION } : {}),
     originalModelCall: async (stage, options) => call(stage, { ...options, timeoutMs: 90_000 }),
   };
   await session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, originalProductionVersion: ORIGINAL_PRODUCTION_VERSION } }));

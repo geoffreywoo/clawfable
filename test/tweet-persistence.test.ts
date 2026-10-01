@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { getTweets, updateTweet } from '@/lib/kv-storage';
+import { getTweet, getTweets, updateTweet } from '@/lib/kv-storage';
 import { createTweetFromGeneratedCandidate } from '@/lib/tweet-persistence';
+import { getGeneratedPublishIssue } from '@/lib/generation-origin';
+import { editorialTweet } from './fixtures/original-editorial-receipt';
 
 describe('generated tweet persistence', () => {
   it('preserves generation, judge, corpus, and final-critic provenance', async () => {
@@ -103,6 +105,20 @@ describe('generated tweet persistence', () => {
       ideaId: 'idea-v2-provenance',
       draftCandidateId: 'draft-v2-provenance',
     });
+  });
+
+  it('preserves the production editorial receipt across persistence and invalidates edited copy', async () => {
+    const approved = editorialTweet({ draftCandidateId: `editorial-persist-${Date.now()}` });
+    const candidate = { ...approved, targetTopic: approved.topic } as any;
+    delete candidate.agentId;
+    expect(getGeneratedPublishIssue(candidate, { agentId: '13' })).toBeNull();
+    const tweet = await createTweetFromGeneratedCandidate('13', candidate, { status: 'queued' });
+    const stored = await getTweet(tweet.id, { fresh: true });
+    expect(stored.assessmentReceipt).toEqual(approved.assessmentReceipt);
+    expect(stored.finalCriticScores).toBeNull();
+    expect(getGeneratedPublishIssue(stored, { agentId: '13', accountHandle: 'geoffwoo' })).toBeNull();
+    const edited = await updateTweet(tweet.id, { content: `${tweet.content} An unassessed addition.` });
+    expect(getGeneratedPublishIssue(edited, { agentId: '13' })).toBeTruthy();
   });
 
   it('maps one generated draft candidate to one tweet across delivery retries', async () => {

@@ -1,5 +1,5 @@
 import { describe,it,expect,vi } from 'vitest';
-import { claimGenerationJob,updateGenerationJob,GenerationJobSession,getGenerationJob,getGenerationJobRecord,acknowledgeGenerationQueue } from '@/lib/generation-job';
+import { claimGenerationJob,updateGenerationJob,GenerationJobSession,getGenerationJob,getGenerationJobRecord,acknowledgeGenerationQueue,retireGenerationCanary,getRetiredGenerationCanary } from '@/lib/generation-job';
 import { normalizeCandidateDisposition,editorialRejectionCodes } from '@/lib/candidate-disposition';
 
 describe('durable generation jobs',()=>{
@@ -195,5 +195,102 @@ describe('generation canary recovery',()=>{
   expect((await getGenerationCanary(id))?.status).toBe('blocked');
   expect((await resumeGenerationCanaryWithEvidence(id,evidence))?.status).toBe('blocked');
   expect((await resumeGenerationCanaryWithEvidence(id,{...evidence,id:'renamed-same-evidence'}))?.status).toBe('blocked');
+ });
+});
+
+describe('continuous generation recovery', () => {
+ it('archives canary history and campaign receipts once without changing any spending or allowance', async () => {
+  const {mutateAiOperationalState,getAiOperationalState}=await import('@/lib/kv-storage');
+  const {recordGenerationCanary,getGenerationCanary}=await import('@/lib/generation-job');
+  const agentId=`retired-canary-${crypto.randomUUID()}`;
+  const canary={id:'campaign-old',limitUsd:6,status:'blocked',emptyRuns:3,emptyAttemptIds:['one','two','three'],queuedIds:['qualified'],
+   blockedReason:'canary_empty_limit',recoveries:[{id:'earlier-recovery',previousEmptyAttemptIds:['older'],previousEmptyRuns:3}]};
+  const spend={version:'account-budget-1',day:'2026-10-01',attempts:{
+   settled:{id:'settled',campaignId:canary.id,state:'settled',reservedUsd:2,observedUsd:1},
+   unresolved:{id:'unresolved',campaignId:canary.id,state:'dispatched',reservedUsd:2,observedUsd:null},
+   background:{id:'background',state:'dispatched',reservedUsd:4,observedUsd:null},
+  },completionHolds:{pending:{day:'2026-10-01',usd:1}},topUps:{authorized:{amountUsd:2}},outputs:{draft:{tweetId:'queued'}}};
+  await mutateAiOperationalState<any,void>(agentId,'generation-canary',()=>({value:canary,result:undefined}));
+  await mutateAiOperationalState<any,void>(agentId,'spend',()=>({value:spend,result:undefined}));
+  const retired=await Promise.all([retireGenerationCanary(agentId),retireGenerationCanary(agentId)]);
+  expect(retired).toEqual([canary,canary]);
+  const archive=await getRetiredGenerationCanary(agentId);
+  expect(archive).toMatchObject({reason:'continuous_generation',canary,campaignCommittedUsd:3,
+   campaignAttempts:{settled:spend.attempts.settled,unresolved:spend.attempts.unresolved}});
+  expect(archive?.campaignAttempts.background).toBeUndefined();
+  expect(await getAiOperationalState(agentId,'spend')).toEqual(spend);
+  expect(await getGenerationCanary(agentId)).toEqual(canary);
+  await recordGenerationCanary(agentId,{queuedId:'later'});
+  await mutateAiOperationalState<any,void>(agentId,'spend',current=>({value:{...current,attempts:{...current.attempts,
+   unresolved:{...current.attempts.unresolved,state:'settled',observedUsd:.5}}},result:undefined}));
+  await retireGenerationCanary(agentId);
+  expect(await getRetiredGenerationCanary(agentId)).toEqual(archive);
+  expect(await getGenerationCanary(agentId)).toEqual(canary);
+ });
+
+ it('continues saved reserves through more than three editorial failures, then waits thirty minutes for a fresh batch', async () => {
+  vi.useFakeTimers();
+  try {
+   vi.setSystemTime(new Date('2026-10-01T18:00:00Z'));
+   const agentId=`continuous-reserves-${crypto.randomUUID()}`;
+   let session=new GenerationJobSession(agentId,(await claimGenerationJob(agentId,{},'p'))!);
+   const id=session.job.id;
+   await session.checkpoint('call:ideation',async()=>({text:'paid ideas'}));
+   for(let index=0;index<4;index++) {
+    await session.write(job=>({...job,checkpoints:{...job.checkpoints,selectedIdeas:[`idea-${index}`],reserveIdeas:[`idea-${index+1}`]}}));
+    await session.finish([],'quality_empty');
+    expect(session.job).toMatchObject({status:'deferred',blocker:'reserve_ready',failures:0});
+    vi.setSystemTime(session.job.nextAttemptAt+1);
+    session=new GenerationJobSession(agentId,(await claimGenerationJob(agentId,{},'p'))!);
+    expect(session.job.id).toBe(id);
+    expect(session.job.checkpoints['call:ideation']).toEqual({text:'paid ideas'});
+   }
+   await session.write(job=>({...job,checkpoints:{...job.checkpoints,reserveIdeas:[]}}));
+   await session.finish([],'quality_empty');
+   expect(session.job).toMatchObject({status:'failed',blocker:'quality_empty',nextAttemptAt:Date.now()+30*60_000});
+   expect(await claimGenerationJob(agentId,{},'p')).toBeNull();
+   vi.setSystemTime(session.job.nextAttemptAt);
+   expect((await claimGenerationJob(agentId,{},'p'))?.id).not.toBe(id);
+   expect((await getGenerationJobRecord(agentId,id))?.checkpoints['call:ideation']).toEqual({text:'paid ideas'});
+  } finally { vi.useRealTimers(); }
+ });
+
+ it('terminates a capped job so a later job can use the remaining daily allowance',async()=>{
+  const agentId=`job-budget-terminal-${crypto.randomUUID()}`;
+  const session=new GenerationJobSession(agentId,(await claimGenerationJob(agentId,{},'p'))!);
+  await session.checkpoint('call:writing',async()=>({text:'paid copy'}));
+  const before=Date.now();
+  await session.finish([],'budget_exhausted',{budgetScope:'job'});
+  expect(session.job).toMatchObject({status:'failed',blocker:'budget_job_exhausted',owner:null,leaseUntil:0});
+  expect(session.job.nextAttemptAt).toBeGreaterThanOrEqual(before+30*60_000);
+  const next=await claimGenerationJob(agentId,{},'p',session.job.nextAttemptAt);
+  expect(next?.id).not.toBe(session.job.id);
+  expect((await getGenerationJobRecord(agentId,session.job.id))?.checkpoints['call:writing']).toEqual({text:'paid copy'});
+ });
+
+ it('does not bypass an exhausted batch cooldown when its evidence expires',async()=>{
+  const agentId=`job-empty-expiry-${crypto.randomUUID()}`;
+  const session=new GenerationJobSession(agentId,(await claimGenerationJob(agentId,{},'p'))!);
+  await session.write(job=>({...job,expiresAt:Date.now()+1000}));
+  await session.finish([],'quality_empty');
+  expect(await claimGenerationJob(agentId,{},'p',session.job.expiresAt+1)).toBeNull();
+  expect(await claimGenerationJob(agentId,{},'p',session.job.nextAttemptAt)).not.toBeNull();
+ });
+
+ it('waits for the next Pacific day despite expiry or policy changes, including the fall DST change',async()=>{
+  vi.useFakeTimers();
+  try {
+   vi.setSystemTime(new Date('2026-11-01T07:30:00Z'));
+   const agentId=`job-daily-budget-${crypto.randomUUID()}`;
+   const session=new GenerationJobSession(agentId,(await claimGenerationJob(agentId,{},'p'))!);
+   await session.checkpoint('call:writing',async()=>({text:'paid copy'}));
+   await session.finish([],'budget_exhausted',{budgetScope:'daily'});
+   expect(session.job).toMatchObject({status:'deferred',blocker:'budget_daily_exhausted',failures:0,
+    nextAttemptAt:Date.parse('2026-11-02T08:00:00Z')});
+   expect(await claimGenerationJob(agentId,{},'new-policy',session.job.expiresAt+1)).toBeNull();
+   const next=await claimGenerationJob(agentId,{},'p',session.job.nextAttemptAt);
+   expect(next).not.toBeNull();
+   expect((await getGenerationJobRecord(agentId,session.job.id))?.checkpoints['call:writing']).toEqual({text:'paid copy'});
+  } finally { vi.useRealTimers(); }
  });
 });

@@ -5,6 +5,7 @@ import { claimGenerationJob, GenerationJobSession } from '@/lib/generation-job';
 const mocks = vi.hoisted(() => ({
   durableState: new Map<string, any>(),
   generateText: vi.fn(),
+  generateOriginalProduction: vi.fn(),
   getGenerationRuns: vi.fn(),
   getIdeaCandidates: vi.fn(),
   getSemanticBlocks: vi.fn(),
@@ -17,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   accountTasteImplementation: null as ((content: string) => Record<string, unknown>) | null,
   geoffreyVoiceProfile: true,
 }));
+
+vi.mock('@/lib/original-production-adapter', () => ({ generateOriginalProduction: mocks.generateOriginalProduction }));
 
 vi.mock('@/lib/ai', () => ({
   estimateAiUsageCostUsd: () => null,
@@ -348,6 +351,7 @@ describe('generateTweetBatchV2 integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.durableState.clear();
+    mocks.generateOriginalProduction.mockReset();
     mocks.accountTasteOverride = null;
     mocks.accountTasteImplementation = null;
     mocks.geoffreyVoiceProfile = true;
@@ -368,40 +372,27 @@ describe('generateTweetBatchV2 integration', () => {
     });
   });
 
-  it('resumes existing legacy durable paid ideas after an unavailable judge without regenerating them', async()=>{
-    mocks.getStoryClusters.mockResolvedValue([]);
-    mocks.getSourceDocuments.mockResolvedValue([]);
-    mocks.generateText.mockImplementation(async(options:any)=>{
-      if(options.task==='idea_generation') {
-        const packet=JSON.parse(options.prompt);
-        return result(JSON.stringify({ideas:[{briefId:packet.subjects[0].id,publicMove:'Within a year, I expect a stock index fund to launch agent-led activist campaigns across its whole portfolio. Every holding gets a team pushing for changes.',contentMode:'prediction',evidenceIds:[],factualRisk:'low'}]}));
-      }
-      if(options.task==='idea_judgment') throw new Error('judge temporarily unavailable');
-      throw new Error(`Unexpected task ${options.task}`);
-    });
-    // This test exercises judge recovery, not random brief/topic rotation.
-    // Keep its fixed activist-investing idea paired with a markets subject.
-    const durableInput={...input,agentId:'13',count:1,requestedTopic:'markets',
-      voiceProfile:{...input.voiceProfile,topics:['markets']},
-      analysis:{...input.analysis,engagementPatterns:{topTopics:['markets']}},
-      durableGeneration:true,modelStack:'publishing_v2_astra' as const,generationPolicy:'budget_v1' as const};
+  it('hands legacy paid checkpoints to the original adapter across an operational retry', async () => {
+    const durableInput = { ...input, agentId: '13', count: 1, durableGeneration: true,
+      modelStack: 'publishing_v2_astra' as const };
     const legacySession = new GenerationJobSession('13', (await claimGenerationJob('13', durableInput, 'legacy-existing-policy'))!);
-    await legacySession.checkpoint('legacyExistingWork', async () => ({ version: 'durable-original-2' }));
+    const paidKey = 'call:idea_generation:paid-original';
+    const paid = { requestKey: paidKey, result: { text: 'saved provider response' } };
+    await legacySession.checkpoint(paidKey, async () => paid);
     await legacySession.finish([], 'provider_failure');
-    await generateTweetBatchV2(durableInput);
-    expect(mocks.durableState.get('generation-job').checkpoints.ideas_ready).toHaveLength(1);
-    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='idea_judgment'),
-      JSON.stringify(mocks.durableState.get('generation-job').checkpoints.ideas_ready)).toHaveLength(1);
-    const saved=mocks.durableState.get('generation-job');
-    mocks.durableState.set('generation-job',{...saved,nextAttemptAt:0,owner:null,leaseUntil:0});
-    await generateTweetBatchV2(durableInput);
-    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='idea_generation')).toHaveLength(1);
-    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='idea_judgment')).toHaveLength(2);
+    mocks.generateOriginalProduction.mockImplementation(async next => {
+      expect(next.jobSession.job.checkpoints[paidKey]).toEqual(paid);
+      throw new Error('provider_pending');
+    });
+    await expect(generateTweetBatchV2(durableInput)).rejects.toThrow('provider_pending');
+    const saved = mocks.durableState.get('generation-job');
+    expect(saved.status).toBe('deferred');
+    mocks.durableState.set('generation-job', { ...saved, nextAttemptAt: 0, owner: null, leaseUntil: 0 });
+    await expect(generateTweetBatchV2(durableInput)).rejects.toThrow('provider_pending');
+    expect(mocks.generateOriginalProduction).toHaveBeenCalledTimes(2);
+    expect(mocks.generateText).not.toHaveBeenCalled();
     expect(mocks.durableState.get('generation-job').id).toBe(saved.id);
-    // A markets subject is outside the technical lane, so no mechanism demand.
-    expect(mocks.generateText.mock.calls.find(([o])=>o.task==='idea_generation')![0].system).not.toContain('Technical subjects');
   });
-
 
   it('uses identical calibrated critic contracts while retaining different generation policies', async () => {
     const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date('2026-08-02T02:00:00Z') });
@@ -421,42 +412,27 @@ describe('generateTweetBatchV2 integration', () => {
     expect(traces.some(t=>t.generationPolicyVersion==='geoffrey-autopost-per-dollar-10')).toBe(true);
   });
 
-  it('finishes an existing legacy job with deterministic verified handles and retained final judgment', async () => {
-    mocks.getStoryClusters.mockResolvedValue([]);
-    mocks.getSourceDocuments.mockResolvedValue([]);
-    const original="i think cognition can help teams build products they couldn't justify staffing. i'd rather see that than the same roadmap with fewer engineers.";
-    const repaired="i think @cognition can help teams build products they couldn't justify staffing. i'd rather see that than the same roadmap with fewer engineers.";
-    mocks.generateText.mockImplementation(async (options:any) => {
-      const packet=JSON.parse(options.prompt);
-      if(options.task==='idea_generation') return result(JSON.stringify({ideas:[{briefId:packet.subjects[0].id,publicMove:original,contentMode:'opinion',evidenceIds:[],factualRisk:'low'}]}));
-      if(options.task==='idea_judgment') return rankingResponse(options.prompt,'ideas');
-      if(options.task==='tweet_writing') return result(JSON.stringify({drafts:[{content:packet.failedAttempts?.length ? repaired : original,format:'observation',posture:'opinion'}]}));
-      if(options.task==='copy_judgment') throw new Error('judge temporarily unavailable');
-      throw new Error(`Unexpected task ${options.task}`);
-    });
-    const durableInput={...input,agentId:'13',count:1,requestedTopic:'Cognition',
-      voiceProfile:{...input.voiceProfile,topics:['Cognition']},analysis:{...input.analysis,engagementPatterns:{topTopics:['Cognition']}},
-      durableGeneration:true,modelStack:'publishing_v2_astra' as const,generationPolicy:'budget_v1' as const};
+  it('retires the blocked pilot without erasing its accounting or retaining its campaign ceiling', async () => {
+    const canary = { id: 'old-pilot', status: 'blocked', emptyRuns: 3, queuedIds: [], limitUsd: 6 };
+    mocks.durableState.set('generation-canary', canary);
+    const durableInput = { ...input, agentId: '13', count: 1, durableGeneration: true,
+      modelStack: 'publishing_v2_astra' as const,
+      spendContext: { agentId: '13', operation: 'generation', runId: 'prior-run', runLimitUsd: 3,
+        campaignId: canary.id, campaignLimitUsd: 6 } };
     const legacySession = new GenerationJobSession('13', (await claimGenerationJob('13', durableInput, 'legacy-existing-policy'))!);
     await legacySession.checkpoint('legacyExistingWork', async () => ({ version: 'durable-original-2' }));
     await legacySession.finish([], 'provider_failure');
-    await generateTweetBatchV2(durableInput);
-    const writers=mocks.generateText.mock.calls.map(([o])=>o).filter(o=>o.task==='tweet_writing');
-    const repairs=writers.filter(o=>JSON.parse(o.prompt).failedAttempts?.length);
-    expect(writers,JSON.stringify(mocks.saveGenerationRun.mock.calls.at(-1)?.[1])).toHaveLength(1);
-    expect(repairs).toHaveLength(0);
-    // The writer is told the handle policy up front.
-    expect(JSON.parse(writers[0].prompt).verifiedEntityMentionPolicy.available).toEqual(expect.arrayContaining([expect.objectContaining({handle:'@cognition'})]));
-    const judged=mocks.generateText.mock.calls.filter(([o])=>o.task==='copy_judgment');
-    expect(judged,JSON.stringify(mocks.saveGenerationRun.mock.calls.at(-1)?.[1])).toHaveLength(1);
-    expect(judged[0][0].prompt).toContain('@cognition');
-    const saved=mocks.durableState.get('generation-job');
-    expect(Object.keys(saved.checkpoints).filter(k=>k.startsWith('repair:'))).toHaveLength(0);
-    expect(saved.status).toBe('deferred');
-    mocks.durableState.set('generation-job',{...saved,nextAttemptAt:0,owner:null,leaseUntil:0});
-    await generateTweetBatchV2(durableInput);
-    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='tweet_writing')).toHaveLength(1);
-    expect(mocks.generateText.mock.calls.filter(([o])=>o.task==='copy_judgment')).toHaveLength(2);
+    mocks.generateOriginalProduction.mockImplementation(async next => {
+      expect(next.spendContext).toMatchObject({ runLimitUsd: 3 });
+      expect(next.spendContext.campaignId).toBeUndefined();
+      expect(next.spendContext.campaignLimitUsd).toBeUndefined();
+      return [];
+    });
+    expect(await generateTweetBatchV2(durableInput)).toEqual([]);
+    expect(mocks.generateOriginalProduction).toHaveBeenCalledTimes(1);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.durableState.get('generation-canary')).toEqual(canary);
+    expect(mocks.durableState.has('generation-canary-retired')).toBe(true);
   });
 
   it('compares three ideas in one call and funds one variant-set writer per brief', async () => {

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
 import { EFFICIENT_GENERATION_POLICY } from './generation-efficiency';
 import { captureOriginalPaidRecovery, ORIGINAL_PAID_RECOVERY_KEY } from './original-paid-recovery';
+import { committedAiSpend, nextAiBudgetDayAt, type AiBudgetExhaustionScope, type AiSpendAttempt, type AiSpendLedger } from './ai-budget';
 
 export const GENERATION_JOB_VERSION = 'durable-original-2';
 export const GENERATION_JOB_NAMESPACE = 'generation-job';
@@ -45,7 +46,10 @@ export async function claimGenerationJob(agentId: string, input: unknown, policy
   if (previous) await archiveGenerationJob(agentId,previous);
   return mutateAiOperationalState<GenerationJob, GenerationJob | null>(agentId, GENERATION_JOB_NAMESPACE, current => {
     if (current && current.leaseUntil > now && current.owner) return {value: current, result: null, skip: true};
-    if (current && current.nextAttemptAt > now && current.policy === policy && current.expiresAt > now) return {value: current, result: null, skip: true};
+    // A policy change or expired subject cannot reset today's account allowance.
+    if (current?.blocker === 'budget_daily_exhausted' && current.nextAttemptAt > now) return {value: current, result: null, skip: true};
+    const batchCooldown = current?.status === 'failed' && ['quality_empty','no_qualified_context','budget_job_exhausted','queue_rejected'].includes(current.blocker || '');
+    if (current && current.nextAttemptAt > now && current.policy === policy && (current.expiresAt > now || batchCooldown)) return {value: current, result: null, skip: true};
     const hasReserve = current?.status === 'queued' && (current.checkpoints.reserveIdeas as string[] || []).length > 0;
     const reusable = current && (current.policy === policy || compatiblePolicy?.(current)) && current.expiresAt > now && (hasReserve || !['queued','failed'].includes(current.status));
     if (!reusable && current && (current.id !== previous?.id || (current.revision || 0) !== (previous?.revision || 0))) return {value:current,result:null,skip:true};
@@ -90,19 +94,22 @@ export class GenerationJobSession {
   async write(update: (job: GenerationJob) => GenerationJob) {
     this.job = await updateGenerationJob(this.agentId, this.job, update);
   }
-  async finish(result: unknown[], outcome: string) {
+  async finish(result: unknown[], outcome: string, options: { budgetScope?: AiBudgetExhaustionScope } = {}) {
+    const now = Date.now();
+    const jobBudgetExhausted = outcome === 'budget_exhausted' && options.budgetScope === 'job';
+    const dailyBudgetExhausted = outcome === 'budget_exhausted' && options.budgetScope === 'daily';
     const reserve = outcome === 'quality_empty' && !this.deferred && (this.job.checkpoints.reserveIdeas as string[] || []).length > 0;
     if (reserve) await this.write(current=>({...current,checkpoints:{...current.checkpoints,attemptedIdeas:[...current.checkpoints.attemptedIdeas as string[] || [],...current.checkpoints.selectedIdeas as string[] || []]}}));
     // Anything other than a completed editorial/context decision remains
     // resumable. New provider/storage error codes must not discard paid work.
-    const operational = !result.length && (reserve || this.deferred || !['quality_empty','no_qualified_context','payment_required','voice_not_ready','subject_expired','stale_evidence'].includes(outcome));
+    const operational = !result.length && !jobBudgetExhausted && (reserve || this.deferred || !['quality_empty','no_qualified_context','payment_required','voice_not_ready','subject_expired','stale_evidence'].includes(outcome));
     await this.write(current => ({...current, result:result.length ? result : undefined,
       // Repeated provider trouble must not discard paid stages and restart
       // ideation. Keep the job resumable while it is valid, with capped backoff.
       status:result.length ? 'assessed' : operational ? 'deferred' : 'failed',
-      blocker:result.length ? null : this.deferred ? 'stage_deferred' : reserve ? 'reserve_ready' : outcome,
-      failures:current.failures + (operational && !this.deferred ? 1 : 0),
-      nextAttemptAt: result.length ? 0 : outcome === 'malformed_output' ? current.expiresAt : Date.now() + (reserve || this.deferred ? 1000 : outcome === 'quality_empty' ? 30*60_000 : Math.min(120,10*2**current.failures)*60_000),
+      blocker:result.length ? null : jobBudgetExhausted ? 'budget_job_exhausted' : dailyBudgetExhausted ? 'budget_daily_exhausted' : this.deferred ? 'stage_deferred' : reserve ? 'reserve_ready' : outcome,
+      failures:current.failures + (operational && !this.deferred && !reserve && !dailyBudgetExhausted ? 1 : 0),
+      nextAttemptAt: result.length ? 0 : dailyBudgetExhausted ? nextAiBudgetDayAt(now) : outcome === 'malformed_output' ? current.expiresAt : now + (reserve || this.deferred ? 1000 : jobBudgetExhausted || ['quality_empty','no_qualified_context'].includes(outcome) ? 30*60_000 : Math.min(120,10*2**current.failures)*60_000),
       owner:result.length ? current.owner : null,leaseUntil:result.length ? current.leaseUntil : 0}));
   }
 }
@@ -142,6 +149,8 @@ export async function resumeGenerationCanaryWithEvidence(agentId:string, evidenc
   if (!evidence?.id?.trim() || evidence.policy !== canaryPolicyKey() || !evidence.evidenceRef?.trim() || !/^[a-f0-9]{64}$/i.test(evidence.evidenceHash || '')) {
     throw new Error('canary_recovery_evidence_required');
   }
+  const retired = await getRetiredGenerationCanary(agentId);
+  if (retired) return retired.canary;
   return mutateAiOperationalState<GenerationCanary,GenerationCanary | null>(agentId,'generation-canary',state=>{
     if (!state || state.status!=='blocked' || state.recoveries?.some(r=>r.id===evidence.id || r.evidenceHash===evidence.evidenceHash)) return {value:state!,result:state || null,skip:true};
     const previousPolicy=state.blockedPolicy || 'unrecorded';
@@ -151,9 +160,37 @@ export async function resumeGenerationCanaryWithEvidence(agentId:string, evidenc
   });
 }
 export const getGenerationCanary = (agentId:string) => getAiOperationalState<GenerationCanary>(agentId,'generation-canary');
+export interface RetiredGenerationCanary {
+  retiredAt: string;
+  reason: 'continuous_generation';
+  canary: GenerationCanary;
+  /** Immutable campaign receipts. The complete live account ledger stays authoritative. */
+  campaignAttempts: Record<string, AiSpendAttempt>;
+  campaignCommittedUsd: number;
+}
+export const getRetiredGenerationCanary = (agentId: string) => getAiOperationalState<RetiredGenerationCanary>(agentId, 'generation-canary-retired');
+
+/** Archive once; never reset a canary, paid attempt, completion hold, or allowance. */
+export async function retireGenerationCanary(agentId: string): Promise<GenerationCanary | null> {
+  const retired = await getRetiredGenerationCanary(agentId);
+  if (retired) return retired.canary;
+  const canary = await getGenerationCanary(agentId);
+  if (!canary) return null;
+  const spend = await getAiOperationalState<AiSpendLedger>(agentId, 'spend');
+  const campaignAttempts = Object.fromEntries(Object.entries(spend?.attempts || {}).filter(([,attempt]) => attempt.campaignId === canary.id));
+  const archived = await mutateAiOperationalState<RetiredGenerationCanary, RetiredGenerationCanary>(agentId, 'generation-canary-retired', existing => {
+    if (existing) return { value: existing, result: existing, skip: true };
+    const value: RetiredGenerationCanary = { retiredAt: new Date().toISOString(), reason: 'continuous_generation',
+      canary, campaignAttempts, campaignCommittedUsd: Object.values(campaignAttempts)
+        .reduce((total, attempt) => total + committedAiSpend(attempt), 0) };
+    return { value, result: value };
+  });
+  return archived.canary;
+}
 /** Reconcile completed decisions before another paid stage, including crashes before finish. */
 export async function reconcileGenerationCanaryAssessments(agentId: string, job: GenerationJob): Promise<GenerationCanary | null> {
   const canary = await getGenerationCanary(agentId);
+  if (await getRetiredGenerationCanary(agentId)) return canary;
   if (canary?.status !== 'active') return canary;
   for (const [key, value] of Object.entries(job.checkpoints)) {
     if (!key.startsWith('assessed:')) continue;
@@ -167,6 +204,7 @@ export async function reconcileGenerationCanaryAssessments(agentId: string, job:
   return getGenerationCanary(agentId);
 }
 export async function recordGenerationCanary(agentId:string, event:{queuedId?:string;empty?:boolean;attemptId?:string}) {
+  if (await getRetiredGenerationCanary(agentId)) return;
   return mutateAiOperationalState<GenerationCanary,void>(agentId,'generation-canary',state=>{
     if (!state || state.status!=='active') return {value:state!,result:undefined,skip:true};
     if(event.empty && event.attemptId && state.emptyAttemptIds?.includes(event.attemptId)) return {value:state,result:undefined,skip:true};

@@ -497,8 +497,24 @@ export interface GenerationSelectionTrace {
   qualityMarginTolerance: number;
 }
 
+export interface OriginalAssessmentReceipt {
+  agentId?: string;
+  editorialDecision?: import('./original-editorial-policy').OriginalEditorialDecision;
+  editorialBindingHash?: string;
+  sourceCopyAssessment?: import('./source-copy-assessment').SourceCopyAssessment;
+  evidenceContextHash?: string;
+  evaluationOnly?: boolean;
+  editorialContractVersion?: string;
+  contentHash: string;
+  policyVersion: string;
+  criticVersion: string;
+  assessedAt: string;
+  validUntil?: string;
+  evidence?: Array<{ sourceDocumentId: string; contentHash: string }>;
+}
+
 export interface Tweet {
-  assessmentReceipt?: { sourceCopyAssessment?: import('./source-copy-assessment').SourceCopyAssessment; evidenceContextHash?: string; evaluationOnly?: boolean; editorialContractVersion?: string; contentHash: string; policyVersion: string; criticVersion: string; assessedAt: string; validUntil?: string; evidence?: Array<{sourceDocumentId:string;contentHash:string}> } | null;
+  assessmentReceipt?: OriginalAssessmentReceipt | null;
   id: string;
   agentId: string;
   content: string;
@@ -906,6 +922,8 @@ export interface IdeaCandidate {
 }
 
 export interface DraftCandidate {
+  editorialDecision?: import('./original-editorial-policy').OriginalEditorialDecision;
+  diagnosticCodes?: string[];
   failureCategory?: IdeaCandidate['failureCategory'];
   judgePolicyVersion?: string;
   repairDecision?: import('./generation-efficiency').RepairDecision | null;

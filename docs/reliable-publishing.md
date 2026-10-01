@@ -1,28 +1,26 @@
-# Reliable original publishing rollout
+# Reliable original publishing
 
-Agent 13 is the first account in this rollout. `ProtocolSettings.durableGenerationEnabled` controls it; other accounts keep the existing path. Original posting targets five/day and five publishable queued drafts. Replies retain their emergency block.
+## Current contract — October 1, 2026
 
-## Execution
+Agent 13 (@geoffwoo) uses the durable original worker. Other accounts retain their existing path. Posting targets five originals per Pacific day with a five-post reserve; replies retain their emergency block.
 
-`/api/cron/generate` runs every ten minutes offset from posting. One fenced account job owns immutable subject context, paid response checkpoints, raw ideas, draft evaluations, reserve selection, and final selected output. A 240-second worker yields before starting a stage without its complete timeout allowance. The next tick replays saved responses and resumes unpaid work. Selected output remains leased until queue acknowledgement; deterministic candidate-to-tweet identity recovers partial persistence.
+The worker runs every ten minutes separately from posting. Each attempt selects one idea, writes three variants, and assesses them together once. It queues the highest passing variant. The existing leased job checkpoints retain paid responses across interruptions; there are no extra critics or automatic rewrites.
 
-Posting no longer performs generation or expensive discovery for the rollout account. Background topic/research/learning moves to the hourly research worker. Current final quality gates are retained. The new idea contract uses publicMove, contentMode and evidence IDs; stylistic idea warnings remain auditable diagnostics, while factual/policy/duplicate failures remain blockers.
+Production uses `original-editorial-policy-1` and a provisional editorial score of 0.75: worthwhile, naturally on-voice, ready to publish. Voice, clarity, substance, interest, originality, and style diagnostics explain the one verdict instead of acting as separate cutoffs. Ordinary observations and opinions need not become frontier predictions. The threshold is a product default, not a calibrated probability; the owner-approved continuous rollout does not depend on completing the older calibration experiment.
 
-Completed jobs remain addressable by job ID after the active pointer advances. Provider outages preserve paid stages across repeated failures. Successful queue insertion makes remaining qualified ideas eligible before new ideation, under the same lifetime job budget. Content receipts expire with their subject packet; publishing rechecks current source hashes and withdrawal state. Interest observations keep their original timestamps, including during failed cache refreshes. Subjective ideas from researched subjects can use the strict no-evidence opinion contract instead of manufacturing citations.
+Unsupported facts, fabricated experience, explicit account restrictions, substantive duplication, invalid payloads, and missing attribution remain hard blockers. The production receipt binds the exact copy, author/context, model decision, evidence hashes, and expiration. Generation, queue admission, and posting consume that same decision without manufacturing legacy quality scores. Live evidence withdrawal, new duplicate history, posting limits, ownership, and operator edits/deletes remain binding. Evaluation receipts cannot authorize posting.
 
-Original X writes have a durable account dispatch record. Ambiguous responses and failures to persist an accepted response hold further writes until official timeline/text/author reconciliation. An empty timeline is not proof of failure and never permits an automatic duplicate. The posting path uses five Pacific-day slots with small stable jitter and a two-hour minimum for catch-up; the existing rolling-24-hour cap still applies. Read-only status reports publishable depth through the same posting checks, current stage, rejection counts, retry action, canary spending, original-only counts and conversion rates.
+A qualified singleton can post when due. Empty editorial attempts never permanently stop an enabled account: unused reserve ideas resume on a later worker tick, and exhausted empty batches retry after 30 minutes. Provider failures retain saved stages and capped backoff. An exhausted $3 job ends with archived artifacts; an exhausted Pacific-day allowance waits until the next Pacific day.
 
-Generation receives a protected $15 of the existing $20 Pacific-day budget, research/topic work is capped at $2, other background operations at $3. Generation may borrow unused capacity. Each durable job keeps the $3 lifetime ceiling across resumes. A generation-canary operational record caps initial experiments at $6 and stops after three consecutive completed empty editorial attempts (including attempts with reserve ideas); two distinct queued outputs pass the canary. Neither top-ups nor deleting unknown charges are automatic.
+The historical $6 generation canary is retired into an immutable archive, with its history and campaign spend receipts preserved. Its stop counter and two-output prerequisite no longer control production. The original spend ledger remains authoritative and unchanged by retirement. The $20 Pacific-day limit and $3 lifetime job limit remain enforced; unknown provider charges remain committed. Generation retains the existing protected allocation, and background work stays capped.
 
-Provider IDs and successful results are stored with spend receipts. The worker retrieves uncertain OpenAI responses where supported. Unknown usage remains committed; unavailable reconciliation is explicit. Successful response replay requires the same job and request fingerprint.
+Original X writes keep their durable dispatch journal. An ambiguous write blocks a replacement until official X reconciliation; an empty timeline never proves that a write failed. Posting retains the existing five daily slots, stable jitter, catch-up spacing, and rolling cap.
 
-## Calibration and outstanding acceptance
+## Acceptance and follow-up
 
-The collector supports the active judge model/policy. At rollout inspection, owner labels were zero approvals and nine explicit rejections, with no matching current scores. The final editorial threshold is therefore unchanged. A private 20-draft owner review was prepared; responses must be persisted as actual owner decisions before calibration. Do not infer approvals from generation scores or historical autoposts.
+Verify deployment separately from delivery: inspect the exact Ready deployment and aliases, then scheduled generation, persisted queue approval, and official X publication receipts. The sustained target is five confirmed originals on each of three complete Pacific days, at most $20/day in AI commitments, a five-post reserve that replenishes, and no duplicate or unsupported posts. Preserve append-only observations and notify only on meaningful progress, failure, or required action.
 
-The measured acceptance target is five confirmed original posts on each of three complete Pacific days, <=$20/day in commitments, a five-post reserve that replenishes, and no duplicate or unsupported posts. Passing local tests or the two-output canary does not establish this target.
-
-Follow-up verification must inspect job stage/blocker/retry time, paid and unresolved spend, queue truth, final critic provenance, and official X post receipts. Monitor actionable changes only. Stop paid canary work at its cap, fix the failed stage, and preserve all receipts. Account-scoped final editorial recalibration remains gated on sufficient owner-labelled held-out evidence.
+The historical rollout notes below describe the superseded experimental gates and their original receipts. They are evidence, not current instructions to keep production stopped.
 
 ## Live evidence — September 26, 2026 Pacific
 

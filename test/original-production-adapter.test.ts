@@ -10,6 +10,8 @@ import { getPublishingV2AutopostQualityMargin, getPublishingV2FinalCriticVersion
 import type { GenerateTextOptions } from '@/lib/ai';
 import { generateTweetBatchV2, type GenerateTweetBatchV2Input, type GenerationBriefV2 } from '@/lib/generation-v2';
 import type { SourceDocument } from '@/lib/types';
+import { ORIGINAL_EDITORIAL_POLICY_VERSION, ORIGINAL_EDITORIAL_CRITIC_VERSION } from '@/lib/original-editorial-policy';
+import { EDITORIAL_DIMENSIONS } from '@/lib/editorial-contract';
 
 const harness = vi.hoisted(() => ({
   generate: vi.fn(), finalOverall: .99, malformed: false, copyVerdict: 'clear', firstCopyUncertain: false,
@@ -86,7 +88,11 @@ beforeEach(() => {
         'the dinner without a guest list, please.',
       ].map(content => ({ ideaId: payload.idea.id, content, format: 'short_punch', posture: 'opinion' })) });
     } else if (options.task === 'copy_judgment') {
-      text = harness.malformed ? JSON.stringify({ ranking: [], scores: [] }) : JSON.stringify({
+      text = (options.jsonSchema as any)?.properties.assessments ? JSON.stringify({ assessments: payload.candidates.map((candidate: any) => ({
+        id: candidate.id, assessment: { editorialScore: harness.finalOverall, explanation: 'A concrete short preference in ordinary words.',
+          hardBlockers: harness.copyVerdict === 'block' ? ['substantive_duplicate'] : [], diagnostics: [],
+          dimensions: Object.fromEntries(EDITORIAL_DIMENSIONS.map(dimension => [dimension, { score: .9, explanation: 'Natural and specific.' }])) },
+      })) }) : harness.malformed ? JSON.stringify({ ranking: [], scores: [] }) : JSON.stringify({
         ranking: payload.candidates.map((candidate: any) => candidate.id),
         scores: payload.candidates.map((candidate: any, index: number) => ({ id: candidate.id,
           overall: harness.finalOverall, voiceFit: .99, operatorPlausibility: .99,
@@ -182,8 +188,9 @@ describe('production original adapter', () => {
     const result = await generateTweetBatchV2({ ...input, agentId: '13', jobSession: undefined });
     expect(result).toHaveLength(1);
     expect(result[0].assessmentReceipt).toMatchObject({
-      policyVersion: getPublishingV2QualityPolicyVersion('original', 'geoffwoo'),
-      criticVersion: getPublishingV2FinalCriticVersion('original', 'geoffwoo'),
+      policyVersion: ORIGINAL_EDITORIAL_POLICY_VERSION,
+      criticVersion: ORIGINAL_EDITORIAL_CRITIC_VERSION,
+      editorialDecision: { threshold: .75, assessment: { editorialScore: .99 } },
       evidence: [],
     });
     expect(Date.parse(result[0].assessmentReceipt!.validUntil!)).toBeGreaterThan(Date.now());
@@ -191,6 +198,24 @@ describe('production original adapter', () => {
     expect(getGeneratedPublishIssue({ ...result[0], content: 'Changed after judgment.' }, { accountHandle: 'geoffwoo' }))
       .toContain('changed after assessment');
     expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['idea_generation', 'tweet_writing', 'copy_judgment']);
+    expect((await getGenerationRuns('13', 1))[0].qualityPolicyVersion).toBe(ORIGINAL_EDITORIAL_POLICY_VERSION);
+  });
+
+  it('migrates a legacy durable snapshot into the same original adapter while preserving history', async () => {
+    const input = await setup();
+    const { jobSession: _session, ...saved } = input;
+    const historicalJob = { ...input.jobSession!.job, id: `legacy-${crypto.randomUUID()}`,
+      input: { ...saved, agentId: '13' }, policy: 'previous-durable-policy', owner: null, leaseUntil: 0,
+      status: 'deferred' as const, nextAttemptAt: 0, checkpoints: { legacyStageMarker: 'preserve-paid-history' } };
+    await mutateAiOperationalState('13', 'generation-job', () => ({ value: historicalJob, result: undefined }));
+    const result = await generateTweetBatchV2({ ...saved, agentId: '13' });
+    expect(result).toHaveLength(1);
+    expect(result[0].assessmentReceipt?.editorialDecision?.policyVersion).toBe(ORIGINAL_EDITORIAL_POLICY_VERSION);
+    expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['idea_generation', 'tweet_writing', 'copy_judgment']);
+    const current = await getGenerationJob('13');
+    expect(current?.id).toBe(historicalJob.id);
+    expect(current?.checkpoints.legacyStageMarker).toBe('preserve-paid-history');
+    expect(current?.checkpoints.originalProductionVersion).toBe('simple-original-4');
   });
 
   it('does not let lexical diagnostics bypass an explicit semantic copy rejection', async () => {

@@ -1,5 +1,15 @@
 import {expect,it} from 'vitest';
-import {summarizeOriginalDelivery} from '@/lib/reliable-generation-status';
+import {summarizeOriginalDelivery,originalGenerationNextAction} from '@/lib/reliable-generation-status';
+import type {GenerationJob} from '@/lib/generation-job';
+
+it('reports one ready original while refill waits for its actual retry',()=>{
+ const now=Date.parse('2026-10-01T18:00:00Z');
+ const job={status:'failed',stage:'assessment',blocker:'quality_empty',nextAttemptAt:now+1800000,expiresAt:now+3600000,checkpoints:{}} as GenerationJob;
+ expect(originalGenerationNextAction(job,1,5,now)).toBe('1 original is ready for the next posting slot. Start a new eligible generation job at or after 2026-10-01T18:30:00.000Z.');
+ expect(originalGenerationNextAction(job,3,3,now)).toBe('Reserve target met; wait for consumption.');
+ expect(originalGenerationNextAction({...job,status:'deferred',blocker:'budget_daily_exhausted'},0,5,now)).toContain('Pacific-day allowance resets');
+ expect(originalGenerationNextAction({...job,blocker:'budget_job_exhausted'},0,5,now)).toContain('remaining daily allowance');
+});
 
 it('counts confirmed originals separately from replies and preserves unresolved cost',()=>{
  const base={id:'1',type:'tweet',status:'posted',xTweetId:'x1',postedAt:'2026-09-27T08:00:00Z',generationSurface:'original'};

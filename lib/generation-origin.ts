@@ -1,5 +1,5 @@
 import type { Tweet } from './types';
-import { getOriginalAssessmentReceiptIssue } from './original-assessment-receipt';
+import { getOriginalAssessmentReceiptIssue, hasCurrentProductionEditorialReceipt } from './original-assessment-receipt';
 import {
   getPublishingV2FinalCriticVersion,
   getPublishingV2QualityPolicyVersion,
@@ -33,7 +33,7 @@ type GenerationOriginTweet = Pick<
   | 'finalCriticScores'
   | 'finalCriticVersion'
   | 'sourceEvidenceTexts'
-> & { type?: Tweet['type']; content?: string; assessmentReceipt?: Tweet['assessmentReceipt'] };
+> & { agentId?: string; type?: Tweet['type']; content?: string; assessmentReceipt?: Tweet['assessmentReceipt'] };
 
 function hasGeneratedContentProvenance(tweet: GenerationOriginTweet): boolean {
   return Boolean(
@@ -47,11 +47,13 @@ function hasGeneratedContentProvenance(tweet: GenerationOriginTweet): boolean {
 
 export function getGeneratedPublishIssue(
   tweet: GenerationOriginTweet,
-  options: { currentVoiceCorpusVersion?: string | null; accountHandle?: string | null } = {},
+  options: { agentId?: string; currentVoiceCorpusVersion?: string | null; accountHandle?: string | null } = {},
 ): string | null {
-  const assessmentIssue = getOriginalAssessmentReceiptIssue(tweet);
+  if (options.agentId && tweet.agentId && options.agentId !== tweet.agentId) return 'Generated assessment belongs to another account.';
+  const assessmentIssue = getOriginalAssessmentReceiptIssue({ ...tweet, agentId: tweet.agentId || options.agentId });
   if (assessmentIssue) return assessmentIssue;
   if (tweet.pipelineVersion === 'v2') {
+    const productionEditorial = hasCurrentProductionEditorialReceipt(tweet, { agentId: options.agentId });
     const qualityPolicyVersion = getPublishingV2QualityPolicyVersion(
       tweet.generationSurface,
       options.accountHandle,
@@ -70,11 +72,11 @@ export function getGeneratedPublishIssue(
       && finalCriticVersion === PUBLISHING_V2_STANDARD_FINAL_CRITIC_VERSION
       && tweet.qualityPolicyVersion === PUBLISHING_V2_QUALITY_POLICY_VERSION
       && tweet.finalCriticVersion === PUBLISHING_V2_FINAL_CRITIC_VERSION;
-    if (tweet.qualityPolicyVersion !== qualityPolicyVersion && !standardAccountAcceptsLatestPair) {
+    if (!productionEditorial && tweet.qualityPolicyVersion !== qualityPolicyVersion && !standardAccountAcceptsLatestPair) {
       return `V2-generated posts require current quality policy ${qualityPolicyVersion}.`;
     }
     if (
-      tweet.generationSurface === 'original'
+      !productionEditorial && tweet.generationSurface === 'original'
       && (
         typeof tweet.finalCriticScores?.qualityMargin !== 'number'
         || tweet.finalCriticScores.qualityMargin < PUBLISHING_V2_MIN_AUTOPOST_QUALITY_MARGIN
@@ -91,7 +93,7 @@ export function getGeneratedPublishIssue(
     ) {
       return `V2-generated posts require current voice corpus ${options.currentVoiceCorpusVersion}.`;
     }
-    if (tweet.finalCriticVersion !== finalCriticVersion && !standardAccountAcceptsLatestPair) {
+    if (!productionEditorial && tweet.finalCriticVersion !== finalCriticVersion && !standardAccountAcceptsLatestPair) {
       return `V2-generated posts require current final critic ${finalCriticVersion}.`;
     }
     if (tweet.finalCriticVerdict !== 'allow' || !tweet.finalCriticProvider || !tweet.finalCriticModel) {

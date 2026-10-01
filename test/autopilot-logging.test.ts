@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { editorialTweet } from './fixtures/original-editorial-receipt';
 import type { PostLogEntry, Tweet } from '../lib/types';
 
 const mocks = vi.hoisted(() => ({
@@ -33,6 +34,8 @@ const mocks = vi.hoisted(() => ({
   getRelationshipProfiles: vi.fn(),
   getProductFacts: vi.fn(),
   getGenerationRuns: vi.fn(),
+  getSourceDocuments: vi.fn(),
+  getStoryClusters: vi.fn(),
   saveGenerationRun: vi.fn(),
   addLearningSignal: vi.fn(),
   invalidateAgentConnection: vi.fn(),
@@ -76,6 +79,8 @@ const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
   semanticIdeaSimilarity: vi.fn(),
   getGenerationCanary: vi.fn(),
+  getGenerationJob: vi.fn(),
+  getDraftCandidates: vi.fn(),
   reconcileOriginalPostDispatch: vi.fn(),
   dispatchOriginalPost: vi.fn(),
 }));
@@ -83,6 +88,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/generation-job', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/generation-job')>(),
   getGenerationCanary: mocks.getGenerationCanary,
+  getGenerationJob: mocks.getGenerationJob,
 }));
 vi.mock('@/lib/original-post-dispatch', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/original-post-dispatch')>(),
@@ -122,6 +128,9 @@ vi.mock('@/lib/kv-storage', () => ({
   getRelationshipProfiles: mocks.getRelationshipProfiles,
   getProductFacts: mocks.getProductFacts,
   getGenerationRuns: mocks.getGenerationRuns,
+  getDraftCandidates: mocks.getDraftCandidates,
+  getSourceDocuments: mocks.getSourceDocuments,
+  getStoryClusters: mocks.getStoryClusters,
   saveGenerationRun: mocks.saveGenerationRun,
   addLearningSignal: mocks.addLearningSignal,
   invalidateAgentConnection: mocks.invalidateAgentConnection,
@@ -440,6 +449,8 @@ beforeEach(() => {
 
   mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings });
   mocks.getGenerationCanary.mockResolvedValue(null);
+  mocks.getGenerationJob.mockResolvedValue(null);
+  mocks.getDraftCandidates.mockResolvedValue([]);
   mocks.reconcileOriginalPostDispatch.mockResolvedValue(null);
   mocks.dispatchOriginalPost.mockResolvedValue({ tweetId: 'x-durable', username: 'geoffwoo' });
   mocks.getAgent.mockResolvedValue(baseAgent);
@@ -475,6 +486,8 @@ beforeEach(() => {
   mocks.getRelationshipProfiles.mockResolvedValue([]);
   mocks.getProductFacts.mockResolvedValue([]);
   mocks.getGenerationRuns.mockResolvedValue([]);
+  mocks.getSourceDocuments.mockResolvedValue([]);
+  mocks.getStoryClusters.mockResolvedValue([]);
   mocks.saveGenerationRun.mockResolvedValue(undefined);
   mocks.getTrendingCache.mockResolvedValue([]);
   mocks.getTrendingCacheSnapshot.mockResolvedValue({
@@ -604,7 +617,7 @@ afterEach(() => {
 });
 
 describe('autopilot remote debug logging', () => {
-  describe('durable original publishing canary', () => {
+  describe('continuous original publishing', () => {
     function setupCanaryPosting(agentId = '13', durable = true) {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-09-28T18:00:00Z'));
@@ -617,22 +630,73 @@ describe('autopilot remote debug logging', () => {
     }
 
     it.each([
-      ['active', ['one'], 1],
-      ['active', ['one', 'two'], 2],
-      ['blocked', ['one', 'two'], 2],
-      ['passed', ['one', 'one'], 1],
-      ['passed', ['one', '  ', ''], 1],
-    ] as const)('holds a ready original while canary is %s with receipts %j', async (status, queuedIds, count) => {
+      ['active', []],
+      ['active', ['one']],
+      ['blocked', []],
+      ['blocked', ['one', 'two']],
+      ['passed', ['one', 'one']],
+    ] as const)('posts one qualified original despite historical canary %s with receipts %j', async (status, queuedIds) => {
       const agent = setupCanaryPosting();
-      mocks.getGenerationCanary.mockResolvedValue({ id: 'canary', status, queuedIds, emptyRuns: 0, limitUsd: 6 });
+      const tweet = editorialTweet({ confidenceScore: .1 });
+      mocks.getQueuedTweets.mockResolvedValue([tweet]);
+      mocks.getGenerationCanary.mockResolvedValue({ id: 'canary', status, queuedIds, emptyRuns: 3, limitUsd: 6 });
       const result = await runAutopilot(agent);
-      expect(result).toMatchObject({ action: 'skipped', reason: expect.stringContaining(`${count}/2 distinct queue-qualified originals`) });
-      expect(result.reason).toContain(`publishing canary ${status}`);
-      expect(mocks.dispatchOriginalPost).not.toHaveBeenCalled();
-      expect(mocks.postTweet).not.toHaveBeenCalled();
+      expect(result.action).toBe('posted');
+      expect(mocks.dispatchOriginalPost).toHaveBeenCalledTimes(1);
       expect(mocks.generateText).not.toHaveBeenCalled();
       expect(mocks.generateTweetBatchV2).not.toHaveBeenCalled();
-      expect(mocks.updateTweet).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: 'posted' }));
+      expect(mocks.getGenerationCanary).not.toHaveBeenCalled();
+    });
+
+    it('carries the same editorial receipt through queue admission and posting', async () => {
+      const agent = setupCanaryPosting('13', false);
+      const tweet = editorialTweet();
+      const candidate = { ...tweet, targetTopic: tweet.topic, rationale: 'Approved once by the editorial judge.' };
+      delete candidate.agentId; // Ranked publishing candidates carry the account through the trusted receipt.
+      mocks.getQueuedTweets.mockResolvedValue([]);
+      mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+      mocks.buildGenerationContext.mockResolvedValue({ ...refillReadyContext, allTweets: [] });
+      mocks.generateTweetBatchV2.mockResolvedValue([candidate]);
+      mocks.createTweetFromGeneratedCandidate.mockResolvedValue(tweet);
+      expect(await refillQueue(agent, 1)).toBe(1);
+      expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledWith(agent.id,
+        expect.objectContaining({ assessmentReceipt: tweet.assessmentReceipt, finalCriticScores: null }),
+        expect.objectContaining({ status: 'queued' }));
+      mocks.getQueuedTweets.mockResolvedValue([tweet]);
+      mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings, durableGenerationEnabled: true });
+      mocks.generateTweetBatchV2.mockClear();
+      expect((await runAutopilot(agent)).action).toBe('posted');
+      expect(mocks.dispatchOriginalPost).toHaveBeenCalledTimes(1);
+      expect(mocks.generateTweetBatchV2).not.toHaveBeenCalled();
+      expect(mocks.generateText).not.toHaveBeenCalled();
+    });
+
+    it.each(['removed', 'edited', 'duplicate'] as const)('preserves the %s gate after production editorial approval', async scenario => {
+      const agent = setupCanaryPosting();
+      const tweet = editorialTweet();
+      mocks.getQueuedTweets.mockResolvedValue([tweet]);
+      if (scenario === 'removed') mocks.getTweet.mockResolvedValue({ ...tweet, status: 'draft' });
+      if (scenario === 'edited') mocks.getTweet.mockResolvedValue({ ...tweet, content: 'Changed by the operator.' });
+      if (scenario === 'duplicate') {
+        mocks.getRecentPostDuplicateIssue.mockReturnValue('Already posted this thought.');
+        mocks.resolveQueuedTweetFailure.mockResolvedValue({ action: 'quarantined', tweet: null, detail: 'Duplicate.' });
+      }
+      expect((await runAutopilot(agent)).action).toBe('skipped');
+      expect(mocks.dispatchOriginalPost).not.toHaveBeenCalled();
+    });
+
+    it.each(['changed', 'withdrawn', 'expired'] as const)('rejects %s live evidence after production editorial approval', async scenario => {
+      const agent = setupCanaryPosting();
+      const now = new Date().toISOString();
+      const tweet = editorialTweet({ content: 'The train schedule is easier to read on paper.',
+        evidenceReferences: [{ sourceDocumentId: 'source-1', url: 'https://example.com/schedule', title: 'Schedule', publisher: 'Example', publishedAt: now, trustTier: 'primary', claim: 'The current train schedule.' }] });
+      mocks.getQueuedTweets.mockResolvedValue([tweet]);
+      mocks.getSourceDocuments.mockResolvedValue([{ id: 'source-1', contentHash: scenario === 'changed' ? 'different' : 'source-hash',
+        fetchedAt: now, metadata: scenario === 'withdrawn' ? { withdrawn: true } : scenario === 'expired' ? { expiresAt: new Date(Date.now() - 1).toISOString() } : {} }]);
+      const result = await runAutopilot(agent);
+      expect(result.action).toBe('skipped');
+      expect(mocks.dispatchOriginalPost).not.toHaveBeenCalled();
+      expect(mocks.updateTweet).toHaveBeenCalledWith(tweet.id, expect.objectContaining({ status: 'quarantined', quarantineReason: expect.stringContaining('evidence changed or was withdrawn') }));
     });
 
     it.each([null, { id: 'canary', status: 'passed', queuedIds: ['one', 'two'], emptyRuns: 0, limitUsd: 6 }])(

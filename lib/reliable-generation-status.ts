@@ -1,10 +1,11 @@
 import {aiBudgetDay, committedAiSpend, getAiBudgetSummary, type AiSpendLedger} from './ai-budget';
-import {getGenerationJob, getGenerationCanary} from './generation-job';
-import {getAiOperationalState, getGenerationRuns, getTweets, getAgent, getIdeaCandidates, getDraftCandidates} from './kv-storage';
+import {getGenerationJob, getGenerationCanary, getRetiredGenerationCanary, type GenerationJob} from './generation-job';
+import {getAiOperationalState, getGenerationRuns, getTweets, getAgent, getIdeaCandidates, getDraftCandidates, getProtocolSettings} from './kv-storage';
 import type {GenerationRunTrace, Tweet, IdeaCandidate, DraftCandidate} from './types';
 import {editorialRejectionCodes} from './candidate-disposition';
 import {getOriginalPostDispatch} from './original-post-dispatch';
 import {generationFailureDiagnostics} from './original-queue-blocker';
+import {ORIGINAL_EDITORIAL_POLICY_VERSION, ORIGINAL_EDITORIAL_QUALITY_THRESHOLD} from './original-editorial-policy';
 
 function ratio(a:number,b:number) { return b ? a/b : null; }
 export function summarizeOriginalDelivery(tweets:Tweet[], runs:GenerationRunTrace[], ledger:AiSpendLedger|null, day=aiBudgetDay(), artifacts?:{ideas:IdeaCandidate[];drafts:DraftCandidate[]}) {
@@ -51,30 +52,41 @@ export function summarizeOriginalDelivery(tweets:Tweet[], runs:GenerationRunTrac
   };
 }
 
+export function originalGenerationNextAction(job: GenerationJob | null, publishableDepth: number, targetDepth: number, now = Date.now()): string {
+  if (publishableDepth >= targetDepth) return 'Reserve target met; wait for consumption.';
+  const retry = job && job.nextAttemptAt > now
+    ? `at or after ${new Date(job.nextAttemptAt).toISOString()}` : 'on the next generation tick';
+  let action: string;
+  if (job?.blocker === 'budget_daily_exhausted') action = `Resume generation after the Pacific-day allowance resets ${retry}; earlier spending remains charged.`;
+  else if (job?.blocker === 'budget_job_exhausted') action = `Start a fresh job ${retry}, within the remaining daily allowance; retain paid artifacts.`;
+  else if (job?.blocker === 'malformed_output') action = `Inspect the saved response for a parser or contract correction; automatic retry ${retry}.`;
+  else if (job?.blocker === 'reserve_ready' || job?.status === 'queued' && (job.checkpoints.reserveIdeas as string[] || []).length) action = `Resume the next saved reserve idea ${retry}.`;
+  else if (!job || job.status === 'failed' || job.status === 'queued' || job.expiresAt <= now) action = `Start a new eligible generation job ${retry}.`;
+  else action = `Resume the saved ${job.stage} stage ${retry}; retain completed paid work.`;
+  return publishableDepth > 0 ? `${publishableDepth} original${publishableDepth === 1 ? ' is' : 's are'} ready for the next posting slot. ${action}` : action;
+}
+
 export async function getReliableGenerationStatus(agentId:string) {
-  const [job,canary,budget,tweets,runs,ledger,agent,dispatch,ideas,drafts]=await Promise.all([
+  const [job,canary,budget,tweets,runs,ledger,agent,dispatch,ideas,drafts,retired,settings]=await Promise.all([
     getGenerationJob(agentId),getGenerationCanary(agentId),getAiBudgetSummary(agentId),getTweets(agentId),getGenerationRuns(agentId,120),getAiOperationalState<AiSpendLedger>(agentId,'spend'),getAgent(agentId),getOriginalPostDispatch(agentId),getIdeaCandidates(agentId,600),getDraftCandidates(agentId,600),
+    getRetiredGenerationCanary(agentId),getProtocolSettings(agentId),
   ]);
   const {inspectPublishableOriginalQueue}=await import('./autopilot');
   const publishable=agent ? await inspectPublishableOriginalQueue(agent) : [];
-  const campaignCommittedUsd=Object.values(ledger?.attempts || {}).filter(a=>a.campaignId===canary?.id).reduce((n,a)=>n+committedAiSpend(a),0);
-  const blocker=dispatch?.state==='dispatched' ? 'x_publication_unresolved' : canary?.status==='blocked' ? canary.blockedReason || 'canary_empty_limit' : job?.blocker || null;
-  const nextAction=blocker==='x_publication_unresolved' ? 'Reconcile the official X receipt before another original write.' : blocker==='canary_empty_limit' ? 'Inspect the shared failed stage before any further paid canary work.'
-    : blocker==='recovery_context_mismatch' ? 'Reconcile current account context with saved paid work before another generation call.'
-    : blocker==='malformed_output' ? 'Inspect the saved raw response and fix its parser or contract. No unchanged paid retry is scheduled before subject expiry.'
-    : blocker==='reserve_ready' ? 'Resume the next qualified reserve idea.'
-    : blocker?.includes('budget') ? 'Wait for funded capacity; preserve all unresolved charges.'
-    : blocker ? 'Resume the saved stage at nextAttemptAt; inspect repeated failures without discarding paid artifacts.'
-    : publishable.length>=5 ? 'Reserve target met; wait for consumption.' : 'Continue the next unfinished generation stage.';
+  const campaignCommittedUsd=canary ? Object.values(ledger?.attempts || {}).filter(a=>a.campaignId===canary.id).reduce((n,a)=>n+committedAiSpend(a),0) : 0;
+  const targetDepth = Math.max(1, settings.minQueueSize || 5);
+  const blocker=dispatch?.state==='dispatched' ? 'x_publication_unresolved' : job?.blocker || null;
+  const nextAction=blocker==='x_publication_unresolved' ? 'Reconcile the official X receipt before another original write.'
+    : originalGenerationNextAction(job,publishable.length,targetDepth);
   const trace=runs.find(r=>r.id===job?.id);
   const failureDiagnostics=generationFailureDiagnostics(job?.id,drafts,job?.checkpoints?.selectedIdeas as string[] | undefined);
-  return {publishableDepth:publishable.length,targetDepth:5,blocker,nextAction,
-    productionFlow: agentId === '13' ? {version:'simple-original-3',stages:['subjects','ideas','drafts','assessment','queue'],maximumModelCallsPerAttempt:3,automaticRewrites:0,activeJobFlow:job?.checkpoints.originalProductionVersion || 'legacy-existing-job',editorialPolicy:'current-production-score-thresholds',sourceCopyPolicy:'semantic-assessment-with-receipt',qualification:'one-shared-final-decision'} : null,
+  return {publishableDepth:publishable.length,targetDepth,blocker,nextAction,
+    productionFlow: agentId === '13' ? {version:'continuous-original-1',stages:['subjects','ideas','drafts','assessment','queue'],maximumModelCallsPerAttempt:3,automaticRewrites:0,activeJobFlow:job?.checkpoints.originalProductionVersion || 'legacy-existing-job',editorialPolicy:ORIGINAL_EDITORIAL_POLICY_VERSION,editorialQualityThreshold:ORIGINAL_EDITORIAL_QUALITY_THRESHOLD,sourceCopyPolicy:'semantic-assessment-with-receipt',qualification:'one-shared-final-decision'} : null,
     rejectionCounts:failureDiagnostics.assessedDrafts ? failureDiagnostics.assessedRejectionCounts : failureDiagnostics.hasActiveSelection ? failureDiagnostics.currentPreflightRejectionCounts : trace?.rejectionCounts || {},
     failureDiagnostics,historicalRejectionCounts:trace?.rejectionCounts || {},
     publication:dispatch?{tweetId:dispatch.tweetId,state:dispatch.state,xTweetId:dispatch.receipt?.tweetId || null,nextReconcileAt:dispatch.nextReconcileAt}:null,
     job:job?{id:job.id,version:job.version,policy:job.policy,stage:job.stage,status:job.status,blocker:job.blocker,nextAttemptAt:job.nextAttemptAt,expiresAt:job.expiresAt}:null,
-    canary:canary?{...canary,committedUsd:campaignCommittedUsd,remainingUsd:Math.max(0,canary.limitUsd-campaignCommittedUsd)}:null,
+    canary:canary?{...canary,runtimeGate:false,retiredAt:retired?.retiredAt || null,archiveNamespace:retired ? 'generation-canary-retired' : null,committedUsd:campaignCommittedUsd,remainingUsd:Math.max(0,canary.limitUsd-campaignCommittedUsd)}:null,
     budget,delivery:summarizeOriginalDelivery(tweets,runs,ledger,aiBudgetDay(),{ideas,drafts}),
   };
 }

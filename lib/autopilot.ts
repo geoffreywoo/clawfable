@@ -52,7 +52,7 @@ import {
 import { generatePublishingBatchV2 } from './publishing-v2';
 import { getCommittedTweetCopyMemoryV2 } from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
-import { hasCurrentOriginalAssessmentReceipt } from './original-assessment-receipt';
+import { hasCurrentOriginalAssessmentReceipt, hasCurrentProductionEditorialReceipt } from './original-assessment-receipt';
 import { retainQualifiedTopicPackets } from './topic-intelligence-refresh';
 import { buildGenerationContext } from './generation-context';
 import { buildLearnings } from './performance';
@@ -509,7 +509,7 @@ function clearsQueuedPostPreflight(
       tweet,
       nativeContext?.allTweets || [],
     ).issue)
-    && !getAuthorityProofIssue(tweet.content)
+    && (hasCurrentProductionEditorialReceipt(tweet) || !getAuthorityProofIssue(tweet.content))
     && !getQueuedClaimEvidenceIssue(tweet, queuedOperatorEvidence(nativeContext))
     && !getQueuedSourceCopyIssue(tweet)
     && !getRecentPostDuplicateIssue(tweet.content, recentPostedContent)
@@ -592,6 +592,7 @@ async function rescoreQueuedTweetsForCurrentPolicy(
       : null;
     const accountMarginIssue = (
       !originIssue
+      && !hasCurrentProductionEditorialReceipt(tweet)
       && tweet.pipelineVersion === 'v2'
       && tweet.generationSurface === 'original'
       && typeof tweet.finalCriticScores?.qualityMargin === 'number'
@@ -1029,7 +1030,7 @@ async function validateQueuedTweetsForPosting(
       continue;
     }
 
-    const authorityIssue = getAuthorityProofIssue(queuedTweet.content);
+    const authorityIssue = hasCurrentProductionEditorialReceipt(queuedTweet) ? null : getAuthorityProofIssue(queuedTweet.content);
     if (authorityIssue) {
       await updateTweet(queuedTweet.id, {
         status: 'quarantined',
@@ -1637,16 +1638,6 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
         : emptyQueueReason,
       repliesSent,
     };
-  }
-
-  if (durableGenerationEnabled(agentId, settings)) {
-    const canary = await getGenerationCanary(agentId);
-    const qualifiedCount = new Set((canary?.queuedIds || []).filter(id => typeof id === 'string' && id.trim()).map(id => id.trim())).size;
-    if (canary && (canary.status !== 'passed' || qualifiedCount < 2)) {
-      return { agentId, action: 'skipped', repliesSent,
-        reason: `Original posting held: publishing canary ${canary.status}; ${qualifiedCount}/2 distinct queue-qualified originals. ${canary.status === 'blocked'
-          ? 'Resolve the canary blocker before posting.' : 'Finish the bounded canary before posting.'}` };
-    }
   }
 
   // Pick tweet with diversity awareness (avoids consecutive same-format/topic + near-duplicates)
@@ -2939,7 +2930,6 @@ export async function refillQueue(
   try {
     const workerSettings = await getProtocolSettings(agent.id);
     if (durableGenerationEnabled(agent.id,workerSettings) && !options.generationWorker) return 0;
-    if (durableGenerationEnabled(agent.id,workerSettings) && (await getGenerationCanary(agent.id))?.status==='blocked') return 0;
     const entitlement = await assertAgentAutomationEntitlement(agent.id, { agent });
     let refillCount = Math.min(2, Math.max(0, count));
     if (refillCount <= 0) return 0;
@@ -3138,7 +3128,7 @@ export async function refillQueue(
           await rejectCandidate(item, 'missing_v2_provenance');
           continue;
         }
-        const originIssue = getGeneratedPublishIssue(item, { accountHandle: agent.handle });
+        const originIssue = getGeneratedPublishIssue(item, { agentId: agent.id, accountHandle: agent.handle });
         if (originIssue) {
           await rejectCandidate(item, 'generated_publish_issue', originIssue);
           continue;
@@ -3196,7 +3186,7 @@ export async function refillQueue(
           await rejectCandidate(item, 'autopost_policy', policyIssue);
           continue;
         }
-        const authorityIssue = getAuthorityProofIssue(item.content);
+        const authorityIssue = hasCurrentProductionEditorialReceipt(item, { agentId: agent.id }) ? null : getAuthorityProofIssue(item.content);
         if (authorityIssue) {
           await rejectCandidate(item, 'unearned_authority', authorityIssue);
           continue;

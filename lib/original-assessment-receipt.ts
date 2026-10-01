@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Tweet } from './types';
+import { isCurrentOriginalEditorialDecision } from './original-editorial-policy';
 import {
   getPublishingV2AutopostQualityMargin,
   getPublishingV2FinalCriticVersion,
@@ -35,15 +36,27 @@ function evidenceContextHash(candidate: ReceiptCandidate, receipt: Receipt): str
   ]);
 }
 
+/** Bind the one editorial decision to its author, context and publishing lineage. */
+function editorialBindingHash(candidate: ReceiptCandidate, receipt: Receipt): string {
+  return hash([
+    receipt.agentId, candidate.generationSurface, candidate.generationRunId,
+    candidate.ideaId, candidate.draftCandidateId, candidate.voiceCorpusVersion,
+    receipt.contentHash, receipt.policyVersion, receipt.criticVersion,
+    receipt.assessedAt, receipt.validUntil || null, receipt.editorialDecision,
+  ]);
+}
+
 /** New receipts attest to one completed semantic assessment; legacy receipts stay legacy. */
 export function createOriginalAssessmentReceipt(candidate: ReceiptCandidate, base: Receipt): Receipt {
   const assessment = candidate.finalCriticScores?.sourceCopyAssessment;
-  if (!assessment) return base;
+  const editorialDecision = base.editorialDecision || candidate.assessmentReceipt?.editorialDecision;
+  if (!assessment && !editorialDecision) return base;
   const receipt: Receipt = {
     ...base,
     evidenceContextHash: evidenceContextHash(candidate, base),
-    sourceCopyAssessment: assessment,
+    ...(editorialDecision ? { agentId: candidate.agentId || base.agentId, editorialDecision } : { sourceCopyAssessment: assessment }),
   };
+  if (editorialDecision) receipt.editorialBindingHash = editorialBindingHash(candidate, receipt);
   const issue = getOriginalAssessmentReceiptIssue({ ...candidate, assessmentReceipt: receipt });
   if (issue) throw new Error(issue);
   return receipt;
@@ -61,15 +74,31 @@ export function getOriginalAssessmentReceiptIssue(candidate: ReceiptCandidate, n
   if (receipt.validUntil && (!Number.isFinite(Date.parse(receipt.validUntil)) || Date.parse(receipt.validUntil) <= now)) {
     return 'Subject evidence expired; reassessment with current evidence is required.';
   }
-  if (!receipt.sourceCopyAssessment) return null;
+  if (!receipt.sourceCopyAssessment && !receipt.editorialDecision) return null;
   if (candidate.generationSurface !== 'original' || candidate.pipelineVersion !== 'v2'
     || candidate.contentProvenance !== 'generated_v2') return 'Original assessment requires generated original provenance.';
-  const assessment = receipt.sourceCopyAssessment;
-  if (!Array.isArray(assessment.sources)) return 'Source-copy assessment inputs are unavailable; reassessment is required.';
-  const parsed = parseSourceCopyAssessment(assessment, sourceCopyFingerprint(candidate.content, assessment.sources));
-  if (!parsed || parsed.verdict !== 'clear' || !candidate.finalCriticScores?.sourceCopyAssessment
-    || hash(assessment) !== hash(candidate.finalCriticScores?.sourceCopyAssessment)) {
-    return 'Source-copy assessment is missing, changed or not clear; reassessment is required.';
+  if (receipt.editorialDecision) {
+    const decision = receipt.editorialDecision;
+    if (receipt.agentId !== '13' || (candidate.agentId && candidate.agentId !== receipt.agentId)) {
+      return 'Original editorial assessment belongs to another account.';
+    }
+    if (!isCurrentOriginalEditorialDecision(decision)
+      || decision.policyVersion !== candidate.qualityPolicyVersion || decision.criticVersion !== candidate.finalCriticVersion
+      || candidate.finalCriticVerdict !== 'allow' || decision.provider !== candidate.finalCriticProvider
+      || decision.model !== candidate.finalCriticModel
+      || !candidate.generationRunId || !candidate.ideaId || !candidate.draftCandidateId || !candidate.voiceCorpusVersion
+      || !Number.isFinite(Date.parse(receipt.assessedAt))
+      || receipt.editorialBindingHash !== editorialBindingHash(candidate, receipt)) {
+      return 'Original editorial assessment is missing, changed or not approved; reassessment is required.';
+    }
+  } else {
+    const assessment = receipt.sourceCopyAssessment!;
+    if (!Array.isArray(assessment.sources)) return 'Source-copy assessment inputs are unavailable; reassessment is required.';
+    const parsed = parseSourceCopyAssessment(assessment, sourceCopyFingerprint(candidate.content, assessment.sources));
+    if (!parsed || parsed.verdict !== 'clear' || !candidate.finalCriticScores?.sourceCopyAssessment
+      || hash(assessment) !== hash(candidate.finalCriticScores?.sourceCopyAssessment)) {
+      return 'Source-copy assessment is missing, changed or not clear; reassessment is required.';
+    }
   }
   if (receipt.evidenceContextHash !== evidenceContextHash(candidate, receipt)) {
     return 'Assessed factual evidence changed; reassessment is required.';
@@ -89,10 +118,20 @@ export function getOriginalAssessmentReceiptIssue(candidate: ReceiptCandidate, n
   return null;
 }
 
+/** Current production approval replaces scalar quality and style vetoes for this account. */
+export function hasCurrentProductionEditorialReceipt(candidate: ReceiptCandidate, options: {
+  agentId?: string; now?: number;
+} = {}): boolean {
+  return Boolean(candidate.assessmentReceipt?.editorialDecision
+    && (candidate.agentId || options.agentId || candidate.assessmentReceipt.agentId) === '13'
+    && !getOriginalAssessmentReceiptIssue({ ...candidate, agentId: candidate.agentId || options.agentId }, options.now));
+}
+
 /** Reuse only this account's completed original judgment; live evidence/history checks remain mandatory. */
 export function hasCurrentOriginalAssessmentReceipt(candidate: ReceiptCandidate, options: {
   agentId?: string; accountHandle?: string; now?: number;
 } = {}): boolean {
+  if (hasCurrentProductionEditorialReceipt(candidate, options)) return true;
   if ((candidate.agentId || options.agentId) !== '13' || candidate.generationSurface !== 'original'
     || !candidate.assessmentReceipt?.sourceCopyAssessment
     || getOriginalAssessmentReceiptIssue(candidate, options.now)) return false;

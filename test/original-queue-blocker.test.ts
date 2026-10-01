@@ -7,10 +7,11 @@ const job = { status: 'deferred', stage: 'tweet_writing', blocker: 'reserve_read
   nextAttemptAt: now - 1000, expiresAt: now + 3600000 } as GenerationJob;
 const canary = { status: 'blocked', emptyRuns: 3 } as GenerationCanary;
 
-it('reports an operational recovery stop without inventing editorial failures', () => {
+it('does not present retired canary recovery metadata as a runtime stop', () => {
   const reason = originalQueueBlockerReason(null, { ...canary, emptyRuns: 0, blockedReason: 'recovery_context_mismatch' });
-  expect(reason).toContain('refreshed account context started a new job');
+  expect(reason).toContain('next scheduled tick');
   expect(reason).not.toContain('editorial-empty');
+  expect(reason).not.toContain('no automatic');
 });
 
 it('separates repaired parent failures from completed current assessments', () => {
@@ -25,14 +26,25 @@ it('separates repaired parent failures from completed current assessments', () =
   expect(result.historicalPreflightRejectionCounts).toEqual({ missing_verified_entity_tag: 1 });
 });
 
-it('prioritizes the canary stop over an overdue reserve retry and selection codes', () => {
+it('reports the actual reserve retry instead of the historical canary stop', () => {
   const reason = originalQueueBlockerReason(job, canary,
     { idea_not_selected: 9, final_technical_credibility_below_floor: 3 }, now);
-  expect(reason).toContain('canary blocked after 3');
+  expect(reason).toContain('reserve_ready');
   expect(reason).toContain('final_technical_credibility_below_floor (3)');
   expect(reason).not.toContain('idea_not_selected');
-  expect(reason).toContain('no automatic retry');
-  expect(reason).not.toContain('resume saved work');
+  expect(reason).not.toContain('no automatic retry');
+  expect(reason).toContain('resume saved work');
+  expect(reason).toContain('next scheduled generation tick');
+});
+
+it('names finite daily and per-job budget retries separately', () => {
+  const daily=originalQueueBlockerReason({...job,blocker:'budget_daily_exhausted',nextAttemptAt:now+3600000},canary,{},now);
+  expect(daily).toContain('Pacific-day AI allowance');
+  expect(daily).toContain('2026-09-26T20:00:00.000Z');
+  const perJob=originalQueueBlockerReason({...job,status:'failed',blocker:'budget_job_exhausted',nextAttemptAt:now+1800000},canary,{},now);
+  expect(perJob).toContain('start a fresh eligible job');
+  expect(perJob).toContain('2026-09-26T19:30:00.000Z');
+  expect(perJob).toContain('Paid artifacts remain archived');
 });
 
 it('does not promise reuse of expired evidence', () => {

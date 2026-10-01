@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { aiBudgetDay, reserveAiSpendInLedger, committedAiSpend, updateAiAttempt, type AiSpendAttempt, type AiSpendLedger } from '@/lib/ai-budget';
+import { aiBudgetDay, nextAiBudgetDayAt, AiBudgetError, reserveAiSpendInLedger, committedAiSpend, updateAiAttempt, type AiSpendAttempt, type AiSpendLedger } from '@/lib/ai-budget';
 import { mutateAiOperationalState, getAiOperationalState } from '@/lib/kv-storage';
 const day = '2026-09-07';
 const context = { agentId: 'budget-test', operation: 'generation', runId: 'run', runLimitUsd: 3 };
@@ -8,6 +8,22 @@ function attempt(id: string, amount: number, runId = 'run'): AiSpendAttempt {
     reservedUsd: amount, observedUsd: null, state: 'dispatched', createdAt: '2026-09-07T20:00:00Z' };
 }
 describe('durable AI admission', () => {
+  it('reports whether a job or daily allowance rejected a reservation without changing receipts', () => {
+    const ledger=reserveAiSpendInLedger(null,context,attempt('1',2),day);
+    expect(()=>reserveAiSpendInLedger(ledger,context,attempt('2',2),day)).toThrowError(expect.objectContaining({code:'budget_exhausted',scope:'job'}));
+    expect(()=>reserveAiSpendInLedger(ledger,context,attempt('2',2),day,3)).toThrowError(expect.objectContaining({code:'budget_exhausted',scope:'daily'}));
+    const campaign={...context,runId:'fresh',campaignId:'screen',campaignLimitUsd:1};
+    expect(()=>reserveAiSpendInLedger(null,campaign,{...attempt('new',2,'fresh'),campaignId:'screen'},day)).toThrowError(expect.objectContaining({scope:'campaign'}));
+    expect(Object.keys(ledger.attempts)).toEqual(['1']);
+    expect(new AiBudgetError('budget_exhausted','job').message).toBe('budget_exhausted');
+  });
+  it.each([
+    ['2026-09-08T06:59:59Z','2026-09-08T07:00:00Z'],
+    ['2026-11-01T07:30:00Z','2026-11-02T08:00:00Z'],
+    ['2026-03-08T08:30:00Z','2026-03-09T07:00:00Z'],
+  ])('resumes the daily allowance after Pacific midnight from %s', (now,next)=>{
+    expect(nextAiBudgetDayAt(Date.parse(now))).toBe(Date.parse(next));
+  });
   it('enforces run and account allowance including unresolved dispatched attempts', () => {
     const first = reserveAiSpendInLedger(null, context, attempt('1', 2), day);
     expect(() => reserveAiSpendInLedger(first, context, attempt('2', 2), day)).toThrow('budget_exhausted');

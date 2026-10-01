@@ -22,7 +22,7 @@ export function generationFailureDiagnostics(jobId: string | undefined, drafts: 
 /** Explain a missed original slot from durable state without invoking generation. */
 export function originalQueueBlockerReason(
   job: GenerationJob | null,
-  canary: GenerationCanary | null,
+  _canary: GenerationCanary | null,
   rejectionCounts: Record<string, number> = {},
   now = Date.now(),
 ): string {
@@ -32,18 +32,18 @@ export function originalQueueBlockerReason(
     .slice(0, 3)
     .map(([code, count]) => `${code} (${count})`);
   const gates = failedGates.length ? ` Latest failed gates: ${failedGates.join(', ')}.` : '';
-  if (canary?.status === 'blocked') {
-    if (canary.blockedReason === 'recovery_context_mismatch') {
-      return 'Original queue empty: paid-work recovery stopped because refreshed account context started a new job. Next: validate context compatibility and resume saved drafts; no automatic paid retry is scheduled.';
-    }
-    return `Original queue empty: canary blocked after ${canary.emptyRuns} consecutive editorial-empty attempts.${gates} Next: validate an offline fix before resuming paid canary work; no automatic retry is scheduled.`;
-  }
   if (!job) return 'Original queue empty: no active generation job. Next: the generation worker will attempt refill on its next scheduled tick.';
-  if (job.expiresAt <= now) {
-    return `Original queue empty: saved subject evidence expired at ${new Date(job.expiresAt).toISOString()}.${gates} Next: the generation worker must select current evidence before resuming.`;
-  }
   const retry = job.nextAttemptAt > now
     ? `on the first generation tick at or after ${new Date(job.nextAttemptAt).toISOString()}`
     : 'on the next scheduled generation tick';
+  if (job.blocker === 'budget_daily_exhausted') {
+    return `Original queue empty: the Pacific-day AI allowance is exhausted. Next: generation resumes ${retry}, with current evidence and all earlier spending retained.`;
+  }
+  if (job.blocker === 'budget_job_exhausted') {
+    return `Original queue empty: this generation job reached its spending cap.${gates} Next: start a fresh eligible job ${retry}, within the remaining daily allowance. Paid artifacts remain archived.`;
+  }
+  if (job.expiresAt <= now) {
+    return `Original queue empty: saved subject evidence expired at ${new Date(job.expiresAt).toISOString()}.${gates} Next: the generation worker must select current evidence before resuming.`;
+  }
   return `Original queue empty: generation ${job.status} at ${job.stage} (${job.blocker || 'in progress'}).${gates} Next: ${job.status === 'failed' ? 'attempt a new eligible job' : 'resume saved work'} ${retry}, subject to budget and evidence checks.`;
 }

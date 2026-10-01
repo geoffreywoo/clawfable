@@ -67,13 +67,26 @@ export interface AiSpendLedger {
   topUps?: Record<string, { day: string; amountUsd: number; purpose: 'generation'; reason: string; createdAt: string }>;
   outputs?: Record<string, { day: string; tweetId: string; runId: string; contentHash: string }>;
 }
+export type AiBudgetExhaustionScope = 'job' | 'daily' | 'campaign' | 'operation';
 export class AiBudgetError extends Error {
-  constructor(public readonly code: 'budget_exhausted' | 'budget_unavailable' | 'attribution_missing' | 'evaluation_deferred') {
+  constructor(public readonly code: 'budget_exhausted' | 'budget_unavailable' | 'attribution_missing' | 'evaluation_deferred',
+    public readonly scope?: AiBudgetExhaustionScope) {
     super(code); this.name = 'AiBudgetError';
   }
 }
 export function aiBudgetDay(now = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}
+/** First instant of the next Pacific budget day, including 23/25-hour DST days. */
+export function nextAiBudgetDayAt(now = Date.now()): number {
+  const day = aiBudgetDay(new Date(now));
+  let before = Math.floor(now), after = before + 26 * 3600_000;
+  while (after - before > 1) {
+    const midpoint = Math.floor((before + after) / 2);
+    if (aiBudgetDay(new Date(midpoint)) === day) before = midpoint;
+    else after = midpoint;
+  }
+  return after;
 }
 export function aiSpendContext(agentId: string, operation: string, runId: string = randomUUID(), runLimitUsd?: number): AiSpendContext {
   return { agentId, operation, runId, ...(runLimitUsd === undefined ? {} : { runLimitUsd }) };
@@ -124,16 +137,16 @@ export function reserveAiSpendInLedger(ledger: AiSpendLedger | null, context: Ai
     const research = new Set(['research-pipeline','network-topic-intelligence','seed-synthesis']);
     const bucket = research.has(context.operation) ? 'research' : 'background';
     const used = attempts.filter(a=>a.day===day && a.operation !== 'generation' && (research.has(a.operation)?'research':'background')===bucket).reduce((n,a)=>n+committedAiSpend(a),0);
-    if (used + attempt.reservedUsd > (bucket === 'research' ? 2 : 3) + 1e-9) throw new AiBudgetError('budget_exhausted');
+    if (used + attempt.reservedUsd > (bucket === 'research' ? 2 : 3) + 1e-9) throw new AiBudgetError('budget_exhausted', 'operation');
   }
   const daily = (value.openingBalance?.day === day ? value.openingBalance.unresolvedUsd : 0) + attempts.filter(a => a.day === day).reduce((n, a) => n + committedAiSpend(a), 0);
   const run = attempts.filter(a => a.runId === context.runId).reduce((n, a) => n + committedAiSpend(a), 0);
   const downstream = context.downstreamReserveUsd ?? value.completionHolds?.[context.runId]?.usd ?? 0;
   const otherHolds = Object.entries(value.completionHolds || {}).filter(([runId, hold]) => runId !== context.runId && hold.day === day).reduce((sum,[,hold])=>sum+hold.usd,0);
   const campaign = context.campaignId ? attempts.filter(a => a.campaignId === context.campaignId).reduce((n,a)=>n+committedAiSpend(a),0) : 0;
-  if (context.campaignId && campaign + attempt.reservedUsd > (context.campaignLimitUsd ?? 12) + 1e-9) throw new AiBudgetError('budget_exhausted');
-  if (daily + otherHolds + attempt.reservedUsd + Math.max(downstream, publishingReserveUsd) > dailyLimitUsd + 1e-9
-    || run + attempt.reservedUsd + downstream > (context.runLimitUsd ?? dailyLimitUsd) + 1e-9) throw new AiBudgetError('budget_exhausted');
+  if (daily + otherHolds + attempt.reservedUsd + Math.max(downstream, publishingReserveUsd) > dailyLimitUsd + 1e-9) throw new AiBudgetError('budget_exhausted', 'daily');
+  if (context.campaignId && campaign + attempt.reservedUsd > (context.campaignLimitUsd ?? 12) + 1e-9) throw new AiBudgetError('budget_exhausted', 'campaign');
+  if (run + attempt.reservedUsd + downstream > (context.runLimitUsd ?? dailyLimitUsd) + 1e-9) throw new AiBudgetError('budget_exhausted', 'job');
   return { ...value, day, completionHolds: { ...value.completionHolds, [context.runId]: { day, usd: downstream } }, attempts: { ...value.attempts, [attempt.id]: attempt } };
 }
 export function resolveAccountDailyAiLimit(handle: string, configuredAntiHunterLimit = process.env.ANTIHUNTER_DAILY_AI_LIMIT_USD): number | null {
@@ -167,7 +180,7 @@ export async function reserveAiAttempt(context: AiSpendContext, target: { model:
     if (context.agentId === '13' && (await getProtocolSettings(context.agentId)).durableGenerationEnabled) context = {...context,allocationPolicy:true};
     const dailyLimitUsd = await getAccountDailyAiLimit(context.agentId);
     if (dailyLimitUsd === null) return null;
-    if (dailyLimitUsd <= 0) throw new AiBudgetError('budget_exhausted');
+    if (dailyLimitUsd <= 0) throw new AiBudgetError('budget_exhausted', 'daily');
     let publishingReserveUsd = 0;
     if (BACKGROUND_OPERATIONS.has(context.operation)) {
       const agent = await getAgent(context.agentId);
