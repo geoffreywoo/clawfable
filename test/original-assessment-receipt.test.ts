@@ -149,9 +149,10 @@ describe('production editorial approval receipt', () => {
     expect(getGeneratedPublishIssue(tweet, { accountHandle: 'geoffwoo' })).toBeTruthy();
   });
 
-  it('requires complete editorial approval and current voice even on the new policy', () => {
+  it('carries the approved voice snapshot across routine corpus refreshes while preserving ownership and receipt requirements', () => {
     const tweet = editorialTweet();
-    expect(getGeneratedPublishIssue(tweet, { currentVoiceCorpusVersion: 'changed-voice' })).toContain('current voice corpus');
+    expect(getGeneratedPublishIssue(tweet, { currentVoiceCorpusVersion: 'changed-voice' })).toBeNull();
+    expect(tweet.voiceCorpusVersion).toBe('voice-corpus-v1-current');
     expect(getGeneratedPublishIssue(tweet, { agentId: 'another-account' })).toContain('another account');
     delete tweet.agentId;
     expect(getGeneratedPublishIssue(tweet, { agentId: 'another-account' })).toContain('another account');

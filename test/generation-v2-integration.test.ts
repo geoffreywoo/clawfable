@@ -394,6 +394,80 @@ describe('generateTweetBatchV2 integration', () => {
     expect(mocks.durableState.get('generation-job').id).toBe(saved.id);
   });
 
+  it('migrates a corpus-keyed job once and reuses paid responses across later corpus refreshes', async () => {
+    const durableInput = { ...input, agentId: '13', count: 1, durableGeneration: true,
+      modelStack: 'publishing_v2_astra' as const,
+      learnings: { ...input.learnings, voiceCorpus: { snapshotId: 'captured-corpus', active: true } } };
+    const old = new GenerationJobSession('13', (await claimGenerationJob('13', durableInput, 'policy-with-old-corpus'))!);
+    const paidKey = 'call:tweet_writing:paid';
+    const paid = { requestKey: paidKey, result: { text: 'already-paid response' } };
+    await old.checkpoint(paidKey, async () => paid);
+    await old.checkpoint('drafts_ready:idea', async () => [{ id: 'paid-draft' }]);
+    await old.finish([], 'provider_failure');
+    const refreshed = { ...durableInput, learnings: { ...durableInput.learnings,
+      voiceCorpus: { snapshotId: 'hourly-refresh-one', active: true } } };
+    mocks.generateOriginalProduction.mockImplementation(async next => {
+      expect(next.jobSession.job.id).toBe(old.job.id);
+      expect(next.learnings.voiceCorpus.snapshotId).toBe('captured-corpus');
+      const replay = await next.jobSession.checkpoint(paidKey, async () => {
+        throw new Error('must not buy an already-paid stage');
+      });
+      expect(replay).toEqual(paid);
+      await next.jobSession.checkpoint('drafts_ready:idea', async () => [{ id: 'replayed-paid-draft' }]);
+      throw new Error('provider_pending');
+    });
+    await expect(generateTweetBatchV2(refreshed)).rejects.toThrow('provider_pending');
+    const migrated = structuredClone(mocks.durableState.get('generation-job'));
+    expect(migrated.policy).not.toBe('policy-with-old-corpus');
+    mocks.durableState.set('generation-job', { ...migrated, nextAttemptAt: 0 });
+    await expect(generateTweetBatchV2({ ...refreshed, learnings: { ...refreshed.learnings,
+      voiceCorpus: { snapshotId: 'hourly-refresh-two', active: true } } })).rejects.toThrow('provider_pending');
+    expect(mocks.durableState.get('generation-job').policy).toBe(migrated.policy);
+    expect(mocks.durableState.get('generation-job').checkpoints).toEqual(migrated.checkpoints);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('resumes the frozen paid job after a routine corpus refresh without bypassing its retry', async () => {
+    const durableInput = { ...input, agentId: '13', count: 1, durableGeneration: true,
+      modelStack: 'publishing_v2_astra' as const,
+      learnings: { ...input.learnings, voiceCorpus: { snapshotId: 'captured-corpus', active: true } } };
+    mocks.generateOriginalProduction.mockImplementationOnce(async next => {
+      await next.jobSession.checkpoint('call:tweet_writing:paid', async () => ({ result: { text: 'paid response' } }));
+      await next.jobSession.checkpoint('drafts_ready:idea', async () => [{ id: 'paid-draft' }]);
+      throw new Error('provider_pending');
+    });
+    await expect(generateTweetBatchV2(durableInput)).rejects.toThrow('provider_pending');
+    const saved = structuredClone(mocks.durableState.get('generation-job'));
+    const refreshed = { ...durableInput, learnings: { ...durableInput.learnings,
+      voiceCorpus: { snapshotId: 'hourly-refreshed-corpus', active: true } } };
+    expect(await generateTweetBatchV2(refreshed)).toEqual([]);
+    expect(mocks.generateOriginalProduction).toHaveBeenCalledTimes(1);
+    mocks.durableState.set('generation-job', { ...saved, nextAttemptAt: 0 });
+    mocks.generateOriginalProduction.mockImplementationOnce(async next => {
+      expect(next.jobSession.job.id).toBe(saved.id);
+      expect(next.jobSession.job.policy).toBe(saved.policy);
+      expect(next.jobSession.job.checkpoints).toEqual(saved.checkpoints);
+      expect(next.learnings.voiceCorpus.snapshotId).toBe('captured-corpus');
+      throw new Error('provider_pending');
+    });
+    await expect(generateTweetBatchV2(refreshed)).rejects.toThrow('provider_pending');
+    expect(mocks.generateOriginalProduction).toHaveBeenCalledTimes(2);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it.each(['owner', 'model'])('starts a fresh durable job for a real %s change', async change => {
+    const durableInput = { ...input, agentId: '13', count: 1, durableGeneration: true,
+      modelStack: 'publishing_v2_astra' as const };
+    mocks.generateOriginalProduction.mockRejectedValue(new Error('provider_pending'));
+    await expect(generateTweetBatchV2(durableInput)).rejects.toThrow('provider_pending');
+    const originalId = mocks.durableState.get('generation-job').id;
+    const changed = change === 'owner'
+      ? { ...durableInput, voiceProfile: { ...input.voiceProfile, antiGoals: ['Never disclose customer identities.'] } }
+      : { ...durableInput, modelStack: 'publishing_v2_gpt_control' as const };
+    await expect(generateTweetBatchV2(changed)).rejects.toThrow('provider_pending');
+    expect(mocks.durableState.get('generation-job').id).not.toBe(originalId);
+  });
+
   it('uses identical calibrated critic contracts while retaining different generation policies', async () => {
     const briefs = buildGenerationBriefsV2({ ...input, stories: storyClusters, documents: sourceDocuments, now: new Date('2026-08-02T02:00:00Z') });
     const critics:any[]=[]; const traces:any[]=[];

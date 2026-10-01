@@ -7941,7 +7941,10 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   };
   input = { ...input, spendContext: continuousSpend(input.spendContext) };
   const authorIdentity = originalAuthorIdentity(input.voiceProfile);
-  const policy = jobFingerprint(['simple-original-4',ORIGINAL_EDITORIAL_POLICY_VERSION,ORIGINAL_EDITORIAL_CRITIC_VERSION,SOURCE_COPY_ASSESSMENT_VERSION,ORIGINAL_EDITORIAL_CONTEXT_VERSION,ORIGINAL_PROMPT_VERSION,ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,SOURCE_ATTRIBUTION_DETECTOR_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,authorIdentity,input.learnings?.voiceCorpus?.snapshotId]);
+  // A routine learning refresh changes the next job's examples, not the
+  // frozen context or paid stages of an in-flight job. Owner/model changes remain binding.
+  const policyInputs = ['simple-original-4',ORIGINAL_EDITORIAL_POLICY_VERSION,ORIGINAL_EDITORIAL_CRITIC_VERSION,SOURCE_COPY_ASSESSMENT_VERSION,ORIGINAL_EDITORIAL_CONTEXT_VERSION,ORIGINAL_PROMPT_VERSION,ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,SOURCE_ATTRIBUTION_DETECTOR_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,authorIdentity];
+  const policy = jobFingerprint(policyInputs);
   const snapshot = JSON.parse(JSON.stringify({...input,onTrace:undefined,onArtifacts:undefined,jobSession:undefined,originalModelCall:undefined,originalEditorialContext:undefined}));
   const job = await claimGenerationJob(input.agentId,snapshot,policy,Date.now(),current=>{
     const saved=current.input as GenerateTweetBatchV2Input;
@@ -7949,7 +7952,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     // durable paid work. Reuse only the same author/model; claim invalidates
     // derived assessments and exact call fingerprints guard paid stage reuse.
     return current.version===GENERATION_JOB_VERSION
-      && jobFingerprint([originalAuthorIdentity(saved.voiceProfile),saved.modelStack,saved.learnings?.voiceCorpus?.snapshotId])===jobFingerprint([authorIdentity,input.modelStack,input.learnings?.voiceCorpus?.snapshotId]);
+      && jobFingerprint([originalAuthorIdentity(saved.voiceProfile),saved.modelStack])===jobFingerprint([authorIdentity,input.modelStack]);
   });
   if (!job) return [];
   const session = new GenerationJobSession(input.agentId,job);

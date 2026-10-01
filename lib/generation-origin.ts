@@ -87,8 +87,11 @@ export function getGeneratedPublishIssue(
     if (!tweet.voiceCorpusVersion) {
       return 'V2-generated posts require voice-corpus provenance.';
     }
+    // The production receipt binds the voice snapshot actually judged. Routine
+    // corpus refreshes guide future generation, not revocation of approved copy.
+    // Current owner restrictions and operator cancellation remain posting checks.
     if (
-      options.currentVoiceCorpusVersion
+      !productionEditorial && options.currentVoiceCorpusVersion
       && tweet.voiceCorpusVersion !== options.currentVoiceCorpusVersion
     ) {
       return `V2-generated posts require current voice corpus ${options.currentVoiceCorpusVersion}.`;

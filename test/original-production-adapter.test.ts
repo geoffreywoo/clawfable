@@ -483,12 +483,39 @@ describe('fresh cron input retains durable author identity', () => {
     expect(resumed.checkpoints.paidRecoveryPolicy).toBe(priorCodePolicy ? job.policy : undefined);
   });
 
-  it.each(['owner-restriction', 'model-stack', 'voice-corpus'])('keeps actual %s changes incompatible', async changed => {
+  it.each([false, true])('retains frozen corpus and paid writing across an hourly corpus refresh (prior policy: %s)', async priorPolicy => {
+    const { input, job } = await pendingOriginal();
+    if (priorPolicy) await mutateAiOperationalState<any, void>('13', 'generation-job', current => ({
+      value: { ...current, policy: 'previous-corpus-keyed-policy' }, result: undefined,
+    }));
+    const fresh = { ...input, learnings: { ...input.learnings!,
+      voiceCorpus: { ...input.learnings!.voiceCorpus!, snapshotId: 'hourly-refreshed-corpus' },
+      operatorVoiceReference: { ...input.learnings!.operatorVoiceReference!, pinnedExamples: [] },
+    } };
+    const result = await generateTweetBatchV2(fresh);
+    expect(result).toHaveLength(1);
+    expect(result[0].voiceCorpusVersion).toBe(input.learnings!.voiceCorpus!.snapshotId);
+    const resumed = (await getGenerationJob('13'))!;
+    expect(resumed.id).toBe(job.id);
+    expect(resumed.policy).toBe(job.policy);
+    expect(resumed.input).toEqual(job.input);
+    expect(resumed.createdAt).toBe(job.createdAt);
+    expect(resumed.expiresAt).toBe(job.expiresAt);
+    // The failed judgment may retry; ideation and writing must never be bought again.
+    expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual([
+      'idea_generation', 'tweet_writing', 'copy_judgment', 'copy_judgment',
+    ]);
+    const originalWriter = JSON.parse(harness.generate.mock.calls[1][0].prompt);
+    const resumedJudge = JSON.parse(harness.generate.mock.calls[3][0].prompt);
+    expect(resumedJudge.originalEditorialContext).toEqual(originalWriter.context);
+    expect(resumed.checkpoints.paidRecoveryPolicy).toBe(priorPolicy ? job.policy : undefined);
+  });
+
+  it.each(['owner-restriction', 'model-stack'])('keeps actual %s changes incompatible', async changed => {
     const { input, job } = await pendingOriginal();
     const fresh = { ...input, voiceProfile: { ...input.voiceProfile }, learnings: { ...input.learnings } };
     if (changed === 'owner-restriction') fresh.voiceProfile.antiGoals = ['Never name customers, including public customers.'];
     if (changed === 'model-stack') fresh.modelStack = 'publishing_v2_gpt_control';
-    if (changed === 'voice-corpus') fresh.learnings.voiceCorpus = { ...input.learnings!.voiceCorpus!, snapshotId: 'new-owner-corpus' };
     expect(await generateTweetBatchV2(fresh)).toHaveLength(1);
     expect((await getGenerationJob('13'))!.id).not.toBe(job.id);
     expect(harness.generate.mock.calls.slice(3).map(([options]) => options.task)).toEqual(['idea_generation', 'tweet_writing', 'copy_judgment']);

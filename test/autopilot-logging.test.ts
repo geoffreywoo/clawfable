@@ -626,6 +626,8 @@ describe('autopilot remote debug logging', () => {
       mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings, durableGenerationEnabled: durable });
       mocks.getQueuedTweets.mockResolvedValue([{ ...validQueuedTweet, agentId,
         content: 'a quiet dinner sounds good to me.', topic: 'health', confidenceScore: .99, candidateScore: 99 }]);
+      mocks.buildGenerationContext.mockResolvedValue({ ...refillReadyContext, allTweets: [],
+        learnings: { ...refillReadyContext.learnings, voiceCorpus: { ...activeGeoffreyCorpus, snapshotId: 'voice-corpus-after-hourly-refresh' } } });
       return agent;
     }
 
@@ -635,7 +637,7 @@ describe('autopilot remote debug logging', () => {
       ['blocked', []],
       ['blocked', ['one', 'two']],
       ['passed', ['one', 'one']],
-    ] as const)('posts one qualified original despite historical canary %s with receipts %j', async (status, queuedIds) => {
+    ] as const)('posts an approved original after routine voice refresh despite historical canary %s with receipts %j', async (status, queuedIds) => {
       const agent = setupCanaryPosting();
       const tweet = editorialTweet({ confidenceScore: .1 });
       mocks.getQueuedTweets.mockResolvedValue([tweet]);
@@ -671,11 +673,12 @@ describe('autopilot remote debug logging', () => {
       expect(mocks.generateText).not.toHaveBeenCalled();
     });
 
-    it.each(['removed', 'edited', 'duplicate'] as const)('preserves the %s gate after production editorial approval', async scenario => {
+    it.each(['removed', 'edited', 'duplicate', 'owner_quarantine'] as const)('preserves the %s gate after production editorial approval', async scenario => {
       const agent = setupCanaryPosting();
       const tweet = editorialTweet();
       mocks.getQueuedTweets.mockResolvedValue([tweet]);
       if (scenario === 'removed') mocks.getTweet.mockResolvedValue({ ...tweet, status: 'draft' });
+      if (scenario === 'owner_quarantine') mocks.getTweet.mockResolvedValue({ ...tweet, status: 'quarantined', quarantinedAt: new Date().toISOString(), quarantineReason: 'New explicit owner restriction' });
       if (scenario === 'edited') mocks.getTweet.mockResolvedValue({ ...tweet, content: 'Changed by the operator.' });
       if (scenario === 'duplicate') {
         mocks.getRecentPostDuplicateIssue.mockReturnValue('Already posted this thought.');
@@ -683,6 +686,17 @@ describe('autopilot remote debug logging', () => {
       }
       expect((await runAutopilot(agent)).action).toBe('skipped');
       expect(mocks.dispatchOriginalPost).not.toHaveBeenCalled();
+    });
+
+    it('still applies current explicit account restrictions after routine voice refresh', async () => {
+      const agent = setupCanaryPosting();
+      const tweet = editorialTweet({ content: 'The NBA playoffs are the most interesting part of basketball.', topic: 'basketball' });
+      mocks.getQueuedTweets.mockResolvedValue([tweet]);
+      expect((await runAutopilot(agent)).action).toBe('skipped');
+      expect(mocks.dispatchOriginalPost).not.toHaveBeenCalled();
+      expect(mocks.updateTweet).toHaveBeenCalledWith(tweet.id, expect.objectContaining({
+        status: 'quarantined', quarantineReason: expect.stringMatching(/sports/i),
+      }));
     });
 
     it.each(['changed', 'withdrawn', 'expired'] as const)('rejects %s live evidence after production editorial approval', async scenario => {
