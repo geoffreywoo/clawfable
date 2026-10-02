@@ -117,8 +117,20 @@ export async function acknowledgeGenerationQueue(agentId: string, runId: string,
   await mutateAiOperationalState<GenerationJob,void>(agentId,GENERATION_JOB_NAMESPACE,current=>{
     if (!current || current.id !== runId) return {value:current!,result:undefined,skip:true};
     const attemptedIdeas=[...new Set([...current.checkpoints.attemptedIdeas as string[] || [],...current.checkpoints.selectedIdeas as string[] || []])];
-    return {value:{...current,status:queued?'queued':'failed',owner:null,leaseUntil:0,stage:queued?'queued':current.stage,blocker:queued?null:'queue_rejected',nextAttemptAt:queued?0:Date.now()+30*60_000,revision:(current.revision || 0)+1,
-      checkpoints:{...current.checkpoints,attemptedIdeas,...(queued ? {
+    const continuous = agentId === '13' && (current.input as { durableGeneration?: boolean } | null)?.durableGeneration === true;
+    const used = new Set([...attemptedIdeas,...current.checkpoints.queuedIdeas as string[] || []]);
+    const reserveIdeas = (current.checkpoints.reserveIdeas as string[] || []).filter(id=>!used.has(id));
+    const retryReserve = !queued && continuous && reserveIdeas.length > 0;
+    return {value:{...current,status:queued?'queued':retryReserve?'deferred':'failed',owner:null,leaseUntil:0,
+      stage:queued?'queued':retryReserve?'ideas_ready':current.stage,blocker:queued?null:retryReserve?'reserve_ready':'queue_rejected',
+      nextAttemptAt:queued?0:Date.now()+(retryReserve?1000:30*60_000),revision:(current.revision || 0)+1,
+      ...(!queued && continuous ? {result:undefined} : {}),
+      checkpoints:{...current.checkpoints,attemptedIdeas,...(!queued && continuous ? {
+        reserveIdeas,
+        // Recovered paid copy can override attemptedIdeas during selection.
+        // Consume its eligibility, retaining every raw response and assessment.
+        ...(current.checkpoints.paidRecoveryIdeaIds ? {paidRecoveryIdeaIds:(current.checkpoints.paidRecoveryIdeaIds as string[]).filter(id=>!used.has(id))} : {}),
+      } : {}),...(queued ? {
         queuedIdeas:[...new Set([...current.checkpoints.queuedIdeas as string[] || [],...current.checkpoints.selectedIdeas as string[] || []])],
       } : {})}},result:undefined};
   });

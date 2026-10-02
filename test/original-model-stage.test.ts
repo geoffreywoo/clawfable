@@ -125,4 +125,19 @@ describe('explicit original model stages', () => {
       expect(originalModelRequestKey('idea_generation', { ...options, ...change })).not.toBe(original);
     }
   });
+
+  it('keeps medium ideation paid output reusable without treating high effort as the same request', async () => {
+    const args = await input('medium-ideation');
+    const mediumOptions = { ...options, openAiReasoningEffort: 'medium' as const };
+    const mediumKey = originalModelRequestKey(args.stage, mediumOptions);
+    expect(mediumKey).not.toBe(originalModelRequestKey(args.stage, options));
+    expect(mediumKey).not.toBe(originalModelRequestKey(args.stage, { ...options, openAiReasoningEffort: 'high' }));
+    const generate = vi.fn(async () => ({ ...output, reasoningEffort: 'medium' as const }));
+    await runOriginalModelStage({ ...args, options: mediumOptions }, { generate });
+    const recovered = new GenerationJobSession(args.session.agentId, (await getGenerationJob(args.session.agentId))!);
+    expect(await runOriginalModelStage({ ...args, session: recovered, deadlineAt: 0,
+      options: { ...mediumOptions, timeoutMs: 120_000 } }, { generate })).toMatchObject({ ...output, reasoningEffort: 'medium' });
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(recovered.job.checkpoints[mediumKey]).toMatchObject({ result: { reasoningEffort: 'medium' } });
+  });
 });

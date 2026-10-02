@@ -4,7 +4,7 @@
 
 Agent 13 (@geoffwoo) uses the durable original worker. Other accounts retain their existing path. Posting targets five originals per Pacific day with a five-post reserve; replies retain their emergency block.
 
-The worker runs every ten minutes separately from posting. Each attempt selects one idea, writes three variants, and assesses them together once. It queues the highest passing variant. The existing leased job checkpoints retain paid responses across interruptions; there are no extra critics or automatic rewrites.
+The worker runs every ten minutes separately from posting. Each attempt selects one idea, writes three variants, and assesses them together once. It queues the highest passing variant. Simple ideation uses Astra with medium reasoning effort to fit its bounded request window; writing and editorial assessment retain their own routing. The existing leased job checkpoints retain paid responses across interruptions; there are no extra critics or automatic rewrites.
 
 Production uses `original-editorial-policy-1` and a provisional editorial score of 0.75: worthwhile, naturally on-voice, ready to publish. Voice, clarity, substance, interest, originality, and style diagnostics explain the one verdict instead of acting as separate cutoffs. Ordinary observations and opinions need not become frontier predictions. The threshold is a product default, not a calibrated probability; the owner-approved continuous rollout does not depend on completing the older calibration experiment.
 
@@ -12,7 +12,7 @@ Unsupported facts, fabricated experience, explicit account restrictions, substan
 
 Routine diction-example refreshes guide future generation without revoking completed approvals or restarting paid jobs. Existing jobs retain their assessed voice context; real owner/model/policy changes still follow normal invalidation and current account restrictions remain binding at publication.
 
-A qualified singleton can post when due. Empty editorial attempts never permanently stop an enabled account: unused reserve ideas resume on a later worker tick, and exhausted empty batches retry after 30 minutes. Provider failures retain saved stages and capped backoff. An exhausted $3 job ends with archived artifacts; an exhausted Pacific-day allowance waits until the next Pacific day.
+A qualified singleton can post when due. Empty editorial attempts never permanently stop an enabled account: unused reserve ideas resume on a later worker tick, including after queue admission rejects a selected draft, and exhausted empty batches retry after 30 minutes. A rejected selection stays attempted and cannot be replayed through a paid-recovery eligibility marker. Provider failures retain saved stages and capped backoff. An exhausted $3 job ends with archived artifacts; an exhausted Pacific-day allowance waits until the next Pacific day.
 
 The historical $6 generation canary is retired into an immutable archive, with its history and campaign spend receipts preserved. Its stop counter and two-output prerequisite no longer control production. The original spend ledger remains authoritative and unchanged by retirement. The $20 Pacific-day limit and $3 lifetime job limit remain enforced; unknown provider charges remain committed. Generation retains the existing protected allocation, and background work stays capped.
 

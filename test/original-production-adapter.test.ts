@@ -161,6 +161,9 @@ describe('production original adapter', () => {
     const result = await generateOriginalProduction(input);
     expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['idea_generation', 'tweet_writing', 'copy_judgment']);
     expect(result).toHaveLength(1);
+    expect(harness.generate.mock.calls[0][0]).toMatchObject({ modelStack: 'publishing_v2_astra',
+      openAiReasoningEffort: 'medium', timeoutMs: 120_000, maxTokens: 2200 });
+    expect(harness.generate.mock.calls[1][0]).not.toHaveProperty('openAiReasoningEffort');
     const judgeCall = harness.generate.mock.calls[2][0];
     expect(JSON.parse(judgeCall.prompt).activeAutopostQualityMargin).toBe(getPublishingV2AutopostQualityMargin('geoffwoo'));
     expect(judgeCall.system).toContain('frontierLead');

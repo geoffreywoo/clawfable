@@ -57,6 +57,91 @@ describe('durable generation jobs',()=>{
   expect(next?.result).toBeUndefined();
   expect(next?.checkpoints.attemptedIdeas).toEqual(['idea-a']);
  });
+ it.each([false,true])('advances a queue-rejected original to its unused paid reserve (recovered copy: %s)',async recoveredCopy=>{
+  vi.useFakeTimers();
+  const {mutateAiOperationalState}=await import('@/lib/kv-storage');
+  const {runOriginalProduction}=await import('@/lib/original-production');
+  try {
+   vi.setSystemTime(new Date('2026-10-02T01:00:00Z'));
+   await mutateAiOperationalState<unknown,void>('13','generation-job',()=>({value:null,result:undefined}));
+   const input={durableGeneration:true,subject:'frozen',spendContext:{runLimitUsd:3}};
+   const session=new GenerationJobSession('13',(await claimGenerationJob('13',input,'p'))!);
+   const paid={result:{text:'paid ideas and copy'}};
+   const assessment={selected:[{draftCandidateId:'draft-a'}],drafts:[{draft:{id:'draft-a'}}]};
+   await session.write(job=>({...job,checkpoints:{
+    subjects_ready:[{id:'subject'}],ideas_ready:[
+     {id:'idea-a',status:'selected',rejectionCodes:[]},{id:'idea-b',status:'reserve',rejectionCodes:[]},
+    ],selectedIdeas:['idea-a'],reserveIdeas:['idea-a','idea-b','already-queued'],
+    attemptedIdeas:['earlier-rejected'],queuedIdeas:['already-queued'],
+    'call:idea_generation:paid':paid,'call:tweet_writing:paid':paid,
+    'drafts_ready:idea-a':[{draft:{id:'draft-a'}}],'assessed:idea-a':assessment,
+    ...(recoveredCopy ? {paidRecoveryPolicy:'p',paidRecoveryIdeaIds:['idea-a']} : {}),
+   }}));
+   await session.finish([{draftCandidateId:'draft-a'}],'completed');
+   await acknowledgeGenerationQueue('13',session.job.id,false);
+   const rejected=(await getGenerationJob('13'))!;
+   expect(rejected).toMatchObject({status:'deferred',blocker:'reserve_ready',stage:'ideas_ready',
+    nextAttemptAt:Date.now()+1000,owner:null,leaseUntil:0,failures:0});
+   expect(rejected.result).toBeUndefined();
+   expect(rejected.checkpoints.reserveIdeas).toEqual(['idea-b']);
+   expect(rejected.checkpoints.attemptedIdeas).toEqual(['earlier-rejected','idea-a']);
+   expect(rejected.checkpoints.queuedIdeas).toEqual(['already-queued']);
+   for(const key of ['call:idea_generation:paid','call:tweet_writing:paid','drafts_ready:idea-a','assessed:idea-a']) {
+    expect(rejected.checkpoints[key]).toEqual(session.job.checkpoints[key]);
+   }
+   expect(await claimGenerationJob('13',{},'p')).toBeNull();
+   vi.setSystemTime(rejected.nextAttemptAt);
+   const resumed=new GenerationJobSession('13',(await claimGenerationJob('13',{durableGeneration:true,subject:'changed'},'p'))!);
+   expect(resumed.job.id).toBe(session.job.id);
+   expect(resumed.job.input).toEqual(input);
+   expect(resumed.job.expiresAt).toBe(session.job.expiresAt);
+   const loadSubjects=vi.fn(),ideate=vi.fn(),validateSubjects=vi.fn(async()=>{});
+   const write=vi.fn(async()=>[{draft:{id:'draft-b',status:'selected',rejectionCodes:[]}}]);
+   const result=await runOriginalProduction({session:resumed,deps:{loadSubjects,ideate,validateSubjects,write,
+    assess:async()=>[{draftCandidateId:'draft-b'}],
+   } as any});
+   expect(result.selected).toEqual([{draftCandidateId:'draft-b'}]);
+   expect(write).toHaveBeenCalledWith(expect.objectContaining({id:'idea-b'}),[{id:'subject'}]);
+   expect(validateSubjects).toHaveBeenCalledWith([{id:'subject'}],expect.objectContaining({id:'idea-b'}));
+   expect(loadSubjects).not.toHaveBeenCalled();expect(ideate).not.toHaveBeenCalled();
+  } finally {
+   await mutateAiOperationalState<unknown,void>('13','generation-job',()=>({value:null,result:undefined}));
+   vi.useRealTimers();
+  }
+ });
+ it('waits thirty minutes for a new batch after queue rejection exhausts the continuous reserve',async()=>{
+  vi.useFakeTimers();
+  const {mutateAiOperationalState}=await import('@/lib/kv-storage');
+  try {
+   vi.setSystemTime(new Date('2026-10-02T01:00:00Z'));
+   await mutateAiOperationalState<unknown,void>('13','generation-job',()=>({value:null,result:undefined}));
+   const session=new GenerationJobSession('13',(await claimGenerationJob('13',{durableGeneration:true},'p'))!);
+   await session.write(job=>({...job,checkpoints:{selectedIdeas:['last-idea'],reserveIdeas:['last-idea'],
+    'call:idea_generation:paid':{result:{text:'paid response'}}}}));
+   await session.finish([{draftCandidateId:'last-draft'}],'completed');
+   await acknowledgeGenerationQueue('13',session.job.id,false);
+   const rejected=(await getGenerationJob('13'))!;
+   expect(rejected).toMatchObject({status:'failed',blocker:'queue_rejected',nextAttemptAt:Date.now()+30*60_000});
+   expect(rejected.checkpoints.reserveIdeas).toEqual([]);
+   expect(await claimGenerationJob('13',{},'p',rejected.nextAttemptAt-1)).toBeNull();
+   vi.setSystemTime(rejected.nextAttemptAt);
+   expect((await claimGenerationJob('13',{durableGeneration:true},'p'))?.id).not.toBe(session.job.id);
+   expect((await getGenerationJobRecord('13',session.job.id))?.checkpoints['call:idea_generation:paid']).toEqual({result:{text:'paid response'}});
+  } finally {
+   await mutateAiOperationalState<unknown,void>('13','generation-job',()=>({value:null,result:undefined}));
+   vi.useRealTimers();
+  }
+ });
+ it('keeps queue-rejection behavior unchanged outside the continuous account',async()=>{
+  const agentId=`other-queue-rejection-${crypto.randomUUID()}`;
+  const session=new GenerationJobSession(agentId,(await claimGenerationJob(agentId,{durableGeneration:true},'p'))!);
+  await session.write(job=>({...job,checkpoints:{selectedIdeas:['a'],reserveIdeas:['b']}}));
+  await session.finish([{id:'draft-a'}],'completed');
+  const before=Date.now();
+  await acknowledgeGenerationQueue(agentId,session.job.id,false);
+  expect(await getGenerationJob(agentId)).toMatchObject({status:'failed',blocker:'queue_rejected',result:[{id:'draft-a'}]});
+  expect((await getGenerationJob(agentId))!.nextAttemptAt).toBeGreaterThanOrEqual(before+30*60_000);
+ });
  it('does not discard paid work after repeated provider failures',async()=>{
   let job=(await claimGenerationJob('job-long-outage',{},'p'))!;
   const session=new GenerationJobSession('job-long-outage',job);

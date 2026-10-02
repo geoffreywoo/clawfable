@@ -213,7 +213,8 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
       validateSubjects: validate,
       ideate: async subjects => {
         const prompt = buildOriginalIdeationPrompt(subjects.map(s => ({ briefId: s.id, context: s.editorialContext })));
-        const response = await call('idea_generation', { ...prompt, modelStack: input.modelStack, timeoutMs: 120_000, maxTokens: 2200, temperature: .8 });
+        const response = await call('idea_generation', { ...prompt, modelStack: input.modelStack,
+          openAiReasoningEffort: 'medium', timeoutMs: 120_000, maxTokens: 2200, temperature: .8 });
         const raw = parseArray(response.text, 'ideas');
         if (!Array.isArray(raw) || raw.length !== subjects.length * 3
           || subjects.some(s => raw.filter(i => i.briefId === s.id && s.subjectPacket!.permittedModes.includes(i.contentMode) && Array.isArray(i.evidenceIds) && i.evidenceIds.every(id => s.sourceDocumentIds.includes(id))).length !== 3)) throw new Error('malformed_output');

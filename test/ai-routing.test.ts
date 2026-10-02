@@ -4,6 +4,7 @@ const ENV_KEYS = [
   'AI_MODEL_POLICY',
   'OPENAI_API_KEY',
   'OPENAI_REASONING_EFFORT',
+  'OPENAI_REASONING_EFFORT_IDEA_GENERATION',
   'OPENAI_REASONING_EFFORT_TWEET_WRITING',
   'ANTHROPIC_API_KEY',
   'ASTRA_CREATIVE_ROLLOUT',
@@ -1049,6 +1050,25 @@ describe('Astra creative pilot', () => {
     await generateText({ task: 'tweet_writing', modelStack: 'publishing_v2_astra', system: 'Write.', prompt: 'test', maxTokens: 400, temperature: 1 });
     expect(create.mock.calls[0][0].reasoning).toEqual({ effort: 'low' });
     expect(create.mock.calls[0][0]).not.toHaveProperty('temperature');
+  });
+
+  it('uses the simple ideation medium override with Astra while retaining writer and judge reasoning', async () => {
+    process.env.AI_MODEL_POLICY = 'astra_all';
+    process.env.OPENAI_REASONING_EFFORT_IDEA_GENERATION = 'high';
+    delete process.env.OPENAI_REASONING_EFFORT;
+    delete process.env.OPENAI_REASONING_EFFORT_TWEET_WRITING;
+    const create = vi.fn().mockResolvedValue({ status: 'completed', output_text: '{"ideas":[]}' });
+    const { generateText } = await loadGeneratorWithOpenAiMock(create);
+    const common = { modelStack: 'publishing_v2_astra' as const, system: 'Return JSON.', prompt: 'One subject.', maxTokens: 2200 };
+    const ideation = await generateText({ ...common, task: 'idea_generation', openAiReasoningEffort: 'medium', timeoutMs: 120_000 });
+    await generateText({ ...common, task: 'tweet_writing' });
+    await generateText({ ...common, task: 'copy_judgment' });
+    expect(create.mock.calls.map(([request]) => ({ model: request.model, reasoning: request.reasoning }))).toEqual([
+      { model: 'gpt-6-astra', reasoning: { effort: 'medium' } },
+      { model: 'gpt-6-astra', reasoning: { effort: 'high' } },
+      { model: 'gpt-6-astra', reasoning: { effort: 'medium' } },
+    ]);
+    expect(ideation.reasoningEffort).toBe('medium');
   });
 
   it('preserves requested Astra identity and effective reasoning when a bounded call times out', async () => {
