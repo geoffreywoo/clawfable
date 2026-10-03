@@ -39,7 +39,7 @@ describe('synthetic editorial safety fixtures', () => {
       const request = editorialAssessmentRequest({ stage: 'final', context: negative.context,
         variants: [negative], model: 'fixture-judge', assessmentContext: negative.assessmentContext });
       expect(request.system).toContain('ownerRestrictions bind');
-      expect(request.system).toContain('stylePreferences inform editorial quality');
+      expect(request.system).toContain('stylePreferences and editorialSteering inform editorial quality');
       // Activation assessment uses the native projection; generic context and
       // the answer key remain auditable fields outside the model request.
       const payload = request.prompt;

@@ -227,3 +227,20 @@ describe('one original editorial context', () => {
     expect(subject.sourceIds).toEqual(['source-a']);
   });
 });
+
+
+it('keeps whole bounded learning examples auditable and separate from evidence and restrictions', () => {
+  const acceptedEdits = [
+    { signalId: 'large', before: 'x'.repeat(1201), after: 'short', lesson: 'Keep concise.', createdAt: '2026-10-02T00:00:00Z' },
+    ...['a', 'b', 'c'].map(id => ({ signalId: id, before: `generic ${id}`, after: `a strange concrete phrase ${id}`, lesson: 'Preserve the owner’s unusual words.', createdAt: '2026-10-02T00:00:00Z' })),
+  ];
+  const editorialSteering = [{ id: 'steering-a', kind: 'take' as const, instruction: 'Prefer a surprising mechanism.', scope: 'standing' as const,
+    provenance: 'explicit_authenticated_owner' as const, ownerUserId: 'owner' }];
+  const context = build({ acceptedEdits, editorialSteering });
+  expect(context.acceptedEdits?.map(row => row.signalId)).toEqual(['a', 'b']);
+  expect(context.editorialSteering).toEqual(editorialSteering);
+  expect(JSON.stringify(context.supportedFacts)).not.toContain('strange concrete');
+  expect(JSON.stringify(context.ownerRestrictions)).not.toContain('surprising mechanism');
+  expect(editorialHash(context)).not.toBe(editorialHash(build()));
+  expect(JSON.stringify(context).length).toBeLessThanOrEqual(ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS);
+});

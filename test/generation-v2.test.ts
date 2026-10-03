@@ -2420,6 +2420,96 @@ describe('Tweet Generation V2', () => {
     expect(retainsPersonalTopicSubjectV2('any subject is valid', ['capital:market'])).toBe(true);
   });
 
+  it('keeps a simple-original batch eligible when historical topic cues were not supplied to ideation', () => {
+    const briefs = [
+      { ...brief('ai', 'ai'), identityScore: 0.94, personalTopicSignals: ['stock:few:weeks:leopold:basket:goes:2027'] },
+      { ...brief('investing', 'investing'), identityScore: 0.94, personalTopicSignals: ['antifund:august:last:upon:value:verifiable:precise'] },
+    ];
+    // Reproduces the six opinions rejected solely by hidden cues in a frozen production job.
+    const publicMoves = [
+      'ai pricing by seat feels backwards to me. i’d rather pay you more to need fewer logins.',
+      'i’d give an agent more autonomy if it had a great undo button. asking permission at every step is not my idea of delegation.',
+      'the ai product i want is allowed to tell me my request is dumb. executing a bad plan perfectly is not premium software.',
+      'a down round isn’t the part i’d judge. does the new money buy a real shot at winning, or just postpone the same conversation?',
+      'i’d rather sell a little too early than need a buyer on a specific tuesday.',
+      'a position shouldn’t get permanent immunity just because you bought it cheap. judge the dollars you still have in it, not the screenshot of your entry.',
+    ];
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: publicMoves.map((publicMove, index) => ({
+        briefId: index < 3 ? 'ai' : 'investing',
+        publicMove,
+        contentMode: 'opinion',
+        evidenceIds: [],
+        factualRisk: 'low',
+      })),
+      agentId: '13',
+      runId: 'run-hidden-personal-topic-cues',
+      briefs,
+      voiceProfile: { ...voiceProfile, accountHandle: 'geoffwoo', topics: ['ai', 'startup', 'vc', 'software', 'agents', 'openai', 'robotics', 'energy'] },
+      recentPosts: [],
+      blocks: [],
+      simpleContract: true,
+      now: '2026-10-03T02:13:00.000Z',
+    });
+
+    expect(ideas).toHaveLength(6);
+    for (const idea of ideas) {
+      expect(idea.status).toBe('generated');
+      expect(idea.rejectionCodes).toEqual([]);
+      expect(idea.diagnosticCodes).toContain('personal_topic_subject_dropped');
+    }
+  });
+
+  it.each([false, true])('preserves supplied legacy cues and reports only actual cue mismatches (simpleContract=%s)', (simpleContract) => {
+    const operatorBrief = {
+      ...brief('operator', 'culture'),
+      personalTopicSignals: ['woodside'],
+    };
+    const legacyPrompt = JSON.parse(buildIdeaGenerationPromptV2([operatorBrief], voiceProfile));
+    expect(legacyPrompt.briefs[0].personalTopicHistory.subjectCues).toEqual(['woodside']);
+    const make = (publicMove: string) => normalizeIdeaCandidatesV2({
+      raw: [{ ...rawIdea('operator', publicMove), contentMode: 'opinion' }],
+      agentId: '13',
+      runId: 'run-visible-personal-topic-cue',
+      briefs: [operatorBrief],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      simpleContract,
+      now: '2026-10-03T02:13:00.000Z',
+    })[0];
+
+    const retained = make('i would rather host a woodside dinner than another founder conference.');
+    expect(retained.rejectionCodes).not.toContain('personal_topic_subject_dropped');
+    expect(retained.diagnosticCodes || []).not.toContain('personal_topic_subject_dropped');
+    const dropped = make('i would rather host a dinner than another founder conference.');
+    expect(simpleContract ? dropped.diagnosticCodes : dropped.rejectionCodes).toContain('personal_topic_subject_dropped');
+    expect(simpleContract ? dropped.rejectionCodes : dropped.diagnosticCodes || []).not.toContain('personal_topic_subject_dropped');
+    if (!simpleContract) expect(dropped.status).toBe('rejected');
+  });
+
+  it('keeps unsupported facts blocked when a hidden personal topic cue becomes diagnostic', () => {
+    const ideas = normalizeIdeaCandidatesV2({
+      raw: [{ briefId: 'space', publicMove: 'starship flight 14 is my favorite rocket launch.', contentMode: 'opinion', evidenceIds: [], factualRisk: 'low' }],
+      agentId: '13',
+      runId: 'run-hidden-cue-unsupported-fact',
+      briefs: [{ ...brief('space', 'space exploration'), personalTopicSignals: ['woodside'] }],
+      voiceProfile,
+      recentPosts: [],
+      blocks: [],
+      simpleContract: true,
+      now: '2026-10-03T02:13:00.000Z',
+    });
+
+    expect(ideas[0]).toMatchObject({
+      status: 'rejected',
+      rejectionCodes: expect.arrayContaining(['unsupported_operator_fact']),
+      diagnosticCodes: expect.arrayContaining(['personal_topic_subject_dropped']),
+    });
+    expect(ideas[0].rejectionCodes).not.toContain('personal_topic_subject_dropped');
+    expect(ideas[0].diagnosticCodes).not.toContain('unsupported_operator_fact');
+  });
+
   it('flags a bounded share of under-tested-arm drafts as exploration holdouts', () => {
     const arm = (name: string, overrides: Record<string, unknown> = {}) => ({
       arm: name,
@@ -4892,4 +4982,12 @@ it('funds current-interest briefs ahead of historical labels in single-draft run
   for (const run of ['run-a', 'run-b', 'run-c', 'run-d']) {
     expect(prioritizeCurrentInterestBriefsV2(briefs, run).slice(0, 2).map(b => b.id)).toEqual(['liked', 'momentum']);
   }
+});
+
+
+it('ranks low-fit network discovery behind real owner interests in the durable two-subject budget', () => {
+  const explore = { id: 'receiver', trendTopicId: 'network-receiver', identityScore: 0, storyClusterId: null };
+  const owned = { id: 'ai', identityScore: .9, storyClusterId: null, trendTopicId: null };
+  const research = { id: 'funding', identityScore: .9, storyClusterId: 'source-story', trendTopicId: null };
+  expect(prioritizeCurrentInterestBriefsV2([explore, owned, research], 'job', true).slice(0, 2).map(row => row.id)).toEqual(['funding', 'ai']);
 });

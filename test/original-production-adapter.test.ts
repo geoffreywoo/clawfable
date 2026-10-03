@@ -12,11 +12,13 @@ import { generateTweetBatchV2, type GenerateTweetBatchV2Input, type GenerationBr
 import type { SourceDocument } from '@/lib/types';
 import { ORIGINAL_EDITORIAL_POLICY_VERSION, ORIGINAL_EDITORIAL_CRITIC_VERSION } from '@/lib/original-editorial-policy';
 import { EDITORIAL_DIMENSIONS } from '@/lib/editorial-contract';
+import { saveEditorialSteering, getEditorialSteering } from '@/lib/editorial-steering';
+import * as steeringStore from '@/lib/editorial-steering';
 
 const harness = vi.hoisted(() => ({
   generate: vi.fn(), finalOverall: .99, malformed: false, copyVerdict: 'clear', firstCopyUncertain: false,
   rejectAllPreflight: false, preflightCalls: [] as any[], normalizationCalls: [] as any[], changePublicMove: false,
-  normalizedIdPrefix: 'idea',
+  normalizedIdPrefix: 'idea', briefRequests: [] as Array<string | undefined>, blockedTopic: '', network: false,
   anchors: [
     { id: 'anchor-a', content: 'coffee outside. walking home.', topic: 'health' },
     { id: 'anchor-b', content: 'the little kitchen table is plenty.', topic: 'health' },
@@ -39,12 +41,15 @@ vi.mock('@/lib/generation-v2', async importOriginal => {
   const actual = await importOriginal<typeof import('@/lib/generation-v2')>();
   return {
     ...actual,
-    buildGenerationBriefsV2: () => [{ id: 'subject-health', topic: 'health', title: 'An ordinary evening',
+    buildGenerationBriefsV2: (options: any) => {
+      harness.briefRequests.push(options.requestedTopic);
+      if (options.requestedTopic && options.requestedTopic === harness.blockedTopic) return [];
+      return [{ id: options.requestedTopic ? `subject-${options.requestedTopic}` : 'subject-health', topic: options.requestedTopic || 'health', title: options.requestedTopic || 'An ordinary evening',
       summary: 'A subjective view about a quiet evening.', authorOpportunity: 'A short personal preference without invented experience.',
-      sourceLane: 'manual_core_exploit', evidenceMode: 'operator_opinion', evidence: [], evidenceIds: [],
-      sourceDocumentIds: [], qualifiedClaimIds: [], storyClusterId: null, trendTopicId: null,
+      sourceLane: harness.network ? 'trend_aligned_exploit' : 'manual_core_exploit', evidenceMode: 'operator_opinion', evidence: [], evidenceIds: [],
+      sourceDocumentIds: [], qualifiedClaimIds: [], storyClusterId: null, trendTopicId: harness.network ? 'network-health' : null,
       trendHeadline: null, sourceBrief: 'Subjective preference, no event evidence.', identityScore: .9,
-      evidenceScore: 1, freshnessScore: 1 }],
+      evidenceScore: 1, freshnessScore: 1 }]; },
     prioritizeCurrentInterestBriefsV2: (briefs: unknown[]) => briefs,
     collectOperatorAnchors: () => harness.anchors,
     normalizeIdeaCandidatesV2: (options: any) => {
@@ -70,7 +75,7 @@ vi.mock('@/lib/generation-v2', async importOriginal => {
 beforeEach(() => {
   harness.generate.mockReset(); harness.finalOverall = .99; harness.malformed = false; harness.copyVerdict = 'clear'; harness.firstCopyUncertain = false;
   harness.rejectAllPreflight = false; harness.preflightCalls = []; harness.normalizationCalls = []; harness.changePublicMove = false;
-  harness.normalizedIdPrefix = 'idea';
+  harness.normalizedIdPrefix = 'idea'; harness.briefRequests = []; harness.blockedTopic = ''; harness.network = false;
   harness.generate.mockImplementation(async (options: GenerateTextOptions) => {
     const payload = JSON.parse(options.prompt);
     let text: string;
@@ -561,4 +566,95 @@ it('revalidates only selected subject dependencies after ideation without accept
   expect(() => validateOriginalSubjects(subjects, frozen, frozen, now, { briefId: 'missing' })).toThrow('stale_evidence');
   expect(() => validateOriginalSubjects([subjects[0], subjects[0]], frozen, frozen, now, selected)).toThrow('stale_evidence');
   expect(() => validateOriginalSubjects([{ ...subjects[0], subjectPacket: { ...subjects[0].subjectPacket!, expiresAt: new Date(now).toISOString() } }], frozen, frozen, now, selected)).toThrow('subject_expired');
+});
+
+
+describe('durable optional owner learning in actual production stages', () => {
+  it('freezes scoped direction and whole accepted edits into idea, writer and judge without another paid stage', async () => {
+    const input = await setup();
+    const record = await saveEditorialSteering(input.agentId, 'owner', { requestId: 'next-subject', kind: 'topic',
+      instruction: 'Prefer concrete operating decisions about robotics.', topic: 'robotics', scope: 'one_off' });
+    input.signals = [{ id: 'edit-1', agentId: input.agentId, signalType: 'edited_before_queue', createdAt: new Date().toISOString(),
+      reason: 'Keep the unusual concrete wording.', metadata: { acceptedEdit: true, originalDraft: 'Optimization is the way forward.',
+        editedDraft: 'the bent wrench stays on my desk.', editTopic: 'health' } }] as any;
+    await generateOriginalProduction(input);
+    expect(harness.briefRequests).toContain('robotics');
+    expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['idea_generation', 'tweet_writing', 'copy_judgment']);
+    for (const [options] of harness.generate.mock.calls) {
+      const payload = JSON.parse(options.prompt);
+      const context = payload.sharedContext || payload.context || payload.originalEditorialContext;
+      expect(context.editorialSteering[0]).toMatchObject({ id: record.id, kind: 'topic', scope: 'one_off' });
+      expect(context.acceptedEdits[0]).toMatchObject({ signalId: 'edit-1', after: 'the bent wrench stays on my desk.' });
+      expect(context.supportedFacts || []).not.toContain('the bent wrench stays on my desk.');
+    }
+    expect((await getEditorialSteering(input.agentId))[0].status).toBe('consumed');
+    const paidCount = harness.generate.mock.calls.length;
+    await saveEditorialSteering(input.agentId, 'owner', { requestId: 'later-coaching', kind: 'copy', instruction: 'A later unrelated preference.', scope: 'standing' });
+    input.signals = [];
+    await generateOriginalProduction(input);
+    expect(harness.generate).toHaveBeenCalledTimes(paidCount);
+    expect(JSON.stringify(input.jobSession!.job.checkpoints.subjects_ready)).not.toContain('later unrelated preference');
+  });
+
+  it('continues ordinary generation with no reply or an unavailable requested topic', async () => {
+    const input = await setup();
+    harness.blockedTopic = 'restricted-subject';
+    await saveEditorialSteering(input.agentId, 'owner', { requestId: 'blocked-topic', kind: 'topic', topic: harness.blockedTopic,
+      instruction: 'Explore this subject if appropriate.', scope: 'one_off' });
+    expect(await generateOriginalProduction(input)).toHaveLength(1);
+    expect((input.jobSession!.job.checkpoints.subjects_ready as any[])[0].topic).toBe('health');
+    const silent = await setup();
+    expect(await generateOriginalProduction(silent)).toHaveLength(1);
+    expect(silent.jobSession!.job.checkpoints.editorial_steering).toEqual([]);
+  });
+
+  it('does not teach rejected, inferred or evaluation-only edits', async () => {
+    const input = await setup();
+    const base = { agentId: input.agentId, signalType: 'edited_before_queue', createdAt: '2026-09-01T00:00:00Z',
+      metadata: { acceptedEdit: true, originalDraft: 'before', editedDraft: 'a rejected after' } };
+    input.signals = [
+      { ...base, id: 'rejected', tweetId: 'tweet-1' },
+      { ...base, id: 'holdout', metadata: { ...base.metadata, holdout: true } },
+      { ...base, id: 'evaluation', metadata: { ...base.metadata, evaluationOnly: true } },
+      { ...base, id: 'inferred', inferred: true },
+      { id: 'negative', agentId: input.agentId, tweetId: 'tweet-1', signalType: 'deleted_from_queue', createdAt: '2026-09-02T00:00:00Z' },
+    ] as any;
+    await generateOriginalProduction(input);
+    expect(JSON.stringify(input.jobSession!.job.checkpoints.subjects_ready)).not.toContain('a rejected after');
+  });
+});
+
+
+it('keeps funded generation and valid decisions available during optional steering storage failures', async () => {
+  const input = await setup();
+  const claim = vi.spyOn(steeringStore, 'claimEditorialSteeringForJob').mockRejectedValueOnce(new Error('unavailable'));
+  try {
+    expect(await generateOriginalProduction(input)).toHaveLength(1);
+    expect(input.jobSession!.job.checkpoints.editorialSteeringUnavailable).toBe(true);
+  } finally { claim.mockRestore(); }
+  const withFeedback = await setup();
+  await saveEditorialSteering(withFeedback.agentId, 'owner', { requestId: 'coaching', kind: 'copy', instruction: 'Keep fragments.', scope: 'one_off' });
+  const completion = vi.spyOn(steeringStore, 'completeEditorialSteeringJob').mockRejectedValueOnce(new Error('unavailable'));
+  try {
+    const selected = await generateOriginalProduction(withFeedback);
+    expect(selected).toHaveLength(1);
+    expect(withFeedback.jobSession!.job.checkpoints.editorialSteeringCompletionPending).toBe(true);
+    const paidCalls = harness.generate.mock.calls.length;
+    expect(await generateOriginalProduction(withFeedback)).toEqual(selected);
+    expect(harness.generate).toHaveBeenCalledTimes(paidCalls);
+    expect(withFeedback.jobSession!.job.checkpoints.editorialSteeringCompletionPending).toBe(false);
+  } finally { completion.mockRestore(); }
+});
+
+
+it('retains qualified network opinions with honest lineage instead of requiring fabricated owner history', async () => {
+  const input = await setup();
+  harness.network = true;
+  input.trending = [{ id: 'network-health', headline: 'Health', category: 'health', sourceUrl: 'https://x.com/source/status/123',
+    publisher: 'Network author', timestamp: new Date().toISOString(), observedAt: new Date().toISOString() }] as any;
+  const selected = await generateOriginalProduction(input);
+  expect(selected).toHaveLength(1);
+  const references = (selected[0] as any).generationEvidenceReferences;
+  expect(references[0]).toMatchObject({ title: 'Followed-network subject: health', publisher: 'Network author', url: 'https://x.com/source/status/123', trustTier: null });
+  expect(references[0].content).toContain('not operator-authored history');
 });

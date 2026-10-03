@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildBanditSlotPlan, type BanditPolicy, type BanditArmScore } from '@/lib/bandit';
+import { buildGenerationBriefsV2 } from '@/lib/generation-v2';
 import {
   buildManualTopicProfile,
   buildSourcePlannerPlan,
@@ -347,7 +348,7 @@ describe('source planner', () => {
       summary: 'Geoffrey writes about industrial capacity and hard technical constraints.',
     }, null, 'aggressive');
 
-    expect(topic.fitScores.identityFit).toBeGreaterThan(0);
+    expect(topic.fitScores.identityFit).toBe(0);
     expect(topic.sourceLane).toBe('reject');
     expect(topic.plannerReason).toContain('politics-led subject lacks exceptional evidence');
   });
@@ -1250,7 +1251,7 @@ describe('source planner', () => {
       })),
       {
         tone: 'casual startup investor',
-        topics: ['AI', 'startups', 'robotics', 'frontier tech'],
+        topics: ['AI', 'startups', 'robotics', 'frontier tech', 'autonomous aircraft'],
         antiGoals: ['generic trend bait'],
         communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: casual startup-native voice.',
         summary: 'Geoffrey writes about AI companies, startups, and frontier technology.',
@@ -1528,4 +1529,98 @@ it('selects fresh X momentum without requiring a like, while prioritizing actual
   expect(selected.map(signal => signal.id)).toEqual(['network-2', 'network-1']);
   expect(selected.map(signal => signal.selectionBasis)).toEqual(['operator_engagement', 'network_momentum']);
   expect(selected[1].networkMomentumScore).toBe(0.8);
+});
+
+describe('honest network subject provenance', () => {
+  // Frozen metadata from the receiver subject that was incorrectly scored .82
+  // by overlapping a long source post with enriched writing instructions.
+  const now = Date.parse('2026-10-02T01:20:00.000Z');
+  const receiver = {
+    id: 4, networkTopicId: 'network-marantz-a7fvgl',
+    headline: "The post contrasts modern stereos' low distortion and flat response with the perceived appeal of vintage Marantz and Sansui receivers. It raises a sound-quality question but does not establish a mechanism or...",
+    category: 'Vintage receiver sound versus modern stereos',
+    source: '@BrianRoemmele', publisher: '@BrianRoemmele',
+    sourceUrl: 'https://x.com/BrianRoemmele/status/2105823874822951412',
+    relevanceScore: 75, timestamp: '2026-10-02T00:55:10.000Z',
+    observedAt: '2026-10-02T01:17:50.115Z', tweetCount: 1,
+    sourceType: 'x' as const, discoveryMethod: 'followed_network' as const,
+    sourceCount: 1, networkMomentumScore: 0.606, networkBreakoutScore: 0.67,
+    operatorEngagementScore: 0, operatorEngagedSourceCount: 0,
+    topicConfidence: 0.92, topicUncertainty: 'medium' as const,
+    semanticDomain: 'general_technology' as const,
+    entities: ['Marantz', 'Sansui'],
+    entityRoles: [{ name: 'Marantz', role: 'company' as const }, { name: 'Sansui', role: 'company' as const }],
+    topTweet: {
+      id: '2105823874822951412', author: 'BrianRoemmele', likes: 37,
+      text: 'Why can vintage home audio systems sound better than modern ones? Flat response, vanishing distortion, a signal path. The power supplies were part of the same philosophy. The point was current on demand. The old market still makes a familiar record feel larger than the room.',
+    },
+  };
+  const voiceProfile = {
+    tone: 'optimist', topics: ['ai', 'startup', 'vc', 'software', 'agents', 'openai', 'robotics', 'energy'], antiGoals: [],
+    summary: 'You are GEOFF. Your voice is optimist. Your communication style is direct and concise.',
+    communicationStyle: 'ACCOUNT TOPIC POLICY FOR @geoffwoo: broad native voice.\n## OPERATOR VOICE REFERENCE\nHigh signal writing. Specific sound, quality, philosophy, point, current demand, modern response and familiar rhythm.\n## LEARNED GUIDANCE\nThese instructions describe expression, not interest in audio.',
+  };
+
+  it('does not turn diction or incidental words in network prose into owner interest', () => {
+    const learnings = { manualTopicProfile: [{ topic: 'crypto',
+      angle: 'usepaid legit cool baked payment viral gtm mechanism',
+      sampleCount: 1, weight: 5, avgEngagement: 20, topTweets: [],
+    }] } as AgentLearnings;
+    const [topic] = enrichTrendingTopics([receiver], voiceProfile, learnings);
+    expect(topic.fitScores).toMatchObject({ soul: 0, manual: 0, identityFit: 0 });
+
+    const [signal] = selectOperatorTopicSignals([receiver], voiceProfile, null, 'moderate', 4, now);
+    expect(signal).toMatchObject({
+      id: receiver.networkTopicId, identityScore: 0,
+      operatorEngagementScore: 0, sourceCount: 1, selectionBasis: 'network_momentum',
+    });
+  });
+
+  it('ranks explicit AI topics and authored investing interests above unengaged network exploration', () => {
+    const ai = { ...receiver, id: 5, networkTopicId: 'network-openai',
+      category: 'OpenAI inference pricing', headline: 'OpenAI inference pricing changes the cost of production agents',
+      entities: ['OpenAI'], semanticDomain: 'ai_compute' as const, sourceCount: 2, networkMomentumScore: 0.55,
+    };
+    const investing = { ...receiver, id: 6, networkTopicId: 'network-qqq',
+      category: 'QQQ public market investing', headline: 'QQQ public market investing and portfolio concentration',
+      entities: ['QQQ'], semanticDomain: 'finance_investing' as const, sourceCount: 2, networkMomentumScore: 0.55,
+    };
+    const learnings = { manualTopicProfile: [{ topic: 'public market investing',
+      angle: 'portfolio concentration', sampleCount: 3, weight: 5, avgEngagement: 20, topTweets: [],
+    }] } as AgentLearnings;
+    const selected = selectOperatorTopicSignals([receiver, ai, investing], voiceProfile, learnings, 'moderate', 4, now);
+    expect(new Set(selected.slice(0, 2).map((signal) => signal.id))).toEqual(new Set(['network-openai', 'network-qqq']));
+    expect(selected.slice(0, 2).every((signal) => signal.identityScore >= 0.85)).toBe(true);
+    expect(selected[2]).toMatchObject({ id: receiver.networkTopicId, identityScore: 0 });
+  });
+
+  it('keeps low-fit exploration to one subject while preserving direct owner engagement', () => {
+    const second = { ...receiver, id: 7, networkTopicId: 'network-second-audio',
+      category: 'Sansui amplifier controls', headline: 'Sansui amplifier controls and interface design' };
+    const selected = selectOperatorTopicSignals([receiver, second], voiceProfile, null, 'moderate', 4, now);
+    expect(selected).toHaveLength(1);
+    const withEngagement = selectOperatorTopicSignals([receiver, { ...second, operatorEngagementScore: 0.9 }], voiceProfile, null, 'moderate', 4, now);
+    expect(withEngagement.map((signal) => signal.id)).toEqual(['network-second-audio', receiver.networkTopicId]);
+    expect(withEngagement[0].identityScore).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it('keeps a network brief exploratory and does not relabel source authors as operator writing', () => {
+    const briefs = buildGenerationBriefsV2({ count: 2, stories: [], documents: [],
+      voiceProfile, analysis: { engagementPatterns: { topTopics: ['AI'] } } as any,
+      learnings: null, style: { autonomyMode: 'balanced', trendMixTarget: 25,
+        trendTolerance: 'moderate', exploration: { underusedTopics: [] } } as any,
+      trending: [receiver], allTweets: [], now: new Date(now),
+    });
+    const brief = briefs.find((entry) => entry.trendTopicId === receiver.networkTopicId);
+    expect(brief).toMatchObject({ identityScore: 0, sourceLane: 'trend_adjacent_explore',
+      evidenceMode: 'operator_opinion', evidence: [], sourceDocumentIds: [],
+    });
+    expect(brief?.summary).toContain('1 source author');
+    expect(brief?.summary).toContain('no direct operator engagement was observed');
+    expect(brief?.summary).not.toContain('operator-written posts');
+    expect(brief?.sourceBrief).toContain('FOLLOWED-NETWORK TOPIC SIGNAL');
+    expect(brief?.sourceBrief).toContain('identity=0.000');
+    expect(brief?.sourceBrief).toContain(`topicId=${receiver.networkTopicId}`);
+    expect(JSON.stringify(brief)).not.toContain(receiver.topTweet.text);
+  });
 });

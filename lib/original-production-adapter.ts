@@ -23,6 +23,8 @@ import { jobFingerprint } from './generation-job';
 import { stableResearchId } from './research-utils';
 import type { DraftCandidate, IdeaCandidate, GenerationModelCallTrace, GenerationRunTrace, SourceDocument } from './types';
 import type { RankedPublishingCandidate } from './publishing-candidate';
+import { claimEditorialSteeringForJob, completeEditorialSteeringJob, type EditorialSteeringGuidance } from './editorial-steering';
+import { selectApprovedEditExamples } from './learning-loop';
 
 export const ORIGINAL_PRODUCTION_VERSION = 'simple-original-4';
 type Subject = GenerationBriefV2 & { editorialContext: OriginalEditorialContext };
@@ -115,7 +117,7 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
       const liveStories = await getStoryClusters(input.agentId, 200);
       if (required.some(subject => subject.storyClusterId && !liveStories.some(story => story.id === subject.storyClusterId && isStoryEditoriallyQualifiedV2(story) && !story.blockReason))) throw new Error('stale_evidence');
     };
-    const prepareSubjects = async (briefs: GenerationBriefV2[], preservePackets = false): Promise<Subject[]> => {
+    const prepareSubjects = async (briefs: GenerationBriefV2[], preservePackets = false, steering: EditorialSteeringGuidance[] = []): Promise<Subject[]> => {
         const attestation = await getOwnerAuthorshipAttestation(input.agentId);
         const anchors = collectOperatorAnchors(input);
         const references = input.learnings?.operatorVoiceReference;
@@ -130,10 +132,19 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
         return briefs.map(brief => {
           const subjectPacket = preservePackets ? structuredClone(brief.subjectPacket) : buildSubjectPacket(brief, documents, session.job.createdAt);
           if (!subjectPacket) throw new Error('stale_evidence');
-          const editorialContext = buildOriginalEditorialContext({ voiceProfile: input.voiceProfile, subject: subjectPacket,
+          // A release must not retroactively coach already purchased copy. New
+          // owner direction belongs to the next unfrozen subject selection.
+          const priorContext = (brief as Subject).editorialContext;
+          const frozenContext = preservePackets && priorContext
+            && ['original-editorial-context-2', 'original-editorial-context-3'].includes(priorContext.contextVersion) ? priorContext : null;
+          const editorialContext = frozenContext ? structuredClone(frozenContext) : buildOriginalEditorialContext({ voiceProfile: input.voiceProfile, subject: subjectPacket,
             contentMode: brief.evidenceMode === 'operator_opinion' ? 'opinion' : 'observation', voiceExamples: examples,
             previousPremises: input.recentPosts, portfolioCompanyContext: brief.portfolioCompanyContext,
-            verifiedEntityMentions: brief.verifiedEntityMentions });
+            verifiedEntityMentions: brief.verifiedEntityMentions, editorialSteering: steering,
+            acceptedEdits: selectApprovedEditExamples((input.signals || []).filter(signal =>
+              !['edited_before_queue', 'edited_before_post', 'taste_calibration_edit'].includes(signal.signalType)
+              || signal.metadata?.acceptedEdit === true && signal.metadata?.evaluationOnly !== true
+                && signal.metadata?.reservedForEvaluation !== true && signal.metadata?.holdout !== true), brief.topic, 2) });
           if (editorialContext.voiceExamples.length < Math.max(1, Math.min(3, input.learnings?.voiceCorpus?.minimumAnchorCount || 3))) throw new Error('voice_not_ready');
           return { ...brief, subjectPacket, editorialContext };
         });
@@ -198,16 +209,37 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
     }
     const result = await runOriginalProduction<Subject, DraftEvaluation>({ session, deps: {
       loadSubjects: async () => {
-        const built = buildGenerationBriefsV2({ count: 1, requestedTopic: input.requestedTopic, stories, documents,
+        const steering = await session.checkpoint('editorial_steering', async () => {
+          try { return await claimEditorialSteeringForJob(input.agentId, runId); }
+          catch {
+            // Optional coaching availability cannot disable an otherwise funded
+            // worker. Preserve the gap explicitly instead of claiming it applied.
+            await session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, editorialSteeringUnavailable: true } }));
+            return [] as EditorialSteeringGuidance[];
+          }
+        });
+        const build = (requestedTopic?: string | null) => buildGenerationBriefsV2({ count: 1, requestedTopic, stories, documents,
           voiceProfile: input.voiceProfile, analysis: input.analysis, learnings: input.learnings, style: input.style,
           trending: input.trending, allTweets: input.allTweets, signals: input.signals, blocks, recentIdeas,
           seedRotationKey: runId, dynamicIdeaSeeds, durable: true });
-        const qualified = built.filter(b => b.evidenceMode === 'operator_opinion'
+        const qualifies = (b: GenerationBriefV2) => b.evidenceMode === 'operator_opinion'
           ? b.sourceLane === 'manual_core_exploit' && b.identityScore >= .68
-          : b.sourceDocumentIds.length > 0 && b.qualifiedClaimIds.length > 0);
-        const subjects = await prepareSubjects(prioritizeCurrentInterestBriefsV2(qualified, runId, true).slice(0, 2));
+            || Boolean(b.trendTopicId) && ['trend_aligned_exploit', 'trend_adjacent_explore'].includes(b.sourceLane)
+          : b.sourceDocumentIds.length > 0 && b.qualifiedClaimIds.length > 0;
+        const baseline = prioritizeCurrentInterestBriefsV2(build(input.requestedTopic).filter(qualifies), runId, true);
+        const topic = !input.requestedTopic && steering.find(row => row.kind === 'topic' && row.topic)?.topic;
+        // Owner topics use the existing source-free opinion path; they are not
+        // evidence of an event. Unavailable/restricted suggestions leave the
+        // ordinary eligible subject pool available without a wait or paid retry.
+        const preferred = topic ? build(topic).filter(qualifies) : [];
+        const combined = [...preferred, ...baseline].filter((row, index, rows) => rows.findIndex(other => other.id === row.id) === index);
+        const subjects = await prepareSubjects(combined.slice(0, 2), false, steering);
+        const contextIds = [...new Set(subjects.flatMap(subject => subject.editorialContext.editorialSteering?.map(row => row.id) || []))];
+        const topicSelectionId = preferred.length ? steering.find(row => row.kind === 'topic' && row.topic === topic)?.id : undefined;
         // Existing receipt/status readers address this stable artifact name.
-        await session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, briefs: subjects } }));
+        await session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, briefs: subjects,
+          editorialSteeringUse: { contextIds, topicSelectionId: topicSelectionId || null,
+            omittedIds: steering.filter(row => !contextIds.includes(row.id) && row.id !== topicSelectionId).map(row => row.id) } } }));
         return subjects;
       },
       validateSubjects: validate,
@@ -264,7 +296,20 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
     trace.stageCounts.briefs = result.subjects.length;
     trace.selectedDraftIds = result.selected.flatMap(c => c.draftCandidateId ? [c.draftCandidateId] : []);
     trace.status = result.selected.length ? 'completed' : 'empty'; trace.outcomeCode = result.outcome;
-    await record(); return result.selected;
+    await record();
+    if ((session.job.checkpoints.editorial_steering as EditorialSteeringGuidance[] | undefined)?.some(row => row.scope === 'one_off')
+      && (result.selected.length || ['quality_empty', 'no_qualified_context'].includes(result.outcome))) {
+      try {
+        await completeEditorialSteeringJob(input.agentId, runId);
+        if (session.job.checkpoints.editorialSteeringCompletionPending)
+          await session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, editorialSteeringCompletionPending: false } }));
+      } catch {
+        // The exact paid assessment remains valid when optional learning
+        // bookkeeping is unavailable. Same-job replay retries this idempotently.
+        await session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, editorialSteeringCompletionPending: true } })).catch(() => undefined);
+      }
+    }
+    return result.selected;
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'provider_failure';
     trace.status = 'failed'; trace.error = reason;

@@ -869,6 +869,28 @@ function operatorTopicEvidenceReference(
   brief: GenerationBriefV2,
   input: GenerateTweetBatchV2Input,
 ): GenerationEvidenceReference {
+  if (brief.trendTopicId) {
+    const topic = input.trending?.find((entry) => (
+      String(entry.networkTopicId || entry.id) === brief.trendTopicId
+    ));
+    const urls = uniqueStrings([
+      topic?.sourceUrl,
+      ...(topic?.evidence || []).map((entry) => entry.sourceUrl),
+    ], 4);
+    return {
+      id: stableResearchId('network-topic', input.agentId, brief.trendTopicId, brief.observedAt || ''),
+      kind: 'operator_topic',
+      sourceDocumentId: null,
+      url: urls[0] || null,
+      title: `Followed-network subject: ${brief.topic}`,
+      publisher: topic?.publisher || topic?.source || 'X followed network',
+      content: `${brief.sourceBrief} Subject-selection provenance only; this is not operator-authored history or support for external factual claims.${urls.length ? ` Source URLs: ${urls.join(', ')}.` : ''}`,
+      publishedAt: topic?.timestamp || null,
+      verifiedAt: brief.observedAt || topic?.observedAt || null,
+      expiresAt: null,
+      trustTier: null,
+    };
+  }
   return {
     id: stableResearchId(
       'operator-topic',
@@ -917,8 +939,11 @@ function operatorTopicBrief(
   creativeSeed: FrontierIdeaSeed | null = null,
   personalTopicSignals: string[] = [],
   personalTopicSignalPremises: string[] = [],
+  networkSignal?: OperatorTopicSignal,
 ): GenerationBriefV2 {
-  const historyPrefix = sampleCount
+  const historyPrefix = networkSignal
+    ? `Followed-network context: ${networkSignal.sourceCount} source author${networkSignal.sourceCount === 1 ? '' : 's'}. ${networkSignal.selectionBasis === 'operator_engagement' ? 'Direct operator engagement supports subject interest.' : 'Network momentum supplies this exploration cue; no direct operator engagement was observed.'} `
+    : sampleCount
     ? `Topic-level history: ${sampleCount} operator-written posts. `
     : '';
   const mechanics = spreadMechanics.length > 0
@@ -931,7 +956,9 @@ function operatorTopicBrief(
   return {
     id: stableResearchId('brief', 'operator', index, topic, provenance),
     topic,
-    sourceLane: 'manual_core_exploit',
+    sourceLane: networkSignal
+      ? identityScore >= 0.45 ? 'trend_aligned_exploit' : 'trend_adjacent_explore'
+      : 'manual_core_exploit',
     storyClusterId: null,
     title: topic,
     summary,
@@ -1708,15 +1735,17 @@ export function rotateBudgetedBriefsV2<T>(briefs: T[], runId: string): T[] {
   return [...briefs.slice(offset), ...briefs.slice(0, offset)];
 }
 
-export function prioritizeCurrentInterestBriefsV2<T extends { trendTopicId?: string | null; storyClusterId?: string | null }>(briefs: T[], runId: string, durable = false): T[] {
+export function prioritizeCurrentInterestBriefsV2<T extends { trendTopicId?: string | null; storyClusterId?: string | null; identityScore?: number }>(briefs: T[], runId: string, durable = false): T[] {
   if (durable) {
     // A sourced current interest wins; otherwise compare a research packet
     // against an interest/opinion packet before funding one writer.
     const sourced = briefs.filter(b => b.storyClusterId);
-    const opinion = briefs.filter(b => !b.storyClusterId);
+    const exploratory = (b: T) => Boolean(b.trendTopicId) && b.identityScore !== undefined && b.identityScore < .45;
+    const ordered = [...briefs.filter(b => !exploratory(b)), ...briefs.filter(exploratory)];
+    const opinion = ordered.filter(b => !b.storyClusterId);
     const first = sourced.find(b => b.trendTopicId) || rotateBudgetedBriefsV2(sourced, runId)[0];
-    const second = opinion.find(b => b.trendTopicId) || sourced.find(b => b !== first) || opinion[0];
-    return [...new Set([first, second, ...briefs].filter(Boolean))] as T[];
+    const second = opinion.find(b => b.trendTopicId && !exploratory(b)) || sourced.find(b => b !== first) || opinion[0];
+    return [...new Set([first, second, ...ordered].filter(Boolean))] as T[];
   }
   return [
     ...briefs.filter(brief => Boolean(brief.trendTopicId) && !brief.storyClusterId),
@@ -2319,11 +2348,14 @@ export function buildGenerationBriefsV2({
     const brief = operatorTopicBrief(
       signal.subject,
       briefs.length,
-      Math.max(0.68, signal.identityScore),
+      signal.identityScore,
       `recent ${signal.selectionBasis === "network_momentum" ? "followed-network momentum" : "operator engagement"} topic signal ${signal.id}`,
-      signal.sourceCount,
+      undefined,
       [],
       null,
+      [],
+      [],
+      signal,
     );
     briefs.push({
       ...brief,
@@ -2337,7 +2369,7 @@ export function buildGenerationBriefsV2({
         relationshipStatus: 'unverified',
       },
       verifiedEntityMentions: buildVerifiedEntityMentions({ entityRoles: signal.entityRoles }),
-      sourceBrief: `OPERATOR TOPIC SIGNAL [subject=${signal.subject}; topicId=${signal.id}; basis=${signal.selectionBasis || "operator_engagement"}; momentum=${(signal.networkMomentumScore || 0).toFixed(3)}; engagement=${signal.operatorEngagementScore.toFixed(3)}; confidence=${signal.topicConfidence.toFixed(3)}; entityRoles=${signal.entityRoles.map((entry) => `${entry.name}:${entry.role}`).join(',') || 'unknown'}; strippedEvents=${signal.strippedEventTerms.join(',') || 'none'}] Subject cue only. It cannot support a headline, relationship, action, number, quote, or factual claim.`,
+      sourceBrief: `FOLLOWED-NETWORK TOPIC SIGNAL [subject=${signal.subject}; topicId=${signal.id}; basis=${signal.selectionBasis || "operator_engagement"}; sourceAuthors=${signal.sourceCount}; identity=${signal.identityScore.toFixed(3)}; momentum=${(signal.networkMomentumScore || 0).toFixed(3)}; engagement=${signal.operatorEngagementScore.toFixed(3)}; confidence=${signal.topicConfidence.toFixed(3)}; entityRoles=${signal.entityRoles.map((entry) => `${entry.name}:${entry.role}`).join(',') || 'unknown'}; strippedEvents=${signal.strippedEventTerms.join(',') || 'none'}] Subject cue only. Source authors are network authors, not operator-written posts. It cannot support a headline, relationship, action, number, quote, or factual claim.`,
     });
     usedTopics.add(key);
     reservedConcreteSubjects.push(signal.subject);
@@ -3968,7 +4000,8 @@ export function normalizeIdeaCandidatesV2({
     const blockIssue = semanticBlockIssue(candidate, blocks);
     if (blockIssue) candidate.rejectionCodes.push(blockIssue);
     if (simpleContract) {
-      const editorial = new Set(['generic_product_wishlist','generic_product_ops_take','synthetic_status_framing','behind_frontier_baseline','basic_ai_take','abstract_comparative_public_move','generated_idea_pattern']);
+      // Historical cues inform topic selection but are not required subjects in the compact contract.
+      const editorial = new Set(['generic_product_wishlist','generic_product_ops_take','synthetic_status_framing','behind_frontier_baseline','basic_ai_take','abstract_comparative_public_move','generated_idea_pattern','personal_topic_subject_dropped']);
       candidate.diagnosticCodes = candidate.rejectionCodes.filter(code=>editorial.has(code) || (candidate.contentMode !== 'prediction' && code.startsWith('idea_frontier_')));
       candidate.rejectionCodes = candidate.rejectionCodes.filter(code=>!candidate.diagnosticCodes!.includes(code));
     }

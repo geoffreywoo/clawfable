@@ -5,8 +5,10 @@ import type { PortfolioCompanyGenerationContext, VoiceCorpusAuthorshipProvenance
 import type { VerifiedEntityMention } from './entity-mentions';
 import { isGeoffreyVoiceProfile } from './account-taste';
 import { GEOFFREY_SUPPRESSED_AUTONOMOUS_COMPANIES, GEOFFREY_PREFERRED_AUTONOMOUS_COMPANIES } from './geoffrey-company-amplification';
+import type { EditorialSteeringGuidance } from './editorial-steering';
+import type { ApprovedEditExample } from './learning-loop';
 
-export const ORIGINAL_EDITORIAL_CONTEXT_VERSION = 'original-editorial-context-2';
+export const ORIGINAL_EDITORIAL_CONTEXT_VERSION = 'original-editorial-context-3';
 export const ORIGINAL_VOICE_EXAMPLE_LIMIT = 3;
 export const ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS = 20_000;
 
@@ -41,6 +43,9 @@ export interface OriginalEditorialContext extends EditorialContext {
   forecastExpectations: string[];
   exampleUse: string;
   exampleRefs: Array<Pick<OriginalVoiceExample, 'id' | 'provenance' | 'authorshipAttestationId'>>;
+  /** Optional owner preferences and whole accepted edits, frozen with this job. */
+  editorialSteering?: EditorialSteeringGuidance[];
+  acceptedEdits?: ApprovedEditExample[];
   /** Audit which generated appendices were kept out of the compact owner contract. */
   excludedApplicationSections: string[];
 }
@@ -186,6 +191,8 @@ export function buildOriginalEditorialContext(input: {
   contentMode: EditorialContext['contentMode'];
   ownerGuidance?: OriginalOwnerGuidance[];
   voiceExamples: OriginalVoiceExample[];
+  editorialSteering?: EditorialSteeringGuidance[];
+  acceptedEdits?: ApprovedEditExample[];
   previousPremises?: string[];
   portfolioCompanyContext?: PortfolioCompanyGenerationContext | null;
   verifiedEntityMentions?: VerifiedEntityMention[];
@@ -233,5 +240,21 @@ export function buildOriginalEditorialContext(input: {
     excludedApplicationSections: compactStyle.excluded,
   };
   boundedText(JSON.stringify(context), 'total', ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS);
+  // Omit oversized whole examples rather than truncate an owner's correction
+  // or turn a full optional memory into a new production blocker.
+  for (const guidance of (input.editorialSteering || []).slice(0, 4)) {
+    if (guidance.provenance !== 'explicit_authenticated_owner' || !guidance.instruction.trim()) continue;
+    const next = [...context.editorialSteering || [], structuredClone(guidance)];
+    if (JSON.stringify({ ...context, editorialSteering: next }).length <= ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS)
+      context.editorialSteering = next;
+  }
+  for (const edit of input.acceptedEdits || []) {
+    if ((context.acceptedEdits?.length || 0) >= 2) break;
+    if (!edit.before.trim() || !edit.after.trim() || edit.before === edit.after
+      || edit.before.length > 1200 || edit.after.length > 1200 || edit.lesson.length > 500) continue;
+    const next = [...context.acceptedEdits || [], structuredClone(edit)];
+    if (JSON.stringify({ ...context, acceptedEdits: next }).length <= ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS)
+      context.acceptedEdits = next;
+  }
   return context;
 }

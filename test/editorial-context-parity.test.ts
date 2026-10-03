@@ -195,7 +195,7 @@ describe('paired editorial assessment context', () => {
       expect(payload.selectedThought).toEqual(positive.assessmentContext.selectedThought);
       expect(payload).not.toHaveProperty('context');
       expect(captured.system).toContain('ownerRestrictions bind');
-      expect(captured.system).toContain('stylePreferences inform editorial quality');
+      expect(captured.system).toContain('stylePreferences and editorialSteering inform editorial quality');
       expect(captured.prompt).not.toMatch(/"(?:expectedHardBlocker|pairedId|rationale|case|contextHash|assessmentContextHash|contentHash)"/);
       for (const variant of variants) expect(captured.prompt).not.toContain(variant.rationale);
     }

@@ -59,7 +59,7 @@ describe('compact original prompts', () => {
     expect(recompose(ideation.prompt)[0].context).toEqual(JSON.parse(writing.prompt).context);
     for (const result of [ideation, writing]) {
       expect(result.system).toContain('ownerRestrictions bind');
-      expect(result.system).toContain('stylePreferences guide ranking, not vetoes');
+      expect(result.system).toContain('stylePreferences and editorialSteering guide ranking, not vetoes');
       expect(result.system).toContain('retain attribution and uncertainty');
       expect(result.system).toContain('company claims are not independently verified');
       expect(result.system).toContain('Evidence IDs are subject.sourceIds');

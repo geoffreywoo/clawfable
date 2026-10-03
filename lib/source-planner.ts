@@ -404,27 +404,15 @@ function identityTokens(value: string): Set<string> {
   );
 }
 
-function profileContextFitScore(label: string, voiceProfile: VoiceProfile): number {
-  const candidate = identityTokens(label);
-  if (candidate.size === 0) return 0;
-  const nativeCommunicationStyle = voiceProfile.communicationStyle
-    .split(/\n## ACCOUNT (?:TOPIC|ANTI-SLOP) POLICY\b/i)[0];
-  const context = identityTokens(`${voiceProfile.summary} ${nativeCommunicationStyle}`);
-  const overlap = [...candidate].filter((token) => context.has(token)).length;
-  if (overlap >= 4) return 0.82;
-  if (overlap === 3) return 0.68;
-  if (overlap === 2) return 0.5;
-  if (overlap === 1) return 0.16;
-  return 0;
-}
-
 function manualFitScore(topic: Pick<TrendingTopic, 'category' | 'headline' | 'topTweet'>, clusters: ManualTopicCluster[]): number {
-  const haystack = `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`.toLowerCase();
+  const haystack = `${topic.category} ${topic.headline}`.toLowerCase();
   let best = 0;
   for (const cluster of clusters) {
     const topicMatch = topicFitScore(haystack, [cluster.topic]);
     const angleMatch = topicFitScore(haystack, [cluster.angle]);
-    best = Math.max(best, Math.max(topicMatch, angleMatch * 0.85));
+    // One incidental word in a historical premise (for example "mechanism")
+    // does not demonstrate interest in a different subject.
+    best = Math.max(best, topicMatch, angleMatch >= 0.5 ? angleMatch * 0.85 : 0);
   }
   return best;
 }
@@ -465,8 +453,17 @@ export function assessNativeTopicIdentity(
   voiceProfile: VoiceProfile,
   learnings: AgentLearnings | null,
 ): NativeTopicIdentityAssessment {
-  const haystack = `${topic.category} ${topic.headline} ${topic.topTweet?.text || ''}`;
+  // Diction instructions and incidental words in a long network post are not
+  // evidence that the owner cares about its subject. Compare the classified
+  // subject to explicit interests and authored topic history instead.
+  const haystack = `${topic.category} ${topic.headline}`;
   const semanticDomain = classifyGeoffreyTopicDomain(haystack, topic.semanticDomain);
+  const explicitTopicFit = topicFitScore(haystack, voiceProfile.topics);
+  const manual = manualFitScore(topic, learnings?.manualTopicProfile || []);
+  const nativeDomains = new Set<TopicSemanticDomain>([
+    ...voiceProfile.topics,
+    ...(learnings?.manualTopicProfile || []).map((cluster) => cluster.topic),
+  ].map((subject) => classifyGeoffreyTopicDomain(subject)).filter((domain) => domain !== 'other'));
   const operatorEngagementBridge = isGeoffreyVoiceProfile(voiceProfile)
     && !RESTRICTED_EXPLORATION_DOMAINS.has(semanticDomain)
     && Number(topic.operatorEngagementScore || 0) >= 0.7
@@ -476,6 +473,7 @@ export function assessNativeTopicIdentity(
     const relevantEvent = GEOFFREY_RELEVANT_EVENT_PATTERN.test(haystack)
       || GEOFFREY_AI_TOKEN_PATTERN.test(haystack);
     if (!isGeoffreyVoiceProfile(voiceProfile) || !relevantEvent) return 0;
+    if (explicitTopicFit === 0 && manual === 0 && !nativeDomains.has(semanticDomain)) return 0;
     const headline = topic.headline.trim();
     const category = normalizeTopic(topic.category);
     const broadCategory = BROAD_IDENTITY_TOPICS.has(category);
@@ -495,12 +493,10 @@ export function assessNativeTopicIdentity(
     return 0;
   })();
   const soul = Math.max(
-    topicFitScore(haystack, voiceProfile.topics),
-    profileContextFitScore(haystack, voiceProfile),
+    explicitTopicFit,
     geoffreyConcreteBridge,
     operatorEngagementBridge,
   );
-  const manual = manualFitScore(topic, learnings?.manualTopicProfile || []);
   const identityFit = Math.max(soul, manual);
   return {
     soul: Number(soul.toFixed(3)),
@@ -802,6 +798,15 @@ export type OperatorTopicSignalRejectionCode =
   | 'event_only_subject'
   | 'promotional_source';
 
+function hasNetworkTopicMomentum(topic: TrendingTopic): boolean {
+  return Number(topic.networkMomentumScore || 0) >= 0.5
+    && Number(topic.topicConfidence || 0) >= 0.65
+    && (Number(topic.sourceCount || 0) >= 2
+      || (Number(topic.networkMomentumScore || 0) >= 0.6
+        && Number(topic.networkBreakoutScore || 0) >= 0.65
+        && Number(topic.topicConfidence || 0) >= 0.8));
+}
+
 export function getOperatorTopicSignalRejectionCodes(
   topic: EnrichedTrendingTopic,
   normalized?: { category: string; wordCount: number; domain: TopicSemanticDomain; nowMs?: number },
@@ -815,16 +820,13 @@ export function getOperatorTopicSignalRejectionCodes(
   const observedAt = Date.parse(topic.observedAt || topic.timestamp);
   if (!Number.isFinite(observedAt) || (normalized?.nowMs ?? Date.now()) - observedAt > 24 * 60 * 60 * 1000 || observedAt > (normalized?.nowMs ?? Date.now()) + 5 * 60 * 1000) codes.push('stale_topic_signal');
   const engaged = Number(topic.operatorEngagementScore || 0) >= 0.7;
-  const networkBreakout = Number(topic.networkMomentumScore || 0) >= 0.5
-    && Number(topic.topicConfidence || 0) >= 0.65
-    && (Number(topic.sourceCount || 0) >= 2
-      || (Number(topic.networkMomentumScore || 0) >= 0.6
-        && Number(topic.networkBreakoutScore || 0) >= 0.65
-        && Number(topic.topicConfidence || 0) >= 0.8));
+  const networkBreakout = hasNetworkTopicMomentum(topic);
   if (!engaged && !networkBreakout) codes.push('operator_engagement_below_floor');
   if (Number(topic.topicConfidence || 0) < 0.55) codes.push('topic_confidence_below_floor');
   if (topic.topicUncertainty === 'high') codes.push('topic_uncertainty_high');
-  if (topic.fitScores.identityFit < 0.45) codes.push('identity_below_floor');
+  // A fresh, specific core-network subject can be explored without claiming
+  // owner interest. Keep its actual fit score and rank it below native subjects.
+  if (topic.fitScores.identityFit < 0.45 && !networkBreakout) codes.push('identity_below_floor');
   if (!isCoreGeoffreyTopicDomain(domain)) codes.push('off_core_domain');
   if (RESTRICTED_EXPLORATION_DOMAINS.has(domain)) codes.push('restricted_domain');
   if (
@@ -890,6 +892,7 @@ export function selectOperatorTopicSignals(
 ): OperatorTopicSignal[] {
   const boundedLimit = Math.max(0, Math.min(12, Math.floor(limit)));
   if (boundedLimit === 0) return [];
+  let explorationSelected = false;
   return enrichTrendingTopics(trending, voiceProfile, learnings, tolerance)
     .filter(topic => isSpecificOperatorSubjectSignal(topic, nowMs))
     .filter((topic) => !isVoiceProfileTopicBlocked(
@@ -899,10 +902,16 @@ export function selectOperatorTopicSignals(
     ))
     .sort((left, right) => (
       Number(right.operatorEngagementScore || 0) - Number(left.operatorEngagementScore || 0)
-      || Number(right.networkMomentumScore || 0) - Number(left.networkMomentumScore || 0)
       || right.fitScores.identityFit - left.fitScores.identityFit
+      || Number(right.networkMomentumScore || 0) - Number(left.networkMomentumScore || 0)
       || right.fitScores.total - left.fitScores.total
     ))
+    .filter((topic) => {
+      if (topic.fitScores.identityFit >= 0.45) return true;
+      if (explorationSelected) return false;
+      explorationSelected = true;
+      return true;
+    })
     .slice(0, boundedLimit)
     .map((topic) => {
       const subject = operatorTopicSignalSubject(topic);
