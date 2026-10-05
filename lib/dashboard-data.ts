@@ -424,7 +424,7 @@ const getCachedLivePublicSoulProfile = unstable_cache(
       getPerformanceHistory(agent.id, 50),
     ]);
 
-    const topTweets = (agent.id === 5 ? uniqueAntiHunterPerformance(perfHistory) : perfHistory)
+    const topTweets = (agent.id === '5' ? uniqueAntiHunterPerformance(perfHistory) : perfHistory)
       .sort((a, b) => (b.likes + b.retweets) - (a.likes + a.retweets))
       .slice(0, 5)
       .map((tweet) => ({
