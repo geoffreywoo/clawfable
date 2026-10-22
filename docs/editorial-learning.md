@@ -41,3 +41,19 @@ Historical cue words explain selection and remain diagnostics on the simple orig
 Offer a compact optional morning/afternoon topic slate. Record explicit feedback as topic, take or copy, linking the actual draft/idea when available; default tentative selections to one-off, and use standing only for explicit continuing direction. Persist through the authenticated API, read back the record, and verify its ID appears in a later frozen job. An assistant suggestion that receives no reply is not owner evidence. The production worker remains the sole X writer. Check publication through official X APIs.
 
 Keep the operational runbook and append-only observations in `.gstack/continuous-posting/`. Measure delivery, reserve replenishment and spending separately from deployment success. Feedback bookkeeping failures must not discard a qualified paid candidate.
+
+## Audience outcomes in topic selection
+
+The durable original worker now derives a bounded topic prior from mature stored X measurements. It uses distinct, locally matched originals from the last ninety days, requires at least five account baseline posts and two posts in a topic, and smooths sparse topic results toward the account baseline. Only the latest valid mature measurement of each exact X ID contributes. Early projections, sticky viral flags, replies, reposts, deleted or quarantined items and evaluation examples cannot supply this prior.
+
+The prior adjusts allocation among existing qualified account topics by at most 0.12 in either direction. It cannot establish a new owner interest, create a factual source, supply a voice example, approve a repeated take or become a hard topic ban. A recently committed topic receives no positive boost. Owner topic requests, current-interest/source priorities, exploration and all publishing checks retain their separate roles. A popular topic still needs a fresh thought; returning takes still need measured viral proof and spacing.
+
+`topic_outcome_learning` freezes the measurements, distinct evidence IDs, sample sizes, baseline and adjustments before a new job selects its subjects. Each affected brief retains its own effective prior. Metrics refreshes do not change already frozen subjects or repurchase completed calls. A failed optional learning read records `topicOutcomeLearningUnavailable` and leaves ordinary selection available. There are no additional model calls.
+
+## Shared application report
+
+`GET /api/agents/[id]/editorial-learning` is an account-authenticated, read-only view backed by `getEditorialLearningStatus`. It combines existing steering, retained jobs, actual subject contexts, stage artifacts and resulting account tweets. It also returns current topic-outcome learning so the same derivation can inform the app and Codex's editorial work.
+
+Read per-subject inclusion rather than assuming a union of IDs means every subject received every instruction. The report distinguishes saved direction, frozen context, completed model artifacts, queue records and app-recorded X IDs. A completed call artifact is execution evidence, not independent proof of compliance with every instruction. App-recorded publication IDs still require official X readback before reporting verified publication. Historical jobs may retain direction that has since been revoked; revocation affects future jobs.
+
+Codex consumes this app service for learning readback instead of maintaining a second interpretation in its status helper. Chat presentation, optional check-in delivery history and external release/publication verification remain Codex responsibilities. The production worker remains the sole autonomous writer.

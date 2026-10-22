@@ -26,6 +26,7 @@ import type { RankedPublishingCandidate } from './publishing-candidate';
 import { claimEditorialSteeringForJob, completeEditorialSteeringJob, type EditorialSteeringGuidance } from './editorial-steering';
 import { selectApprovedEditExamples } from './learning-loop';
 import { buildOriginalRepetitionContext } from './original-repetition';
+import { buildEditorialTopicOutcomeLearning } from './editorial-topic-learning';
 
 export const ORIGINAL_PRODUCTION_VERSION = 'simple-original-4';
 type Subject = GenerationBriefV2 & { editorialContext: OriginalEditorialContext };
@@ -233,10 +234,24 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
             return [] as EditorialSteeringGuidance[];
           }
         });
+        // A bounded audience prior ranks existing owner topics. Freeze the
+        // actual measurements before selection so a later metrics refresh
+        // cannot change a paid job's subject allocation or prompt contract.
+        const topicOutcomeLearning = await session.checkpoint('topic_outcome_learning', async () => {
+          try {
+            return buildEditorialTopicOutcomeLearning({ tweets: input.allTweets,
+              performance: await getPerformanceHistory(input.agentId, 5000), now: Date.now() });
+          } catch {
+            // Optional outcome learning must not turn an available publishing
+            // worker into a wait for analytics or another model call.
+            await session.write(job => ({ ...job, checkpoints: { ...job.checkpoints, topicOutcomeLearningUnavailable: true } }));
+            return null;
+          }
+        });
         const build = (requestedTopic?: string | null) => buildGenerationBriefsV2({ count: 1, requestedTopic, stories, documents,
           voiceProfile: input.voiceProfile, analysis: input.analysis, learnings: input.learnings, style: input.style,
           trending: input.trending, allTweets: input.allTweets, signals: input.signals, blocks, recentIdeas,
-          seedRotationKey: runId, dynamicIdeaSeeds, durable: true });
+          seedRotationKey: runId, dynamicIdeaSeeds, durable: true, topicOutcomeLearning });
         const qualifies = (b: GenerationBriefV2) => b.evidenceMode === 'operator_opinion'
           ? b.sourceLane === 'manual_core_exploit' && b.identityScore >= .68
             || Boolean(b.trendTopicId) && ['trend_aligned_exploit', 'trend_adjacent_explore'].includes(b.sourceLane)

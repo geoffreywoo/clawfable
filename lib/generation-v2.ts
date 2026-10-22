@@ -98,6 +98,7 @@ import { getAutonomyConfidenceThreshold } from './autonomy-policy';
 import { isUnderTestedBanditArm, scoreLearnedArmPrior } from './bandit';
 import { DYNAMIC_SEED_TTL_DAYS, pruneExpiredDynamicSeeds, type DynamicIdeaSeed } from './seed-synthesis';
 import { selectApprovedEditExamples, type ApprovedEditExample } from './learning-loop';
+import { editorialTopicOutcomePriorFor, type EditorialTopicOutcomeLearning, type EditorialTopicOutcomePrior } from './editorial-topic-learning';
 import { getAuthorityProofIssue } from './virality-signals';
 import {
   inferAudienceSegment,
@@ -525,6 +526,8 @@ export interface OperatorTopicContextV2 {
 }
 
 export interface GenerationBriefV2 {
+  /** Measured topic allocation evidence; never a new subject interest or factual source. */
+  topicOutcomeLearning?: EditorialTopicOutcomePrior;
   subjectPacket?: SubjectPacket;
   observedAt?: string;
   id: string;
@@ -1068,6 +1071,7 @@ interface OperatorTopicCandidateV2 {
   personalTopicSignalPremises?: string[];
   spreadMechanics: string[];
   priorityScore: number;
+  topicOutcomeLearning?: EditorialTopicOutcomePrior;
 }
 
 const PERSONAL_TOPIC_SIGNAL_GENERIC_TOKENS = new Set([
@@ -1408,7 +1412,8 @@ function rankOperatorTopicCandidates(
     const rotation = seedRotationKey
       ? (seedRotationOffset(`${seedRotationKey}:${key}`) % 1000) / 1000
       : 0;
-    return candidate.priorityScore - committedPenalty - attemptedPenalty + rotation * 0.08;
+    return candidate.priorityScore - committedPenalty - attemptedPenalty + rotation * 0.08
+      + (candidate.topicOutcomeLearning?.adjustment || 0);
   };
   return [...candidates].sort((left, right) => {
     const leftScore = score(left);
@@ -2060,6 +2065,7 @@ export function buildGenerationBriefsV2({
   seedRotationKey = '',
   dynamicIdeaSeeds = [],
   durable = false,
+  topicOutcomeLearning,
   now = new Date(),
 }: {
   count: number;
@@ -2078,6 +2084,7 @@ export function buildGenerationBriefsV2({
   seedRotationKey?: string;
   dynamicIdeaSeeds?: FrontierIdeaSeed[];
   durable?: boolean;
+  topicOutcomeLearning?: EditorialTopicOutcomeLearning | null;
   now?: Date;
 }): GenerationBriefV2[] {
   const briefCount = Math.max(4, Math.min(8, count * 2));
@@ -2252,12 +2259,19 @@ export function buildGenerationBriefsV2({
     return true;
   };
 
+  const recentTopicKeys = new Set(committedTweets.slice(0, 4).map((tweet) => topicKey(tweet.topic || '')));
   const operatorCandidates = operatorTopicCandidates({ voiceProfile, analysis, learnings, style })
     .filter((candidate) => !geoffreyPortfolio || !['crypto', 'politics_geopolitics'].includes(operatorCandidateDomain(candidate)))
     .filter((candidate) => !isGenerationSubjectBlocked(
       voiceProfile,
       `${candidate.topic} ${candidate.historicalAngle || ''} ${(candidate.personalTopicSignals || []).join(' ')}`,
-    ));
+    )).map(candidate => {
+      // Outcomes can adjust an already-qualified subject's allocation, never
+      // create owner interest or outrank explicit requests/current sources.
+      const prior = durable ? editorialTopicOutcomePriorFor(topicOutcomeLearning, candidate.topic,
+        recentTopicKeys.has(topicKey(candidate.topic))) : undefined;
+      return prior ? { ...candidate, topicOutcomeLearning: prior } : candidate;
+    });
 
   // A source portfolio is useful for freshness, but it cannot crowd the
   // operator's durable subjects out of the batch. This keeps the majority of
@@ -2420,7 +2434,6 @@ export function buildGenerationBriefsV2({
     reservedConcreteSubjects.push(pendingPortfolioCompany.name);
   }
 
-  const recentTopicKeys = new Set(committedTweets.slice(0, 4).map((tweet) => topicKey(tweet.topic || '')));
   const recentAttemptedSubjects = recentOperatorAttemptIdeas(
     recentIdeas,
     now,
@@ -2499,6 +2512,7 @@ export function buildGenerationBriefsV2({
     const brief = hydrateDynamicSeedEvidenceV2(nativeBrief, seed, storyCandidates.filter((story) => (
       !briefs.some((existing) => existing.storyClusterId === story.id)
     )), documents, now, voiceProfile);
+    if (candidate.topicOutcomeLearning) brief.topicOutcomeLearning = structuredClone(candidate.topicOutcomeLearning);
     if (!portfolioAllowsTopic(`${brief.topic} ${brief.title}`, brief.topic, brief.portfolioCompanyContext)) return false;
     briefs.push(brief);
     usedTopics.add(key);
