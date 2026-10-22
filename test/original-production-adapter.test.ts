@@ -14,11 +14,14 @@ import { ORIGINAL_EDITORIAL_POLICY_VERSION, ORIGINAL_EDITORIAL_CRITIC_VERSION } 
 import { EDITORIAL_DIMENSIONS } from '@/lib/editorial-contract';
 import { saveEditorialSteering, getEditorialSteering } from '@/lib/editorial-steering';
 import * as steeringStore from '@/lib/editorial-steering';
+import * as storageStore from '@/lib/kv-storage';
+import { compactOriginalRepetitionContext } from '@/lib/original-repetition';
 
 const harness = vi.hoisted(() => ({
   generate: vi.fn(), finalOverall: .99, malformed: false, copyVerdict: 'clear', firstCopyUncertain: false,
   rejectAllPreflight: false, preflightCalls: [] as any[], normalizationCalls: [] as any[], changePublicMove: false,
   normalizedIdPrefix: 'idea', briefRequests: [] as Array<string | undefined>, blockedTopic: '', network: false,
+  repetitionInputs: [] as any[],
   anchors: [
     { id: 'anchor-a', content: 'coffee outside. walking home.', topic: 'health' },
     { id: 'anchor-b', content: 'the little kitchen table is plenty.', topic: 'health' },
@@ -68,7 +71,10 @@ vi.mock('@/lib/generation-v2', async importOriginal => {
       if (harness.rejectAllPreflight) { draft.status = 'rejected'; draft.rejectionCodes = ['final_source_copy_risk']; }
       return { draft, idea, brief, sourceDocuments: documents, anchors };
     },
-    // qualifyOriginalDrafts deliberately remains the real production implementation.
+    qualifyOriginalDrafts: (options: any) => {
+      harness.repetitionInputs.push(structuredClone(options.input.originalRepetitionContext));
+      return actual.qualifyOriginalDrafts(options);
+    },
   };
 });
 
@@ -76,6 +82,7 @@ beforeEach(() => {
   harness.generate.mockReset(); harness.finalOverall = .99; harness.malformed = false; harness.copyVerdict = 'clear'; harness.firstCopyUncertain = false;
   harness.rejectAllPreflight = false; harness.preflightCalls = []; harness.normalizationCalls = []; harness.changePublicMove = false;
   harness.normalizedIdPrefix = 'idea'; harness.briefRequests = []; harness.blockedTopic = ''; harness.network = false;
+  harness.repetitionInputs = [];
   harness.generate.mockImplementation(async (options: GenerateTextOptions) => {
     const payload = JSON.parse(options.prompt);
     let text: string;
@@ -94,7 +101,8 @@ beforeEach(() => {
       ].map(content => ({ ideaId: payload.idea.id, content, format: 'short_punch', posture: 'opinion' })) });
     } else if (options.task === 'copy_judgment') {
       text = (options.jsonSchema as any)?.properties.assessments ? JSON.stringify({ assessments: payload.candidates.map((candidate: any) => ({
-        id: candidate.id, assessment: { editorialScore: harness.finalOverall, explanation: 'A concrete short preference in ordinary words.',
+        id: candidate.id, ...(payload.repetitionContext ? { repetition: { verdict: 'fresh', matchedTweetIds: [], explanation: 'A distinct preference.' } } : {}),
+        assessment: { editorialScore: harness.finalOverall, explanation: 'A concrete short preference in ordinary words.',
           hardBlockers: harness.copyVerdict === 'block' ? ['substantive_duplicate'] : [], diagnostics: [],
           dimensions: Object.fromEntries(EDITORIAL_DIMENSIONS.map(dimension => [dimension, { score: .9, explanation: 'Natural and specific.' }])) },
       })) }) : harness.malformed ? JSON.stringify({ ranking: [], scores: [] }) : JSON.stringify({
@@ -114,8 +122,13 @@ beforeEach(() => {
   });
 });
 
-async function setup(): Promise<GenerateTweetBatchV2Input> {
-  const agentId = `original-adapter-${crypto.randomUUID()}`;
+async function setup(agentId = `original-adapter-${crypto.randomUUID()}`): Promise<GenerateTweetBatchV2Input> {
+  if (agentId === '13') {
+    // Continuous-only cases own their active job and canary. Prior cases may
+    // leave a live lease; never let this fixture resume another test's work.
+    await mutateAiOperationalState(agentId, 'generation-job', () => ({ value: null, result: undefined }));
+    await mutateAiOperationalState(agentId, 'generation-canary', () => ({ value: null, result: undefined }));
+  }
   return {
     agentId, count: 1, modelStack: 'publishing_v2_astra', mode: 'live', durableGeneration: true,
     voiceProfile: { accountHandle: 'geoffwoo', tone: 'casual', topics: ['health'], antiGoals: [],
@@ -128,7 +141,8 @@ async function setup(): Promise<GenerateTweetBatchV2Input> {
         xTweetId: anchor.id, topic: anchor.topic, authorshipProvenance: 'operator_composed',
         voiceCorpusDispositions: ['diction_anchor'] })), startupRegisterExamples: [], bestPerformers: [] } } as any,
     entitlement: { eligible: true, source: 'agent_exemption' } as any,
-    jobSession: new GenerationJobSession(agentId, (await claimGenerationJob(agentId, {}, 'adapter-test-policy'))!),
+    jobSession: new GenerationJobSession(agentId, (await claimGenerationJob(agentId, {},
+      agentId === '13' ? `adapter-test-policy-${crypto.randomUUID()}` : 'adapter-test-policy'))!),
   };
 }
 
@@ -305,6 +319,103 @@ describe('production original adapter', () => {
     expect(stored.every(draft => draft.rejectionCodes.includes('copy_judge_low_quality'))).toBe(true);
     expect(stored.every(draft => draft.rejectionCodes.includes('final_quality_margin'))).toBe(true);
     expect((await getGenerationRuns(input.agentId, 1))[0].outcomeCode).toBe('quality_empty');
+  });
+});
+
+describe('durable repetition comparison context', () => {
+  const published = (agentId: string, content: string, xTweetId: string) => createTweet({
+    agentId, content, type: 'original', status: 'posted', xTweetId,
+    postedAt: new Date(Date.now() - 1000).toISOString(),
+  } as any);
+
+  it('freezes fresh history at first judgment and replays the same paid request after later posts', async () => {
+    const input = await setup('13');
+    input.analysis = { engagementPatterns: { avgLikes: 36, viralThreshold: 108 } } as any;
+    const cacheReset = vi.spyOn(storageStore, 'resetReadCache');
+    const beforeIdea = await published(input.agentId, 'A quiet dinner should leave room to change the plan.', 'x-before-idea');
+    const successful = harness.generate.getMockImplementation()!;
+    let beforeJudge: Awaited<ReturnType<typeof createTweet>> | undefined;
+    let pending = true;
+    harness.generate.mockImplementation(async options => {
+      if (options.task === 'tweet_writing') {
+        beforeJudge = await published(input.agentId, 'A dinner without speeches is a different kind of evening.', 'x-before-judge');
+      }
+      if (options.task === 'copy_judgment' && pending) { pending = false; throw new Error('provider_pending'); }
+      return successful(options);
+    });
+    await expect(generateOriginalProduction(input)).rejects.toThrow('provider_pending');
+    expect(cacheReset).toHaveBeenCalledTimes(1);
+    const key = 'repetition_context:idea-0';
+    const frozen = structuredClone(input.jobSession!.job.checkpoints[key]) as any;
+    expect(frozen.history.viralLikesThreshold).toBe(108);
+    expect(frozen.comparators.map((row: any) => row.tweetId)).toContain(beforeIdea.id);
+    expect(frozen.comparators.map((row: any) => row.tweetId)).toContain(beforeJudge!.id);
+    const ideaPrompt = JSON.parse(harness.generate.mock.calls[0][0].prompt);
+    const ideaHistory = ideaPrompt.sharedContext.repetitionHistory || ideaPrompt.subjects[0].context.repetitionHistory;
+    expect(ideaHistory.history.viralLikesThreshold).toBe(108);
+    expect(ideaHistory.comparators.map((row: any) => row.tweetId)).toContain(beforeIdea.id);
+    expect(ideaHistory.comparators.map((row: any) => row.tweetId)).not.toContain(beforeJudge!.id);
+    const frozenSubjects = structuredClone(input.jobSession!.job.checkpoints.subjects_ready);
+    const afterDispatch = await published(input.agentId, 'The late supper can wait until tomorrow.', 'x-after-dispatch');
+    expect(await generateOriginalProduction(input)).toHaveLength(1);
+    expect(cacheReset).toHaveBeenCalledTimes(1);
+    expect(input.jobSession!.job.checkpoints[key]).toEqual(frozen);
+    expect(input.jobSession!.job.checkpoints.subjects_ready).toEqual(frozenSubjects);
+    expect(harness.repetitionInputs).toEqual([frozen, frozen]);
+    expect(frozen.comparators.map((row: any) => row.tweetId)).not.toContain(afterDispatch.id);
+    const judgments = harness.generate.mock.calls.filter(([options]) => options.task === 'copy_judgment').map(([options]) => options);
+    expect(judgments).toHaveLength(2);
+    expect(judgments[1].prompt).toBe(judgments[0].prompt);
+    expect(judgments[1].spendContext?.requestKey).toBe(judgments[0].spendContext?.requestKey);
+    const finalPayload = JSON.parse(judgments[0].prompt);
+    expect(finalPayload.originalEditorialContext).not.toHaveProperty('repetitionHistory');
+    expect(finalPayload.repetitionContext).toEqual(compactOriginalRepetitionContext(frozen));
+    expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual([
+      'idea_generation', 'tweet_writing', 'copy_judgment', 'copy_judgment',
+    ]);
+    cacheReset.mockRestore();
+  });
+
+  it('does not add history to a legacy judgment already dispatched without it', async () => {
+    const input = await setup('13');
+    harness.rejectAllPreflight = true;
+    expect(await generateOriginalProduction(input)).toEqual([]);
+    harness.rejectAllPreflight = false;
+    // An imported pre-release snapshot has paid writing and a pending legacy
+    // judgment. It has neither the new owner-context field nor its checkpoint.
+    await input.jobSession!.write(job => {
+      const checkpoints = structuredClone(job.checkpoints);
+      for (const name of ['subjects_ready', 'briefs']) {
+        for (const subject of checkpoints[name] as any[]) delete subject.editorialContext.repetitionHistory;
+      }
+      for (const row of checkpoints['drafts_ready:idea-0'] as any[]) {
+        row.draft.status = 'generated'; row.draft.rejectionCodes = [];
+      }
+      delete checkpoints['assessed:idea-0'];
+      delete checkpoints['repetition_context:idea-0'];
+      return { ...job, checkpoints, stage: 'copy_judgment' };
+    });
+    const frozenSubjects = structuredClone(input.jobSession!.job.checkpoints.subjects_ready);
+    const paidWriting = Object.fromEntries(Object.entries(input.jobSession!.job.checkpoints)
+      .filter(([key]) => key.startsWith('call:tweet_writing:')));
+    const successful = harness.generate.getMockImplementation()!;
+    let pending = true;
+    harness.generate.mockClear(); harness.repetitionInputs = [];
+    harness.generate.mockImplementation(async options => {
+      if (pending) { pending = false; throw new Error('provider_pending'); }
+      return successful(options);
+    });
+    await expect(generateOriginalProduction(input)).rejects.toThrow('provider_pending');
+    await published(input.agentId, 'A newly published evening preference.', 'x-legacy-later');
+    expect(await generateOriginalProduction(input)).toHaveLength(1);
+    expect(input.jobSession!.job.checkpoints['repetition_context:idea-0']).toBeUndefined();
+    expect(harness.repetitionInputs).toEqual([undefined, undefined]);
+    expect(input.jobSession!.job.checkpoints.subjects_ready).toEqual(frozenSubjects);
+    for (const [key, value] of Object.entries(paidWriting)) expect(input.jobSession!.job.checkpoints[key]).toEqual(value);
+    expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['copy_judgment', 'copy_judgment']);
+    const [first, second] = harness.generate.mock.calls.map(([options]) => options);
+    expect(second.prompt).toBe(first.prompt);
+    expect(second.spendContext?.requestKey).toBe(first.spendContext?.requestKey);
   });
 });
 
@@ -515,7 +626,9 @@ describe('fresh cron input retains durable author identity', () => {
     ]);
     const originalWriter = JSON.parse(harness.generate.mock.calls[1][0].prompt);
     const resumedJudge = JSON.parse(harness.generate.mock.calls[3][0].prompt);
-    expect(resumedJudge.originalEditorialContext).toEqual(originalWriter.context);
+    const { repetitionHistory: _writerHistory, ...ownerContext } = originalWriter.context;
+    expect(resumedJudge.originalEditorialContext).toEqual(ownerContext);
+    expect(resumedJudge.repetitionContext).toEqual(JSON.parse(harness.generate.mock.calls[2][0].prompt).repetitionContext);
     expect(resumed.checkpoints.paidRecoveryPolicy).toBe(priorPolicy ? job.policy : undefined);
   });
 

@@ -1,4 +1,5 @@
 import { candidateEditorialDecision, deterministicEditorialBlockers, editorialHash, parseEditorialAssessment, type EditorialAssessment, type EditorialHardBlocker } from './editorial-contract';
+import { isValidOriginalRepetitionProof, type OriginalRepetitionProof } from './original-repetition';
 
 export const ORIGINAL_EDITORIAL_POLICY_VERSION = 'original-editorial-policy-1';
 export const ORIGINAL_EDITORIAL_CRITIC_VERSION = 'original-editorial-critic-1';
@@ -27,6 +28,8 @@ export interface OriginalEditorialDecision {
   model: string;
   policyVersion: string;
   criticVersion: string;
+  /** Measured repeat eligibility from the same final editorial call, when available. */
+  repetition?: OriginalRepetitionProof;
 }
 
 /** Trusted-store receipt consistency, never authorization for client-supplied JSON. */
@@ -39,6 +42,7 @@ export function isCurrentOriginalEditorialDecision(value: unknown): value is Ori
     && /^[a-f0-9]{64}$/.test(decision.requestKey || '')
     && ['openai', 'anthropic'].includes(decision.provider) && typeof decision.model === 'string' && decision.model.trim()
     && parseEditorialAssessment(decision.assessment)
+    && (!decision.repetition || isValidOriginalRepetitionProof(decision.repetition))
     && editorialHash(decision.assessment) === decision.assessmentHash
     && candidateEditorialDecision(decision.assessment, decision.threshold).accepted);
 }

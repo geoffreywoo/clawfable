@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { buildOriginalEditorialContext, contextForOriginalMode } from '@/lib/original-editorial-context';
 import { buildOriginalIdeationPrompt, buildOriginalWritingPrompt, originalModelContext, ORIGINAL_IDEATION_SCHEMA, ORIGINAL_WRITING_SCHEMA, type OriginalSelectedThought } from '@/lib/original-prompts';
+import { buildOriginalRepetitionContext, compactOriginalRepetitionContext } from '@/lib/original-repetition';
+import { originalAssessmentContext } from '@/lib/generation-v2';
 
 const context = buildOriginalEditorialContext({
   voiceProfile: { accountHandle: 'anotherowner', summary: 'An operator.', tone: 'direct', communicationStyle: 'casual', topics: ['AI'], antiGoals: ['Do not disclose private customer information.'] },
@@ -15,6 +17,45 @@ function recompose(prompt: string) {
 }
 
 describe('compact original prompts', () => {
+  it('sends measured repetition history to idea and writer without changing legacy projections', () => {
+    const repetitionHistory = buildOriginalRepetitionContext({ tweets: [], performance: [], query: context.subject.subject,
+      now: Date.parse(context.subject.observedAt) });
+    const enriched = { ...context, repetitionHistory };
+    const ideation = buildOriginalIdeationPrompt([{ briefId: idea.briefId, context: enriched }]);
+    const writing = buildOriginalWritingPrompt({ idea, context: enriched });
+    expect(recompose(ideation.prompt)[0].context.repetitionHistory).toEqual(compactOriginalRepetitionContext(repetitionHistory));
+    expect(JSON.parse(writing.prompt).context.repetitionHistory).toEqual(compactOriginalRepetitionContext(repetitionHistory));
+    for (const prompt of [ideation, writing]) {
+      expect(prompt.system).toContain('only when its comparator is reuseEligible');
+      expect(prompt.system).toContain('sharing a topic alone does not make two takes duplicates');
+      expect(prompt.system).toContain('Do not replay a queued take');
+    }
+    expect(originalModelContext(context)).not.toHaveProperty('repetitionHistory');
+    expect(buildOriginalWritingPrompt({ idea, context }).system).not.toContain('repetitionHistory');
+  });
+
+  it('sends only the fresh final comparison set while preserving complete frozen server contexts', () => {
+    const oldHistory = buildOriginalRepetitionContext({ tweets: [], performance: [], query: 'old writer subject', now: Date.parse(context.subject.observedAt) });
+    const freshHistory = buildOriginalRepetitionContext({ tweets: [{ id: 'later-post', agentId: '13', type: 'original', status: 'posted',
+      xTweetId: 'official-later-post', postedAt: context.subject.observedAt, content: 'A later take about finished customer work.' }] as any,
+      performance: [], query: 'finished customer work', now: Date.parse(context.subject.observedAt) + 1000 });
+    const enriched = { ...context, repetitionHistory: oldHistory };
+    const before = structuredClone({ enriched, freshHistory });
+    const evaluation = { idea: { id: idea.id, publicMove: idea.publicMove, contentMode: idea.contentMode, evidenceIds: idea.evidenceIds },
+      brief: { evidenceMode: 'operator_opinion' }, sourceDocuments: [] } as any;
+    const fresh = originalAssessmentContext(enriched, evaluation, freshHistory);
+    expect(fresh.originalEditorialContext).not.toHaveProperty('repetitionHistory');
+    expect(fresh.repetitionContext).toEqual(compactOriginalRepetitionContext(freshHistory));
+    expect(JSON.stringify(fresh).match(/A later take about finished customer work\./g)).toHaveLength(1);
+    expect(JSON.stringify(fresh)).not.toMatch(/queryHash|contentHash|official-later-post|recentOriginals|queuedReturnIds/);
+    expect({ enriched, freshHistory }).toEqual(before);
+    const legacy = originalAssessmentContext(context, evaluation);
+    expect(legacy.originalEditorialContext).toEqual(originalModelContext(context));
+    expect(legacy).not.toHaveProperty('repetitionContext');
+    expect(originalAssessmentContext(enriched, evaluation).originalEditorialContext.repetitionHistory)
+      .toEqual(compactOriginalRepetitionContext(oldHistory));
+  });
+
   it('factors only equal fields and common rules while preserving complete per-subject meaning', () => {
     const first = { ...context, previousPremises: ['A previous thought to avoid.'] };
     const second = { ...contextForOriginalMode(first, 'prediction'),

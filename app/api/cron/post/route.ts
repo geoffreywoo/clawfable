@@ -15,9 +15,9 @@ import { getInternalRequestAuthError } from '@/lib/internal-request-auth';
 import { refreshAgentTopicIntelligence } from '@/lib/topic-intelligence-refresh';
 import { VOICE_CORPUS_SCHEMA_VERSION } from '@/lib/voice-corpus';
 import { LEARNING_DERIVATION_VERSION } from '@/lib/learning-evidence';
+import { CRON_AUTOPILOT_LOCK_TTL_SECONDS } from '@/lib/cron-settings';
 
 export const maxDuration = 800;
-export const CRON_AUTOPILOT_LOCK_TTL_SECONDS = 15 * 60;
 
 export async function GET(request: NextRequest) {
   const authError = getInternalRequestAuthError(request, process.env.CRON_SECRET);

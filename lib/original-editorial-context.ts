@@ -7,6 +7,8 @@ import { isGeoffreyVoiceProfile } from './account-taste';
 import { GEOFFREY_SUPPRESSED_AUTONOMOUS_COMPANIES, GEOFFREY_PREFERRED_AUTONOMOUS_COMPANIES } from './geoffrey-company-amplification';
 import type { EditorialSteeringGuidance } from './editorial-steering';
 import type { ApprovedEditExample } from './learning-loop';
+import type { OriginalRepetitionContext } from './original-repetition';
+import { originalModelContext } from './original-prompts';
 
 export const ORIGINAL_EDITORIAL_CONTEXT_VERSION = 'original-editorial-context-3';
 export const ORIGINAL_VOICE_EXAMPLE_LIMIT = 3;
@@ -46,6 +48,8 @@ export interface OriginalEditorialContext extends EditorialContext {
   /** Optional owner preferences and whole accepted edits, frozen with this job. */
   editorialSteering?: EditorialSteeringGuidance[];
   acceptedEdits?: ApprovedEditExample[];
+  /** Prior public takes are comparison data, never voice anchors or factual evidence. */
+  repetitionHistory?: OriginalRepetitionContext;
   /** Audit which generated appendices were kept out of the compact owner contract. */
   excludedApplicationSections: string[];
 }
@@ -194,6 +198,7 @@ export function buildOriginalEditorialContext(input: {
   editorialSteering?: EditorialSteeringGuidance[];
   acceptedEdits?: ApprovedEditExample[];
   previousPremises?: string[];
+  repetitionHistory?: OriginalRepetitionContext;
   portfolioCompanyContext?: PortfolioCompanyGenerationContext | null;
   verifiedEntityMentions?: VerifiedEntityMention[];
 }): OriginalEditorialContext {
@@ -232,20 +237,27 @@ export function buildOriginalEditorialContext(input: {
     ownerGuidance: [...ownerRestrictions.map(rule => `Restriction: ${rule.text}`), ...stylePreferences.map(rule => `Style preference, assessed editorially: ${rule.text}`)],
     supportedFacts: unique(input.subject.supportedFacts).map(fact => boundedText(fact, 'supportedFact', 2400)),
     unresolvedClaims: input.subject.unverifiedContext?.trim() ? [boundedText(input.subject.unverifiedContext, 'unverifiedContext', 2400)] : [],
-    previousPremises: unique(input.previousPremises || []).slice(0, 12).map(premise => boundedText(premise, 'previousPremise', 1200)),
+    // New contexts carry relevant, dated history and explicit reuse eligibility.
+    // Keep the legacy projection byte-stable for already purchased old contexts.
+    previousPremises: input.repetitionHistory ? []
+      : unique(input.previousPremises || []).slice(0, 12).map(premise => boundedText(premise, 'previousPremise', 1200)),
     voiceExamples: examples.map(example => example.content),
     exampleRefs: examples.map(example => ({ id: example.id, provenance: example.provenance,
       ...(example.authorshipAttestationId ? { authorshipAttestationId: example.authorshipAttestationId } : {}) })),
     exampleUse: 'Examples demonstrate diction, rhythm, compression and register only. They supply no facts, personal experience or new premises. Do not copy their wording, scene, metaphor or underlying claim. Sharing a topic or informal rhythm alone is not a duplicate.',
     excludedApplicationSections: compactStyle.excluded,
   };
-  boundedText(JSON.stringify(context), 'total', ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS);
+  // Bound the actual semantic payload, not server-only provenance and proof
+  // metadata. The latter remain frozen in full for auditing and live checks.
+  const modelCharacters = (value: OriginalEditorialContext) => JSON.stringify(originalModelContext(value)).length;
+  if (modelCharacters(context) > ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS)
+    throw new Error(`original_editorial_context_limit:total:${ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS}`);
   // Omit oversized whole examples rather than truncate an owner's correction
   // or turn a full optional memory into a new production blocker.
   for (const guidance of (input.editorialSteering || []).slice(0, 4)) {
     if (guidance.provenance !== 'explicit_authenticated_owner' || !guidance.instruction.trim()) continue;
     const next = [...context.editorialSteering || [], structuredClone(guidance)];
-    if (JSON.stringify({ ...context, editorialSteering: next }).length <= ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS)
+    if (modelCharacters({ ...context, editorialSteering: next }) <= ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS)
       context.editorialSteering = next;
   }
   for (const edit of input.acceptedEdits || []) {
@@ -253,8 +265,21 @@ export function buildOriginalEditorialContext(input: {
     if (!edit.before.trim() || !edit.after.trim() || edit.before === edit.after
       || edit.before.length > 1200 || edit.after.length > 1200 || edit.lesson.length > 500) continue;
     const next = [...context.acceptedEdits || [], structuredClone(edit)];
-    if (JSON.stringify({ ...context, acceptedEdits: next }).length <= ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS)
+    if (modelCharacters({ ...context, acceptedEdits: next }) <= ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS)
       context.acceptedEdits = next;
+  }
+  if (input.repetitionHistory) {
+    // Owner guidance and facts keep their existing budget priority. Trim whole
+    // history rows rather than lose explicit coaching or stop generation. The
+    // final judgment gets its own independently frozen current comparison set.
+    const history = structuredClone(input.repetitionHistory);
+    while (history.comparators.length && modelCharacters({ ...context, repetitionHistory: history }) > ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS) {
+      history.comparators.pop();
+      history.history.omittedComparatorCount += 1;
+    }
+    if (modelCharacters({ ...context, repetitionHistory: history }) <= ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS)
+      context.repetitionHistory = history;
+    else context.excludedApplicationSections.push('REPETITION HISTORY (context budget)');
   }
   return context;
 }

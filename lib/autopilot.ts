@@ -28,6 +28,7 @@ import {
   getSourceDocuments,
   getStoryClusters,
   getTweets,
+  resetReadCache,
   getAnalysis,
   updateTweet,
   createMention,
@@ -53,6 +54,8 @@ import { generatePublishingBatchV2 } from './publishing-v2';
 import { getCommittedTweetCopyMemoryV2 } from './generation-v2';
 import { getGeneratedPublishIssue } from './generation-origin';
 import { hasCurrentOriginalAssessmentReceipt, hasCurrentProductionEditorialReceipt } from './original-assessment-receipt';
+import { getOriginalRepetitionPublishIssue, isValidOriginalRepetitionProof } from './original-repetition';
+import { editorialHash } from './editorial-contract';
 import { retainQualifiedTopicPackets } from './topic-intelligence-refresh';
 import { buildGenerationContext } from './generation-context';
 import { buildLearnings } from './performance';
@@ -444,7 +447,7 @@ function isTerminalAutoReplyPostError(error: unknown): boolean {
 type QueuedNativeVoiceContext = Pick<
   Awaited<ReturnType<typeof buildGenerationContext>>,
   'voiceProfile' | 'learnings' | 'memory' | 'allTweets'
->;
+> & { recentOriginalLog?: PostLogEntry[] };
 
 function queuedOperatorEvidence(context: QueuedNativeVoiceContext | null): string[] {
   return [
@@ -492,12 +495,41 @@ export function getQueuedSourceCopyIssue(tweet: Tweet): string | null {
     : null;
 }
 
+/** Only the exact historical identities approved for a spaced return bypass fuzzy checks. */
+function repetitionAwareFuzzyHistory(
+  candidate: Pick<Tweet, 'content' | 'assessmentReceipt'> & { id?: string },
+  contents: string[],
+  history: Tweet[],
+  recentOriginalLog: PostLogEntry[] = [],
+): string[] {
+  const proof = candidate.assessmentReceipt?.editorialDecision?.repetition;
+  if (!isValidOriginalRepetitionProof(proof) || proof.assessment.verdict !== 'repeat'
+    || getOriginalRepetitionPublishIssue(candidate, history)) return contents;
+  const matchedIds = new Set(proof.matchedPosts.map(post => post.tweetId));
+  const exempt = new Set(proof.matchedPosts.flatMap(post => {
+    const original = history.find(tweet => tweet.id === post.tweetId);
+    return original?.status === 'posted' && editorialHash(original.content) === post.contentHash
+      ? [original.content] : [];
+  }));
+  // A matching string on an unapproved identity (especially a queued draft)
+  // still blocks. Unknown log identities never inherit another post's proof.
+  for (const tweet of history) {
+    if (tweet.id !== candidate.id && ['queued', 'posted', 'deleted_from_x'].includes(tweet.status)
+      && !tweet.quarantinedAt && (!matchedIds.has(tweet.id) || tweet.status !== 'posted')) exempt.delete(tweet.content);
+  }
+  for (const entry of recentOriginalLog) if (!matchedIds.has(entry.tweetId)) exempt.delete(entry.content);
+  // Exact copy is never an allowed return, even if its family was approved.
+  return contents.filter(content => content === candidate.content || !exempt.has(content));
+}
+
 function clearsQueuedPostPreflight(
   agent: Agent,
   tweet: Tweet,
   recentPostedContent: string[],
   nativeContext: QueuedNativeVoiceContext | null = null,
 ): boolean {
+  const fuzzyHistory = repetitionAwareFuzzyHistory(tweet, recentPostedContent,
+    nativeContext?.allTweets || [], nativeContext?.recentOriginalLog);
   return (
     tweet.status === 'queued'
     && !tweet.quarantinedAt
@@ -512,8 +544,9 @@ function clearsQueuedPostPreflight(
     && (hasCurrentProductionEditorialReceipt(tweet) || !getAuthorityProofIssue(tweet.content))
     && !getQueuedClaimEvidenceIssue(tweet, queuedOperatorEvidence(nativeContext))
     && !getQueuedSourceCopyIssue(tweet)
-    && !getRecentPostDuplicateIssue(tweet.content, recentPostedContent)
-    && !getSemanticHistoryIssue(agent, tweet, recentPostedContent)
+    && !getOriginalRepetitionPublishIssue(tweet, nativeContext?.allTweets || [])
+    && !getRecentPostDuplicateIssue(tweet.content, fuzzyHistory)
+    && !getSemanticHistoryIssue(agent, tweet, fuzzyHistory)
   );
 }
 
@@ -555,10 +588,12 @@ async function rescoreQueuedTweetsForCurrentPolicy(
   const invalid: Array<{
     tweet: Tweet;
     issue: string;
-    policyGate: 'account_topic_policy' | 'company_amplification_policy' | 'company_content_mix_policy' | 'portfolio_company_policy' | 'portfolio_promotion_priority_policy' | 'entity_mention_policy' | 'generation_origin' | 'autopost_quality_margin';
+    policyGate: 'account_topic_policy' | 'company_amplification_policy' | 'company_content_mix_policy' | 'portfolio_company_policy' | 'portfolio_promotion_priority_policy' | 'entity_mention_policy' | 'generation_origin' | 'original_repetition' | 'autopost_quality_margin';
   }> = [];
   const requiredAutopostMargin = getPublishingV2AutopostQualityMargin(agent.handle);
   const currentVoiceCorpusVersion = context?.learnings?.voiceCorpus?.snapshotId || null;
+  const repetitionHistory = context?.allTweets || (queuedTweets.some(tweet => tweet.assessmentReceipt?.editorialDecision?.repetition)
+    ? await getTweets(agent.id) : []);
   const needsEvidence = queuedTweets.some(t=>t.assessmentReceipt?.evidence?.length);
   const [currentSources,currentStories] = needsEvidence ? await Promise.all([getSourceDocuments(agent.id),getStoryClusters(agent.id)]) : [[],[]];
   for (const tweet of queuedTweets) {
@@ -600,12 +635,14 @@ async function rescoreQueuedTweetsForCurrentPolicy(
     )
       ? `V2-generated originals for @${agent.handle.replace(/^@/, '')} require autonomous quality margin at least ${requiredAutopostMargin.toFixed(2)}.`
       : null;
+    const repetitionIssue = getOriginalRepetitionPublishIssue(tweet, repetitionHistory);
     const issue = accountTopicIssue
       || companyAmplificationIssue
       || portfolioCompanyIssue
       || autonomousPromotionIssue
       || entityMentionIssue
       || originIssue
+      || repetitionIssue
       || accountMarginIssue;
     if (issue) invalid.push({
       tweet,
@@ -622,7 +659,9 @@ async function rescoreQueuedTweetsForCurrentPolicy(
                 ? 'entity_mention_policy'
                 : originIssue
                   ? 'generation_origin'
-                  : 'autopost_quality_margin',
+                  : repetitionIssue
+                    ? 'original_repetition'
+                    : 'autopost_quality_margin',
     });
     else valid.push(tweet);
   }
@@ -914,7 +953,8 @@ async function validateQueuedTweetsForPosting(
   recentPostedContent: string[] = [],
   recentLog: PostLogEntry[] = [],
 ): Promise<Tweet[]> {
-  const nativeContext = await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 });
+  const nativeContext = { ...await buildGenerationContext(agent, { negativeLimit: 10, directiveLimit: 10 }),
+    recentOriginalLog: recentLog.filter(isSuccessfulOriginalPostLogEntry) };
   const semanticHistoryContent = [...new Set([
     ...recentPostedContent,
     ...(nativeContext?.allTweets || [])
@@ -1144,8 +1184,10 @@ async function validateQueuedTweetsForPosting(
       continue;
     }
 
-    const duplicateIssue = getRecentPostDuplicateIssue(queuedTweet.content, semanticHistoryContent)
-      || getSemanticHistoryIssue(agent, queuedTweet, semanticHistoryContent);
+    const fuzzyHistory = repetitionAwareFuzzyHistory(queuedTweet, semanticHistoryContent,
+      nativeContext.allTweets, nativeContext.recentOriginalLog);
+    const duplicateIssue = getRecentPostDuplicateIssue(queuedTweet.content, fuzzyHistory)
+      || getSemanticHistoryIssue(agent, queuedTweet, fuzzyHistory);
     if (duplicateIssue) {
       const resolved = await resolveQueuedTweetFailure(agent, queuedTweet, duplicateIssue);
       await addLearningSignal(agent.id, {
@@ -1714,11 +1756,16 @@ export async function runAutopilot(agent: Agent): Promise<AutopilotResult> {
   // the agent's queue version, so capture it before the re-read and re-check it
   // as the last step before the X call.
   const queueVersionBeforeSelection = await getQueueVersion(agentId);
+  // Reuse the paid editorial proof against the current committed history.
+  // The queue-version check below still fences concurrent edits and posts.
+  resetReadCache();
+  const selectionHistory = await getTweets(agentId);
   const selectionPool = [...rankedQueue];
   let tweet: Tweet | null = null;
   while (selectionPool.length > 0) {
     const candidate = pickDiverseTweet(selectionPool, recentPostEntries) || selectionPool[0];
-    const staleReason = getStaleSelectionReason(candidate, await getTweet(candidate.id, { fresh: true }), agent);
+    const staleReason = getStaleSelectionReason(candidate, await getTweet(candidate.id, { fresh: true }), agent)
+      || getOriginalRepetitionPublishIssue(candidate, selectionHistory);
     if (!staleReason) {
       tweet = candidate;
       break;
@@ -3050,15 +3097,19 @@ export async function refillQueue(
       : [];
     const allBatch = [...batch, ...marketingBatch];
 
+    // Generation can span several posting ticks. Admission must see copies
+    // committed while the paid stages ran, including a crash-replayed result.
+    resetReadCache();
+    const admissionHistory = await getTweets(agent.id);
     // Only copy that reached a committed lifecycle state can block a refill.
     // Quarantined and unreviewed artifacts are failed attempts, not editorial memory.
-    const recentContent = getCommittedTweetCopyMemoryV2(allTweets, { limit: 50 });
+    const recentContent = getCommittedTweetCopyMemoryV2(admissionHistory, { limit: 50 });
     const operatorEvidence = [
       ...(learnings?.operatorVoiceReference?.pinnedExamples || []),
       ...(learnings?.operatorVoiceReference?.startupRegisterExamples || []),
       ...(learnings?.operatorVoiceReference?.bestPerformers || []),
     ].map((entry) => entry.content);
-    const contentMixHistory = [...allTweets];
+    const contentMixHistory = [...admissionHistory];
 
     const addBatchItems = async (items: typeof allBatch): Promise<number> => {
       let addedFromBatch = 0;
@@ -3120,10 +3171,22 @@ export async function refillQueue(
         ]);
       };
       for (const item of items) {
-        const committed = allTweets.find(tweet=>tweet.draftCandidateId && tweet.draftCandidateId === item.draftCandidateId);
+        const committed = admissionHistory.find(tweet=>tweet.draftCandidateId && tweet.draftCandidateId === item.draftCandidateId);
         if (committed) {
+          // A crash replay can find its own queued copy after another return
+          // consumed the allowance. Preserve known X receipts for reconciliation.
+          const repetitionIssue = committed.status === 'queued' && !committed.xTweetId
+            ? getOriginalRepetitionPublishIssue(committed, contentMixHistory) : null;
+          if (repetitionIssue) {
+            await updateTweet(committed.id, {
+              status: 'quarantined', preQuarantineStatus: 'queued',
+              quarantinedAt: new Date().toISOString(), quarantineReason: repetitionIssue,
+            });
+            await rejectCandidate(item, 'original_repetition', repetitionIssue);
+            continue;
+          }
           if (durableGenerationEnabled(agent.id,settings)) await repairTweetIndexes(committed);
-          if (durableGenerationEnabled(agent.id,settings) && committed.status === 'queued' && !committed.quarantinedAt && !getGeneratedPublishIssue(committed,{accountHandle:agent.handle})) {
+          if (durableGenerationEnabled(agent.id,settings) && committed.status === 'queued' && !committed.xTweetId && !committed.quarantinedAt && !getGeneratedPublishIssue(committed,{accountHandle:agent.handle})) {
             await recordGenerationCanary(agent.id,{queuedId:committed.id});
             await recordAutopostReadyOutput(agent.id,committed);
           }
@@ -3137,6 +3200,11 @@ export async function refillQueue(
         const originIssue = getGeneratedPublishIssue(item, { agentId: agent.id, accountHandle: agent.handle });
         if (originIssue) {
           await rejectCandidate(item, 'generated_publish_issue', originIssue);
+          continue;
+        }
+        const repetitionIssue = getOriginalRepetitionPublishIssue(item, contentMixHistory);
+        if (repetitionIssue) {
+          await rejectCandidate(item, 'original_repetition', repetitionIssue);
           continue;
         }
         const accountTopicIssue = getAccountTopicPolicyIssue(
@@ -3206,11 +3274,12 @@ export async function refillQueue(
           await rejectCandidate(item, 'claim_evidence', claimEvidenceIssue);
           continue;
         }
-        if (isNearDuplicate(item.content, recentContent, 0.55).isDuplicate) {
+        const fuzzyHistory = repetitionAwareFuzzyHistory(item, recentContent, contentMixHistory);
+        if (isNearDuplicate(item.content, fuzzyHistory, 0.55).isDuplicate) {
           await rejectCandidate(item, 'recent_copy_duplicate');
           continue;
         }
-        if (recentContent.some((content) => semanticIdeaSimilarity(
+        if (fuzzyHistory.some((content) => semanticIdeaSimilarity(
           { content: item.content, topic: item.targetTopic },
           { content },
         ) >= QUEUE_SEMANTIC_DUPLICATE_THRESHOLD)) {

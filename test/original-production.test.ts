@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runOriginalProduction, type OriginalProductionDependencies } from '@/lib/original-production';
-import { claimGenerationJob, GenerationJobSession, getGenerationJob, getGenerationCanary,
+import { acknowledgeGenerationQueue, claimGenerationJob, GenerationJobSession, getGenerationJob, getGenerationCanary,
   reconcileGenerationCanaryAssessments, generationCanaryAttemptId, type GenerationCanary } from '@/lib/generation-job';
 import { mutateAiOperationalState } from '@/lib/kv-storage';
 import type { IdeaCandidate, DraftCandidate } from '@/lib/types';
@@ -31,9 +31,8 @@ function qualify(drafts: Draft[]): RankedPublishingCandidate[] {
   return [{ content: drafts[0].draft.content, draftCandidateId: drafts[0].draft.id,
     ideaId: drafts[0].draft.ideaId } as RankedPublishingCandidate];
 }
-async function setup() {
-  const agentId = `original-production-${crypto.randomUUID()}`;
-  const session = new GenerationJobSession(agentId, (await claimGenerationJob(agentId, {}, 'policy'))!);
+async function setup(agentId = `original-production-${crypto.randomUUID()}`, input = {}) {
+  const session = new GenerationJobSession(agentId, (await claimGenerationJob(agentId, input, 'policy'))!);
   const deps = {
     loadSubjects: vi.fn(async () => [{ id: 'subject', valid: true }]),
     validateSubjects: vi.fn(async (subjects: Subject[], selected?: IdeaCandidate) => {
@@ -108,6 +107,63 @@ describe('single-path original production', () => {
     expect(second.selected[0].ideaId).toBe('reserve');
     expect(args.deps.ideate).toHaveBeenCalledTimes(1);
     expect(args.deps.write.mock.calls.map(call => call[0].id)).toEqual(['first', 'reserve']);
+  });
+
+  it('continues to a saved reserve after queue duplicate rejection without repurchasing completed stages', async () => {
+    const args = await setup('13', { durableGeneration: true });
+    let activeSession = args.session;
+    const generate = vi.fn(async (): Promise<GenerateTextResult> => ({
+      text: 'saved provider result', stopReason: 'stop', provider: 'openai', model: 'gpt-6-astra',
+      inputTokens: 100, outputTokens: 20,
+    }));
+    const stage = async (name: 'idea_generation' | 'tweet_writing' | 'copy_judgment', key: string) => runOriginalModelStage({
+      session: activeSession, stage: name,
+      options: { system: 'Account editorial task.', prompt: key, maxTokens: 100, timeoutMs: 10_000 },
+      spendContext: { agentId: '13', runId: activeSession.job.id, operation: 'generation' },
+      deadlineAt: Date.now() + 240_000,
+    }, { generate });
+    args.deps.ideate.mockImplementation(async () => {
+      await stage('idea_generation', 'ranked thoughts');
+      return [idea('first'), idea('reserve')];
+    });
+    args.deps.write.mockImplementation(async selected => {
+      await stage('tweet_writing', selected.id);
+      return [draft(selected.id)];
+    });
+    args.deps.assess.mockImplementation(async drafts => {
+      await stage('copy_judgment', drafts[0].draft.ideaId);
+      return qualify(drafts);
+    });
+    const first = await runOriginalProduction(args);
+    await activeSession.finish(first.selected, first.outcome);
+    const paidBefore = Object.fromEntries(Object.entries(activeSession.job.checkpoints).filter(([key]) => key.startsWith('call:')));
+    const historyBefore = structuredClone(activeSession.job.checkpoints.callHistory) as unknown[];
+    expect(generate).toHaveBeenCalledTimes(3);
+
+    // The admission layer found a committed duplicate after this assessment.
+    // Its negative acknowledgement consumes only the selected idea.
+    await acknowledgeGenerationQueue('13', activeSession.job.id, false);
+    const rejected = (await getGenerationJob('13'))!;
+    expect(rejected).toMatchObject({ status: 'deferred', stage: 'ideas_ready', blocker: 'reserve_ready', owner: null, leaseUntil: 0 });
+    expect(rejected.checkpoints.attemptedIdeas).toEqual(['first']);
+    expect(rejected.checkpoints.reserveIdeas).toEqual(['reserve']);
+    expect(rejected.result).toBeUndefined();
+    expect(await claimGenerationJob('13', {}, 'policy', rejected.nextAttemptAt - 1)).toBeNull();
+    expect(generate).toHaveBeenCalledTimes(3);
+
+    const next = (await claimGenerationJob('13', {}, 'policy', rejected.nextAttemptAt))!;
+    expect(next.id).toBe(activeSession.job.id);
+    activeSession = new GenerationJobSession('13', next);
+    const second = await runOriginalProduction({ session: activeSession, deps: args.deps });
+    expect(second.selected[0].ideaId).toBe('reserve');
+    expect(args.deps.ideate).toHaveBeenCalledTimes(1);
+    expect(args.deps.write.mock.calls.map(call => call[0].id)).toEqual(['first', 'reserve']);
+    expect(args.deps.assess.mock.calls.map(call => call[0][0].draft.ideaId)).toEqual(['first', 'reserve']);
+    expect(generate).toHaveBeenCalledTimes(5);
+    for (const [key, value] of Object.entries(paidBefore)) expect(activeSession.job.checkpoints[key]).toEqual(value);
+    expect((activeSession.job.checkpoints.callHistory as unknown[]).slice(0, historyBefore.length)).toEqual(historyBefore);
+    expect(activeSession.job.checkpoints['assessed:first']).toEqual(rejected.checkpoints['assessed:first']);
+    expect(activeSession.job.input).toEqual({ durableGeneration: true });
   });
 
   it('treats unavailable and malformed assessments as pending, never completed empty attempts', async () => {
