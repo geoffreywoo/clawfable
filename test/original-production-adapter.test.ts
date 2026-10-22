@@ -21,7 +21,7 @@ const harness = vi.hoisted(() => ({
   generate: vi.fn(), finalOverall: .99, malformed: false, copyVerdict: 'clear', firstCopyUncertain: false,
   rejectAllPreflight: false, preflightCalls: [] as any[], normalizationCalls: [] as any[], changePublicMove: false,
   normalizedIdPrefix: 'idea', briefRequests: [] as Array<string | undefined>, blockedTopic: '', network: false,
-  repetitionInputs: [] as any[],
+  repetitionInputs: [] as any[], topicLearningInputs: [] as any[],
   anchors: [
     { id: 'anchor-a', content: 'coffee outside. walking home.', topic: 'health' },
     { id: 'anchor-b', content: 'the little kitchen table is plenty.', topic: 'health' },
@@ -46,6 +46,7 @@ vi.mock('@/lib/generation-v2', async importOriginal => {
     ...actual,
     buildGenerationBriefsV2: (options: any) => {
       harness.briefRequests.push(options.requestedTopic);
+      harness.topicLearningInputs.push(structuredClone(options.topicOutcomeLearning));
       if (options.requestedTopic && options.requestedTopic === harness.blockedTopic) return [];
       return [{ id: options.requestedTopic ? `subject-${options.requestedTopic}` : 'subject-health', topic: options.requestedTopic || 'health', title: options.requestedTopic || 'An ordinary evening',
       summary: 'A subjective view about a quiet evening.', authorOpportunity: 'A short personal preference without invented experience.',
@@ -82,7 +83,7 @@ beforeEach(() => {
   harness.generate.mockReset(); harness.finalOverall = .99; harness.malformed = false; harness.copyVerdict = 'clear'; harness.firstCopyUncertain = false;
   harness.rejectAllPreflight = false; harness.preflightCalls = []; harness.normalizationCalls = []; harness.changePublicMove = false;
   harness.normalizedIdPrefix = 'idea'; harness.briefRequests = []; harness.blockedTopic = ''; harness.network = false;
-  harness.repetitionInputs = [];
+  harness.repetitionInputs = []; harness.topicLearningInputs = [];
   harness.generate.mockImplementation(async (options: GenerateTextOptions) => {
     const payload = JSON.parse(options.prompt);
     let text: string;
@@ -175,6 +176,36 @@ async function persistRecoveryFixture(input: GenerateTweetBatchV2Input, recovery
 }
 
 describe('production original adapter', () => {
+  it('freezes outcome learning before subject selection and replays paid work without refreshing it', async () => {
+    const history = vi.spyOn(storageStore, 'getPerformanceHistory').mockResolvedValue([]);
+    try {
+      const input = await setup();
+      const first = await generateOriginalProduction(input);
+      const frozen = structuredClone(input.jobSession!.job.checkpoints.topic_outcome_learning);
+      expect(frozen).toMatchObject({ baseline: { postCount: 0 }, topics: [] });
+      expect(harness.topicLearningInputs).toHaveLength(1);
+      expect(harness.topicLearningInputs[0]).toEqual(frozen);
+      history.mockRejectedValue(new Error('later analytics outage'));
+      const recovered = new GenerationJobSession(input.agentId, (await getGenerationJob(input.agentId))!);
+      expect(await generateOriginalProduction({ ...input, jobSession: recovered })).toEqual(first);
+      expect(recovered.job.checkpoints.topic_outcome_learning).toEqual(frozen);
+      expect(history).toHaveBeenCalledTimes(1);
+      expect(harness.generate).toHaveBeenCalledTimes(3);
+    } finally { history.mockRestore(); }
+  });
+
+  it('records unavailable optional topic learning and keeps the three-stage worker running', async () => {
+    const history = vi.spyOn(storageStore, 'getPerformanceHistory').mockRejectedValue(new Error('analytics unavailable'));
+    try {
+      const input = await setup();
+      expect(await generateOriginalProduction(input)).toHaveLength(1);
+      expect(input.jobSession!.job.checkpoints.topicOutcomeLearningUnavailable).toBe(true);
+      expect(input.jobSession!.job.checkpoints.topic_outcome_learning).toBeNull();
+      expect(harness.topicLearningInputs).toEqual([null]);
+      expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['idea_generation', 'tweet_writing', 'copy_judgment']);
+    } finally { history.mockRestore(); }
+  });
+
   it('runs exactly ideation, writing and the unchanged final judge, with reusable paid checkpoints', async () => {
     const input = await setup();
     const result = await generateOriginalProduction(input);
