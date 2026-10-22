@@ -4,6 +4,9 @@ import { buildOriginalEditorialContext, contextForOriginalMode, originalAuthorId
 import type { VoiceProfile } from '@/lib/soul-parser';
 import type { SubjectPacket } from '@/lib/subject-packet';
 import { buildAntiFundPortfolioContext, getAntiFundPortfolioCompany } from '@/lib/antifund-portfolio';
+import { buildOriginalRepetitionContext } from '@/lib/original-repetition';
+import { originalModelContext } from '@/lib/original-prompts';
+import publicHistory from './fixtures/original-repetition-public-history-20261022.json';
 
 const profile: VoiceProfile = { accountHandle: 'geoffwoo', summary: 'Founder and investor.', topics: ['AI', 'manufacturing'], tone: 'direct', communicationStyle: 'casual; fragments are fine', antiGoals: ['Never invent personal experience.'] };
 const subject: SubjectPacket = { version: 'subject-packet-1', subject: 'Cognition agent pricing', sourceIds: ['source-a'], supportedFacts: ['Cognition says its agent costs $10.'], unverifiedContext: 'Unverified: adoption is growing.', permittedModes: ['opinion', 'prediction', 'factual_claim', 'observation'], observedAt: '2026-09-28T00:00:00Z', expiresAt: '2026-09-29T00:00:00Z', interest: { kind: 'research', relevance: .9 } };
@@ -225,6 +228,81 @@ describe('one original editorial context', () => {
     expect(JSON.stringify(subject)).toBe(original);
     context.subject.sourceIds.push('another');
     expect(subject.sourceIds).toEqual(['source-a']);
+  });
+
+  it('carries dated reuse history separately from legacy blanket premise exclusions', () => {
+    const repetitionHistory = buildOriginalRepetitionContext({ tweets: [], performance: [], query: subject.subject,
+      now: Date.parse(subject.observedAt) });
+    const before = structuredClone(repetitionHistory);
+    const context = build({ previousPremises: ['An old take is not automatically banned forever.'], repetitionHistory });
+    expect(context.repetitionHistory).toEqual(before);
+    expect(context.repetitionHistory).not.toBe(repetitionHistory);
+    expect(context.previousPremises).toEqual([]);
+    expect(contextForOriginalMode(context, 'prediction').repetitionHistory).toEqual(before);
+    expect(context.supportedFacts).not.toContain(JSON.stringify(repetitionHistory));
+    expect(repetitionHistory).toEqual(before);
+    expect(build({ previousPremises: ['Legacy frozen premise.'] })).not.toHaveProperty('repetitionHistory');
+  });
+
+  it('keeps complete owner steering and accepted edits ahead of a large repetition history', () => {
+    const now = Date.parse(subject.observedAt);
+    const repetitionHistory = buildOriginalRepetitionContext({
+      tweets: Array.from({ length: 20 }, (_, index) => ({ id: `prior-${index}`, agentId: '13', type: 'original', status: 'posted',
+        xTweetId: `x-prior-${index}`, postedAt: new Date(now - (index + 1) * 86_400_000).toISOString(),
+        content: `A complete prior comparison ${index}: `.padEnd(900, 'word '),
+      })) as any,
+      performance: [], query: subject.subject, now,
+    });
+    const originalHistory = structuredClone(repetitionHistory);
+    const editorialSteering = Array.from({ length: 4 }, (_, index) => ({ id: `steering-${index}`, kind: 'take' as const,
+      instruction: `Preserve the owner's complete preference ${index}. `.repeat(5), scope: 'standing' as const,
+      provenance: 'explicit_authenticated_owner' as const, ownerUserId: 'owner' }));
+    const acceptedEdits = Array.from({ length: 2 }, (_, index) => ({ signalId: `edit-${index}`,
+      before: `Complete before ${index}: `.padEnd(180, 'before '), after: `Complete after ${index}: `.padEnd(180, 'after '),
+      lesson: 'Keep the complete edit pair.', createdAt: subject.observedAt }));
+    const inputs = { voiceProfile: { ...profile, antiGoals: Array.from({ length: 4 }, (_, index) => `Owner boundary ${index}: `.padEnd(1000, 'boundary ')) },
+      subject: { ...subject, supportedFacts: Array.from({ length: 3 }, (_, index) => `Complete source fact ${index}: `.padEnd(900, 'fact ')) },
+      editorialSteering, acceptedEdits };
+    const baseline = build(inputs);
+    const context = build({ ...inputs, repetitionHistory });
+    expect(context.editorialSteering).toEqual(editorialSteering);
+    expect(context.acceptedEdits).toEqual(acceptedEdits);
+    expect(context.ownerRestrictions).toEqual(baseline.ownerRestrictions);
+    expect(context.supportedFacts).toEqual(baseline.supportedFacts);
+    expect(JSON.stringify(originalModelContext(context)).length).toBeLessThanOrEqual(ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS);
+    expect(context.repetitionHistory!.comparators.length).toBeLessThan(originalHistory.comparators.length);
+    expect(context.repetitionHistory!.history.omittedComparatorCount).toBeGreaterThan(originalHistory.history.omittedComparatorCount);
+    for (const row of context.repetitionHistory!.comparators) {
+      expect(row).toEqual(originalHistory.comparators.find(original => original.tweetId === row.tweetId));
+    }
+    expect(repetitionHistory).toEqual(originalHistory);
+  });
+
+  it('retains all 24 server comparators when the compact payload and full owner memories fit', () => {
+    const now = Date.parse('2026-10-22T03:59:03.444Z');
+    const repetitionHistory = buildOriginalRepetitionContext({
+      tweets: publicHistory.posts.filter(post => post.id !== '12673').map(post => ({ ...post, agentId: '13', type: 'original', status: 'posted' })) as any,
+      performance: [], query: "paying for ai shouldn't mean buying its agreement. if my plan is bad, i want the product to push back on me.", now,
+    });
+    const originalHistory = structuredClone(repetitionHistory);
+    expect(repetitionHistory.comparators).toHaveLength(24);
+    const editorialSteering = Array.from({ length: 4 }, (_, index) => ({ id: `complete-steering-${index}`, kind: 'take' as const,
+      instruction: `Preserve the owner's complete preference ${index}. `.repeat(5), scope: 'standing' as const,
+      provenance: 'explicit_authenticated_owner' as const, ownerUserId: 'owner' }));
+    const acceptedEdits = Array.from({ length: 2 }, (_, index) => ({ signalId: `complete-edit-${index}`,
+      before: `Complete before ${index}: `.padEnd(450, 'before '), after: `Complete after ${index}: `.padEnd(450, 'after '),
+      lesson: 'Keep every word of the accepted pair.', createdAt: subject.observedAt }));
+    const context = build({ repetitionHistory, editorialSteering, acceptedEdits,
+      voiceProfile: { ...profile, antiGoals: Array.from({ length: 4 }, (_, index) => `Owner boundary ${index}: `.padEnd(500, 'boundary ')) },
+      subject: { ...subject, supportedFacts: Array.from({ length: 3 }, (_, index) => `Complete source fact ${index}: `.padEnd(500, 'fact ')) } });
+    expect(JSON.stringify(context).length).toBeGreaterThan(ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS);
+    expect(JSON.stringify(originalModelContext(context)).length).toBeLessThanOrEqual(ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS);
+    expect(context.repetitionHistory).toEqual(originalHistory);
+    expect(context.editorialSteering).toEqual(editorialSteering);
+    expect(context.acceptedEdits).toEqual(acceptedEdits);
+    expect(originalModelContext(context).repetitionHistory!.comparators).toHaveLength(24);
+    expect(context.repetitionHistory!.comparators.some(row => row.tweetId === '12582')).toBe(true);
+    expect(repetitionHistory).toEqual(originalHistory);
   });
 });
 

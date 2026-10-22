@@ -102,7 +102,8 @@ vi.mock('@/lib/autopilot-health', () => ({
   runAutopilotWatchdog: mocks.runAutopilotWatchdog,
 }));
 
-import { CRON_AUTOPILOT_LOCK_TTL_SECONDS, GET, maxDuration } from '@/app/api/cron/post/route';
+import { GET, maxDuration } from '@/app/api/cron/post/route';
+import { CRON_AUTOPILOT_LOCK_TTL_SECONDS } from '@/lib/cron-settings';
 import { TwitterActionError } from '@/lib/twitter-debug';
 import { LEARNING_DERIVATION_VERSION } from '@/lib/learning-evidence';
 import { VOICE_CORPUS_SCHEMA_VERSION } from '@/lib/voice-corpus';

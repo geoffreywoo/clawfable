@@ -20,6 +20,16 @@ The compact context includes up to two complete accepted owner edits with their 
 
 Paid stages and their context survive interruptions and routine learning refreshes. Later direction and revocation affect future unfrozen jobs. A release does not add fresh coaching to already purchased copy. New context and request hashes bind new decisions to exact feedback, evidence and text; historical receipts and spending are retained.
 
+## Fresh takes and measured returns
+
+The continuous @geoffwoo original path retrieves relevant prior originals and queue commitments instead of showing only the first twelve old premises. These comparisons are not voice examples or factual evidence. The existing single Astra editorial call classifies each variant as fresh, a returning take, or uncertain and names its matching prior posts. A same-core paraphrase without a valid return exception uses the existing `substantive_duplicate` blocker; sharing a topic alone is not a duplicate. The score cutoff remains 0.75 and no additional critic call is purchased.
+
+Return eligibility requires mature official X performance history, with at least eighteen measured hours and five distinct mature baseline posts. A sticky `wasViral` flag or projected early spread is insufficient. Measured likes must meet the account's viral threshold and three times its mature median, or measured relative spread must clear 0.78. The proof retains the original IDs, measurement time, actual counts, baseline and criterion. Historical performance proof can remain useful; new factual claims still need current evidence.
+
+Conservative implementation defaults are fourteen days and twenty intervening originals since the latest matching publication, with at most one returning take per ten originals and a queued-return reservation. These are product defaults, not numbers specified by the owner. A proven original can anchor another return even if its intervening return was not itself viral, but every matching publication must clear spacing and deleted posts cannot authorize a return. Verbatim reposts remain blocked.
+
+The comparison payload freezes once before the first dispatch of each final assessment, so retries use the same paid request. New proof is bound to the exact assessed text and checked again against live history at admission, queue readiness and posting. A rejected selection advances to saved reserves through the scheduled worker. Old completed or dispatched judgments retain their original paid contract; known stale queue artifacts can be quarantined without rewriting copy or inventing owner feedback. Autopilot, budgets and the normal publishing boundary remain active.
+
 ## Topic relevance and recovery
 
 Explicit account interests, owner-authored topic history and direct engagement establish topic relevance. Shared words in a long source post or a generated style appendix do not. Followed-network discovery retains its source author, URL, topic ID and observation time, and is never counted as operator-authored history. Low-fit exploration ranks after stronger owner interests and has a bounded discovery slot.

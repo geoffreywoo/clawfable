@@ -15,7 +15,7 @@ import { isCurrentSourceEvidence } from './source-validity';
 import { getOwnerAuthorshipAttestation, normalizedAuthorshipText } from './owner-authorship';
 import {
   getSourceDocuments, getStoryClusters, getSemanticBlocks, getIdeaCandidates, getDynamicIdeaSeeds,
-  getDraftCandidates, getTweets, saveGenerationRun, upsertIdeaCandidates, upsertDraftCandidates,
+  getDraftCandidates, getTweets, getPerformanceHistory, resetReadCache, saveGenerationRun, upsertIdeaCandidates, upsertDraftCandidates,
 } from './kv-storage';
 import { aiSpendContext, releaseAiCompletionHold } from './ai-budget';
 import { normalizeCandidateDisposition } from './candidate-disposition';
@@ -25,6 +25,7 @@ import type { DraftCandidate, IdeaCandidate, GenerationModelCallTrace, Generatio
 import type { RankedPublishingCandidate } from './publishing-candidate';
 import { claimEditorialSteeringForJob, completeEditorialSteeringJob, type EditorialSteeringGuidance } from './editorial-steering';
 import { selectApprovedEditExamples } from './learning-loop';
+import { buildOriginalRepetitionContext } from './original-repetition';
 
 export const ORIGINAL_PRODUCTION_VERSION = 'simple-original-4';
 type Subject = GenerationBriefV2 & { editorialContext: OriginalEditorialContext };
@@ -56,6 +57,12 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
   const startedAt = Date.now(), deadlineAt = startedAt + 240_000;
   const runId = session.job.id;
   const continuous = input.agentId === '13' && input.durableGeneration === true;
+  const previousSelectedIdea = (session.job.checkpoints.selectedIdeas as string[] | undefined)?.[0];
+  // An old dispatched judgment may have an unresolved provider commitment or a
+  // saved raw response. Its request must replay exactly, without added history.
+  const legacyPendingJudgmentIdea = session.job.stage === 'copy_judgment' && previousSelectedIdea
+    && !Object.prototype.hasOwnProperty.call(session.job.checkpoints, `repetition_context:${previousSelectedIdea}`)
+    ? previousSelectedIdea : null;
   const policy = continuous ? { qualityPolicyVersion: ORIGINAL_EDITORIAL_POLICY_VERSION, finalCriticVersion: ORIGINAL_EDITORIAL_CRITIC_VERSION } : getGenerationPolicyVersions(input.voiceProfile, 'original');
   let ideas: IdeaCandidate[] = [], drafts: DraftCandidate[] = [];
   let trace: GenerationRunTrace = {
@@ -118,7 +125,12 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
       if (required.some(subject => subject.storyClusterId && !liveStories.some(story => story.id === subject.storyClusterId && isStoryEditoriallyQualifiedV2(story) && !story.blockReason))) throw new Error('stale_evidence');
     };
     const prepareSubjects = async (briefs: GenerationBriefV2[], preservePackets = false, steering: EditorialSteeringGuidance[] = []): Promise<Subject[]> => {
-        const attestation = await getOwnerAuthorshipAttestation(input.agentId);
+        const hasFrozenContext = (brief: GenerationBriefV2) => preservePackets && (brief as Subject).editorialContext
+          && ['original-editorial-context-2', 'original-editorial-context-3'].includes((brief as Subject).editorialContext.contextVersion);
+        const [attestation, performance] = await Promise.all([
+          getOwnerAuthorshipAttestation(input.agentId),
+          continuous && briefs.some(brief => !hasFrozenContext(brief)) ? getPerformanceHistory(input.agentId, 5000) : Promise.resolve([]),
+        ]);
         const anchors = collectOperatorAnchors(input);
         const references = input.learnings?.operatorVoiceReference;
         const referenceRows = [...references?.pinnedExamples || [], ...references?.startupRegisterExamples || [], ...references?.bestPerformers || []];
@@ -140,6 +152,9 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
           const editorialContext = frozenContext ? structuredClone(frozenContext) : buildOriginalEditorialContext({ voiceProfile: input.voiceProfile, subject: subjectPacket,
             contentMode: brief.evidenceMode === 'operator_opinion' ? 'opinion' : 'observation', voiceExamples: examples,
             previousPremises: input.recentPosts, portfolioCompanyContext: brief.portfolioCompanyContext,
+            repetitionHistory: continuous ? buildOriginalRepetitionContext({ tweets: input.allTweets, performance,
+              query: [brief.topic, brief.title, brief.summary].filter(Boolean).join(' '), now: Date.now(),
+              viralLikesThreshold: input.analysis?.engagementPatterns?.viralThreshold }) : undefined,
             verifiedEntityMentions: brief.verifiedEntityMentions, editorialSteering: steering,
             acceptedEdits: selectApprovedEditExamples((input.signals || []).filter(signal =>
               !['edited_before_queue', 'edited_before_post', 'taste_calibration_edit'].includes(signal.signalType)
@@ -279,7 +294,20 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
       assess: async (evaluations, idea, subjects) => {
         const subject = subjects.find(row => row.id === idea.briefId)!;
         const originalEditorialContext = contextForOriginalMode(subject.editorialContext, idea.contentMode || subject.editorialContext.contentMode);
-        const selected = await qualifyOriginalDrafts({ evaluations, input: { ...assessmentInput, originalEditorialContext }, calls: [], blocks });
+        const originalRepetitionContext = !continuous || legacyPendingJudgmentIdea === idea.id ? undefined
+          : await session.checkpoint(`repetition_context:${idea.id}`, async () => {
+            // Paid generation can outlive a request-scoped history read. Only
+            // a new comparison checkpoint refreshes; retries reuse its bytes.
+            resetReadCache();
+            const [tweets, performance] = await Promise.all([
+              getTweets(input.agentId), getPerformanceHistory(input.agentId, 5000),
+            ]);
+            return buildOriginalRepetitionContext({ tweets, performance,
+              query: [idea.publicMove || idea.claim, ...evaluations.map(entry => entry.draft.content)].join('\n'), now: Date.now(),
+              viralLikesThreshold: input.analysis?.engagementPatterns?.viralThreshold });
+          });
+        const selected = await qualifyOriginalDrafts({ evaluations, input: { ...assessmentInput, originalEditorialContext,
+          ...(originalRepetitionContext ? { originalRepetitionContext } : {}) }, calls: [], blocks });
         if (evaluations.some(e => e.draft.rejectionCodes.includes('malformed_copy_judgment'))) throw new Error('malformed_output');
         if (evaluations.some(e => e.draft.rejectionCodes.includes('copy_judge_unavailable'))) throw new Error('copy_judgment_failed');
         return selected;

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { editorialTweet } from './fixtures/original-editorial-receipt';
-import type { PostLogEntry, Tweet } from '../lib/types';
+import type { PostLogEntry, Tweet, TweetPerformance } from '../lib/types';
+import { createOriginalAssessmentReceipt } from '@/lib/original-assessment-receipt';
+import { editorialHash } from '@/lib/editorial-contract';
 
 const mocks = vi.hoisted(() => ({
   getProtocolSettings: vi.fn(),
@@ -12,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   getQueueVersion: vi.fn(),
   getTweet: vi.fn(),
   getTweets: vi.fn(),
+  resetReadCache: vi.fn(),
+  repairTweetIndexes: vi.fn(),
   getAnalysis: vi.fn(),
   createTweet: vi.fn(),
   updateTweet: vi.fn(),
@@ -80,6 +84,8 @@ const mocks = vi.hoisted(() => ({
   semanticIdeaSimilarity: vi.fn(),
   getGenerationCanary: vi.fn(),
   getGenerationJob: vi.fn(),
+  acknowledgeGenerationQueue: vi.fn(),
+  getOriginalRepetitionPublishIssue: vi.fn((_candidate: unknown, _history: Tweet[]) => null as string | null),
   getDraftCandidates: vi.fn(),
   reconcileOriginalPostDispatch: vi.fn(),
   dispatchOriginalPost: vi.fn(),
@@ -89,6 +95,11 @@ vi.mock('@/lib/generation-job', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/generation-job')>(),
   getGenerationCanary: mocks.getGenerationCanary,
   getGenerationJob: mocks.getGenerationJob,
+  acknowledgeGenerationQueue: mocks.acknowledgeGenerationQueue,
+}));
+vi.mock('@/lib/original-repetition', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/original-repetition')>(),
+  getOriginalRepetitionPublishIssue: mocks.getOriginalRepetitionPublishIssue,
 }));
 vi.mock('@/lib/original-post-dispatch', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/original-post-dispatch')>(),
@@ -106,6 +117,8 @@ vi.mock('@/lib/kv-storage', () => ({
   getQueueVersion: mocks.getQueueVersion,
   getTweet: mocks.getTweet,
   getTweets: mocks.getTweets,
+  resetReadCache: mocks.resetReadCache,
+  repairTweetIndexes: mocks.repairTweetIndexes,
   getAnalysis: mocks.getAnalysis,
   createTweet: mocks.createTweet,
   updateTweet: mocks.updateTweet,
@@ -272,6 +285,8 @@ import {
   selfHealAutopilotQueue,
 } from '@/lib/autopilot';
 const actualTweetFeatures = await vi.importActual<typeof import('@/lib/tweet-features')>('@/lib/tweet-features');
+const actualRepetition = await vi.importActual<typeof import('@/lib/original-repetition')>('@/lib/original-repetition');
+const actualSurvivability = await vi.importActual<typeof import('@/lib/survivability')>('@/lib/survivability');
 import { PUBLISHING_V2_FINAL_CRITIC_VERSION, PUBLISHING_V2_QUALITY_POLICY_VERSION } from '@/lib/publishing-quality-policy';
 import { ACCOUNT_TOPIC_POLICY_VERSION } from '@/lib/account-topic-policy';
 import { TwitterActionError } from '@/lib/twitter-debug';
@@ -445,12 +460,49 @@ const refillReadyContext = {
   signals: [],
 };
 
+function spacedReturnFixture(exactCopy = false) {
+  const day = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const historical = (id: string, ageDays: number, content: string): Tweet => ({
+    ...queuedTweet, id, agentId: '13', type: 'original', status: 'posted', content,
+    topic: 'AI', xTweetId: `x-${id}`, postedAt: new Date(now - ageDays * day).toISOString(),
+    createdAt: new Date(now - ageDays * day).toISOString(),
+  });
+  const winner = historical('proven-winner', 30, 'paying for AI should buy judgment. challenge the assignment before doing it.');
+  const intervening = Array.from({ length: 25 }, (_, index) => historical(`intervening-${index}`, 25 - index / 2,
+    `Independent original observation number ${index}.`));
+  const history = [winner, ...intervening];
+  const performance: TweetPerformance[] = [winner, ...intervening.slice(0, 8)].map(post => ({
+    tweetId: post.id, xTweetId: post.xTweetId!, content: post.content, format: 'observation', topic: 'AI',
+    postedAt: post.postedAt!, checkedAt: new Date(Date.parse(post.postedAt!) + day).toISOString(),
+    likes: post.id === winner.id ? 100 : 10, retweets: 2, replies: 1, impressions: 1000,
+    engagementRate: 1.3, wasViral: post.id === winner.id, source: 'autopilot',
+  }));
+  const candidate = editorialTweet({
+    id: 'approved-return', content: exactCopy ? winner.content
+      : 'paying for AI should buy judgment. challenge the assignment before doing it, even when agreement is easier.',
+    topic: 'AI', generationRunId: 'approved-return-run', ideaId: 'approved-return-idea', draftCandidateId: 'approved-return-draft',
+  });
+  const context = actualRepetition.buildOriginalRepetitionContext({ tweets: history, performance, query: winner.content, now });
+  const { proof, issue } = actualRepetition.assessOriginalRepetition({ context, content: candidate.content,
+    assessment: { verdict: 'repeat', matchedTweetIds: [winner.id], explanation: 'Return to the same measured winner after sufficient spacing.' } });
+  expect(issue).toBeNull();
+  expect(proof).not.toBeNull();
+  candidate.assessmentReceipt = createOriginalAssessmentReceipt(candidate, {
+    ...candidate.assessmentReceipt!, editorialDecision: { ...candidate.assessmentReceipt!.editorialDecision!, repetition: proof! },
+  });
+  return { candidate, history, winner };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 
   mocks.getProtocolSettings.mockResolvedValue({ ...baseSettings });
   mocks.getGenerationCanary.mockResolvedValue(null);
   mocks.getGenerationJob.mockResolvedValue(null);
+  mocks.repairTweetIndexes.mockResolvedValue(undefined);
+  mocks.acknowledgeGenerationQueue.mockResolvedValue(undefined);
+  mocks.getOriginalRepetitionPublishIssue.mockReturnValue(null);
   mocks.getDraftCandidates.mockResolvedValue([]);
   mocks.reconcileOriginalPostDispatch.mockResolvedValue(null);
   mocks.dispatchOriginalPost.mockResolvedValue({ tweetId: 'x-durable', username: 'geoffwoo' });
@@ -460,7 +512,10 @@ beforeEach(() => {
   mocks.updateProtocolSettings.mockResolvedValue({ ...baseSettings });
   mocks.getQueuedTweets.mockResolvedValue([queuedTweet]);
   mocks.getQueueVersion.mockResolvedValue(4);
-  mocks.getTweets.mockResolvedValue([]);
+  mocks.getTweets.mockImplementation(async () => {
+    const latestContext = mocks.buildGenerationContext.mock.results.at(-1);
+    return (await latestContext?.value)?.allTweets || [];
+  });
   // Storage truth for the pre-post re-read: the latest version of a tweet the
   // run has observed through the queue read, a repair, or a refill persist.
   mocks.getTweet.mockImplementation(async (id: string) => {
@@ -1072,6 +1127,231 @@ describe('autopilot remote debug logging', () => {
         rejectionCounts: expect.objectContaining({ queue_recent_semantic_duplicate: 1 }),
       }),
     );
+  });
+
+  it('rejects a copy committed while generation was running instead of admitting from the stale input history', async () => {
+    mocks.getAnalysis.mockResolvedValue({ agentId: baseAgent.id });
+    mocks.getQueuedTweets.mockResolvedValue([]);
+    mocks.buildGenerationContext.mockResolvedValue({ ...refillReadyContext, allTweets: [] });
+    const candidate = {
+      content: 'let the person who owns the customer problem choose which experiment to run next.',
+      format: 'observation', targetTopic: 'startups', rationale: 'Approved thought.',
+      ...currentGeoffreyCertification,
+      generationRunId: 'run-concurrent-publication', ideaId: 'idea-concurrent', draftCandidateId: 'draft-concurrent',
+      candidateScore: 90, confidenceScore: .9,
+    } as any;
+    mocks.getTweets.mockResolvedValue([]);
+    mocks.generateTweetBatchV2.mockImplementationOnce(async () => {
+      mocks.getTweets.mockResolvedValue([{ ...validQueuedTweet, id: 'new-live-post',
+        content: candidate.content, status: 'posted', xTweetId: '2100000000000000001' }]);
+      return [candidate];
+    });
+
+    expect(await refillQueue(baseAgent, 1)).toBe(0);
+    expect(mocks.createTweetFromGeneratedCandidate).not.toHaveBeenCalled();
+    expect(mocks.resetReadCache).toHaveBeenCalledTimes(1);
+    expect(mocks.getTweets).toHaveBeenCalledWith(baseAgent.id);
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
+      format: 'refill_candidate_rejected', draftCandidateId: candidate.draftCandidateId,
+      reason: 'recent_copy_duplicate',
+    }));
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the current lifecycle when a formerly committed copy was quarantined during generation', async () => {
+    mocks.getAnalysis.mockResolvedValue({ agentId: baseAgent.id });
+    mocks.getQueuedTweets.mockResolvedValue([]);
+    const candidate = {
+      content: 'let the person who owns the customer problem choose which experiment to run next.',
+      format: 'observation', targetTopic: 'startups', rationale: 'Approved thought.',
+      ...currentGeoffreyCertification,
+      generationRunId: 'run-current-lifecycle', ideaId: 'idea-current', draftCandidateId: 'draft-current',
+      candidateScore: 90, confidenceScore: .9,
+    } as any;
+    const old = { ...validQueuedTweet, id: 'quarantined-during-generation', content: candidate.content };
+    mocks.buildGenerationContext.mockResolvedValue({ ...refillReadyContext, allTweets: [old] });
+    mocks.generateTweetBatchV2.mockResolvedValue([candidate]);
+    mocks.getTweets.mockResolvedValue([{ ...old, status: 'quarantined', quarantinedAt: new Date().toISOString() }]);
+
+    expect(await refillQueue(baseAgent, 1)).toBe(1);
+    expect(mocks.createTweetFromGeneratedCandidate).toHaveBeenCalledWith(baseAgent.id,
+      expect.objectContaining({ draftCandidateId: candidate.draftCandidateId }), expect.objectContaining({ status: 'queued' }));
+  });
+
+  it('rejects a paid repetition proof against fresh admission history and consumes only that selection', async () => {
+    const agent = { ...baseAgent, id: '13' };
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = agent.id;
+    const settings = { ...baseSettings, durableGenerationEnabled: true };
+    const recent = { ...validQueuedTweet, id: 'new-family-post', agentId: agent.id, status: 'posted' as const, xTweetId: 'new-x' };
+    const candidate = {
+      ...editorialTweet({
+        content: 'the person holding the customer problem should choose the experiment.',
+        generationRunId: 'paid-repetition-job', ideaId: 'paid-first', draftCandidateId: 'paid-first-draft',
+      }),
+      targetTopic: 'startups', rationale: 'Approved thought.',
+    } as any;
+    mocks.getProtocolSettings.mockResolvedValue(settings);
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.getQueuedTweets.mockResolvedValue([]);
+    mocks.buildGenerationContext.mockResolvedValue({ ...refillReadyContext, settings, allTweets: [] });
+    mocks.generateTweetBatchV2.mockResolvedValue([candidate]);
+    mocks.getTweets.mockResolvedValue([recent]);
+    mocks.getOriginalRepetitionPublishIssue.mockImplementation((_candidate, history) => (
+      history.some(tweet => tweet.id === recent.id) ? 'Repeated premise has not cleared its reuse interval.' : null
+    ));
+
+    expect(await refillQueue(agent, 1, {}, { generationWorker: true })).toBe(0);
+    expect(mocks.getOriginalRepetitionPublishIssue).toHaveBeenCalledWith(candidate, [recent]);
+    expect(mocks.acknowledgeGenerationQueue).toHaveBeenCalledExactlyOnceWith(agent.id, candidate.generationRunId, false);
+    expect(mocks.createTweetFromGeneratedCandidate).not.toHaveBeenCalled();
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledTimes(1);
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(agent.id, expect.objectContaining({
+      format: 'refill_candidate_rejected', reason: expect.stringContaining('original_repetition:'),
+    }));
+  });
+
+  it('excludes a failed repetition proof from readiness without rewriting copy or buying a judge', async () => {
+    const tweet = editorialTweet();
+    const agent = { ...baseAgent, id: tweet.agentId, handle: 'geoffwoo' };
+    mocks.buildGenerationContext.mockResolvedValue({ ...refillReadyContext, allTweets: [tweet] });
+    mocks.getOriginalRepetitionPublishIssue.mockReturnValue('Repeated premise has not cleared its reuse interval.');
+
+    expect(await inspectPublishableOriginalQueue(agent)).toEqual([]);
+    expect(mocks.getOriginalRepetitionPublishIssue).toHaveBeenCalledWith(tweet, [tweet]);
+    expect(mocks.updateTweet).not.toHaveBeenCalled();
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+  });
+
+  it('checks the proof against fresh history again before the fenced publication', async () => {
+    mocks.getQueuedTweets.mockResolvedValue([validQueuedTweet]);
+    const justCommitted = { ...validQueuedTweet, id: 'concurrent-family-post', status: 'posted' as const, xTweetId: 'new-x' };
+    mocks.getTweets.mockResolvedValue([justCommitted]);
+    mocks.getOriginalRepetitionPublishIssue.mockImplementation((_candidate, history) => (
+      history.some(tweet => tweet.id === justCommitted.id) ? 'Repeated premise has not cleared its reuse interval.' : null
+    ));
+
+    expect(await runAutopilot(baseAgent)).toMatchObject({ action: 'skipped' });
+    expect(mocks.getOriginalRepetitionPublishIssue).toHaveBeenCalledWith(validQueuedTweet, [justCommitted]);
+    expect(mocks.postTweet).not.toHaveBeenCalled();
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.addPostLogEntry).toHaveBeenCalledWith(baseAgent.id, expect.objectContaining({
+      format: 'stale_selection_gate', reason: 'Repeated premise has not cleared its reuse interval.',
+    }));
+  });
+
+  it('admits, reports ready, and posts a verified spaced viral return without the old fuzzy veto', async () => {
+    const { candidate, history, winner } = spacedReturnFixture();
+    const agent = { ...baseAgent, id: '13', handle: 'geoffwoo' };
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = agent.id;
+    mocks.getOriginalRepetitionPublishIssue.mockImplementation(actualRepetition.getOriginalRepetitionPublishIssue);
+    mocks.getRecentPostDuplicateIssue.mockImplementation(actualSurvivability.getRecentPostDuplicateIssue);
+    expect(actualSurvivability.isNearDuplicate(candidate.content, [winner.content], .55).isDuplicate).toBe(true);
+    expect(actualTweetFeatures.semanticIdeaSimilarity(candidate, winner)).toBeGreaterThanOrEqual(QUEUE_SEMANTIC_DUPLICATE_THRESHOLD);
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.getQueuedTweets.mockResolvedValue([]);
+    mocks.buildGenerationContext.mockResolvedValue({ ...refillReadyContext, allTweets: history });
+    mocks.getTweets.mockResolvedValue(history);
+    mocks.generateTweetBatchV2.mockResolvedValue([{ ...candidate, targetTopic: 'AI', rationale: 'Approved spaced return.' }]);
+    mocks.createTweetFromGeneratedCandidate.mockResolvedValue(candidate);
+
+    expect(await refillQueue(agent, 1)).toBe(1);
+    mocks.getQueuedTweets.mockResolvedValue([candidate]);
+    mocks.getTweets.mockResolvedValue([candidate, ...history]);
+    mocks.buildGenerationContext.mockResolvedValue({ ...refillReadyContext, allTweets: [candidate, ...history] });
+    expect((await inspectPublishableOriginalQueue(agent)).map(tweet => tweet.id)).toEqual([candidate.id]);
+    const posted = await runAutopilot(agent);
+    expect(posted).toMatchObject({ action: 'posted', tweetId: candidate.id });
+    expect(mocks.postTweet).toHaveBeenCalledExactlyOnceWith(expect.anything(), candidate.content, expect.anything());
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledTimes(1);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it.each(['spacing changed', 'proof changed', 'exact copy', 'unmatched queued copy', 'legacy proof missing'] as const)(
+    'does not exempt a return when %s', async scenario => {
+      const { candidate, history, winner } = spacedReturnFixture(scenario === 'exact copy');
+      const agent = { ...baseAgent, id: '13', handle: 'geoffwoo' };
+      process.env.AUTOMATION_EXEMPT_AGENT_IDS = agent.id;
+      if (scenario === 'spacing changed') winner.postedAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      if (scenario === 'proof changed') candidate.assessmentReceipt!.editorialDecision!.repetition!.matchedPosts[0].contentHash = 'changed';
+      if (scenario === 'unmatched queued copy') history.push({ ...winner, id: 'unmatched-queued', status: 'queued', xTweetId: null, postedAt: null });
+      if (scenario === 'legacy proof missing') {
+        const decision = { ...candidate.assessmentReceipt!.editorialDecision! };
+        delete decision.repetition;
+        candidate.assessmentReceipt = createOriginalAssessmentReceipt(candidate, { ...candidate.assessmentReceipt!, editorialDecision: decision });
+      }
+      mocks.getOriginalRepetitionPublishIssue.mockImplementation(actualRepetition.getOriginalRepetitionPublishIssue);
+      mocks.getRecentPostDuplicateIssue.mockImplementation(actualSurvivability.getRecentPostDuplicateIssue);
+      mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+      mocks.getQueuedTweets.mockResolvedValue([]);
+      mocks.buildGenerationContext.mockResolvedValue({ ...refillReadyContext, allTweets: history });
+      mocks.getTweets.mockResolvedValue(history);
+      mocks.generateTweetBatchV2.mockResolvedValue([{ ...candidate, targetTopic: 'AI', rationale: 'Return candidate.' }]);
+      expect(await refillQueue(agent, 1)).toBe(0);
+      expect(mocks.createTweetFromGeneratedCandidate).not.toHaveBeenCalled();
+      expect(mocks.postTweet).not.toHaveBeenCalled();
+      expect(mocks.generateText).not.toHaveBeenCalled();
+    },
+  );
+
+  it('quarantines a queued crash replay when its approved return quota was consumed and advances the saved reserve', async () => {
+    const { candidate, history } = spacedReturnFixture();
+    const agent = { ...baseAgent, id: '13', handle: 'geoffwoo' };
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = agent.id;
+    const otherReturn = { ...candidate, id: 'newer-return', draftCandidateId: 'newer-return-draft',
+      content: `${candidate.content} ask the awkward question.`, status: 'posted' as const,
+      xTweetId: 'newer-return-x', postedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() };
+    otherReturn.assessmentReceipt = createOriginalAssessmentReceipt(otherReturn, {
+      ...candidate.assessmentReceipt!, contentHash: editorialHash(otherReturn.content),
+      editorialDecision: { ...candidate.assessmentReceipt!.editorialDecision!, repetition: {
+        ...candidate.assessmentReceipt!.editorialDecision!.repetition!, contentHash: editorialHash(otherReturn.content),
+      } },
+    });
+    const liveHistory = [candidate, otherReturn, ...history];
+    expect(actualRepetition.getOriginalRepetitionPublishIssue(candidate, liveHistory)).toContain('one-in-ten');
+    mocks.getOriginalRepetitionPublishIssue.mockImplementation(actualRepetition.getOriginalRepetitionPublishIssue);
+    const settings = { ...baseSettings, minQueueSize: 5, durableGenerationEnabled: true };
+    mocks.getProtocolSettings.mockResolvedValue(settings);
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.getQueuedTweets.mockResolvedValue([]);
+    mocks.buildGenerationContext.mockResolvedValue({ ...refillReadyContext, settings, allTweets: history });
+    mocks.getTweets.mockResolvedValue(liveHistory);
+    mocks.generateTweetBatchV2.mockResolvedValue([{ ...candidate, targetTopic: 'AI', rationale: 'Replayed paid assessment.' }]);
+
+    expect(await refillQueue(agent, 1, {}, { generationWorker: true })).toBe(0);
+    expect(mocks.updateTweet).toHaveBeenCalledExactlyOnceWith(candidate.id, {
+      status: 'quarantined', preQuarantineStatus: 'queued', quarantinedAt: expect.any(String),
+      quarantineReason: expect.stringContaining('one-in-ten'),
+    });
+    expect(mocks.acknowledgeGenerationQueue).toHaveBeenCalledExactlyOnceWith(agent.id, candidate.generationRunId, false);
+    expect(mocks.repairTweetIndexes).not.toHaveBeenCalled();
+    expect(mocks.createTweetFromGeneratedCandidate).not.toHaveBeenCalled();
+    expect(mocks.addLearningSignal).not.toHaveBeenCalled();
+    expect(mocks.generateTweetBatchV2).toHaveBeenCalledTimes(1);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it.each(['posted', 'deleted_from_x', 'queued'] as const)('reconciles a %s replay with a known X receipt without negative acknowledgement', async status => {
+    const { candidate, history } = spacedReturnFixture();
+    const agent = { ...baseAgent, id: '13' };
+    process.env.AUTOMATION_EXEMPT_AGENT_IDS = agent.id;
+    const committed = { ...candidate, status, xTweetId: 'already-accepted-x' };
+    const settings = { ...baseSettings, durableGenerationEnabled: true };
+    mocks.getProtocolSettings.mockResolvedValue(settings);
+    mocks.getAnalysis.mockResolvedValue({ agentId: agent.id });
+    mocks.getQueuedTweets.mockResolvedValue([]);
+    mocks.buildGenerationContext.mockResolvedValue({ ...refillReadyContext, settings, allTweets: history });
+    mocks.getTweets.mockResolvedValue([committed, ...history]);
+    mocks.generateTweetBatchV2.mockResolvedValue([{ ...candidate, targetTopic: 'AI', rationale: 'Replayed paid assessment.' }]);
+    mocks.getOriginalRepetitionPublishIssue.mockReturnValue('A later return has occupied the quota.');
+
+    expect(await refillQueue(agent, 1, {}, { generationWorker: true })).toBe(0);
+    expect(mocks.repairTweetIndexes).toHaveBeenCalledExactlyOnceWith(committed);
+    expect(mocks.acknowledgeGenerationQueue).toHaveBeenCalledExactlyOnceWith(agent.id, candidate.generationRunId, true);
+    expect(mocks.getOriginalRepetitionPublishIssue).not.toHaveBeenCalled();
+    expect(mocks.updateTweet).not.toHaveBeenCalled();
+    expect(mocks.addLearningSignal).not.toHaveBeenCalled();
+    expect(mocks.postTweet).not.toHaveBeenCalled();
   });
 
   it('applies the same semantic threshold at autopost time', async () => {

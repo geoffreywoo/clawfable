@@ -83,6 +83,7 @@ export function getOriginalAssessmentReceiptIssue(candidate: ReceiptCandidate, n
       return 'Original editorial assessment belongs to another account.';
     }
     if (!isCurrentOriginalEditorialDecision(decision)
+      || (decision.repetition && decision.repetition.contentHash !== receipt.contentHash)
       || decision.policyVersion !== candidate.qualityPolicyVersion || decision.criticVersion !== candidate.finalCriticVersion
       || candidate.finalCriticVerdict !== 'allow' || decision.provider !== candidate.finalCriticProvider
       || decision.model !== candidate.finalCriticModel

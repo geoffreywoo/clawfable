@@ -2,6 +2,7 @@ import { contextForOriginalMode, originalAuthorIdentity, ORIGINAL_EDITORIAL_CONT
 import { ORIGINAL_PROMPT_VERSION, originalModelContext } from './original-prompts';
 import { assessSourceCopy, bindSourceCopyAssessment, SOURCE_COPY_ASSESSMENT_VERSION, SOURCE_COPY_JUDGMENT_SCHEMA, SOURCE_COPY_JUDGE_GUIDANCE, type SourceCopyAssessment } from './source-copy-assessment';
 import { createOriginalAssessmentReceipt } from './original-assessment-receipt';
+import { assessOriginalRepetition, compactOriginalRepetitionContext, parseOriginalRepetitionAssessment, type OriginalRepetitionContext } from './original-repetition';
 import { finalCopyRejectionCodes } from './final-copy-policy';
 import { originalModelRequestKey, runOriginalModelStage } from './original-model-stage';
 import { EDITORIAL_PRINCIPLES as DURABLE_EDITORIAL_CONTRACT, editorialAssessmentRequest, EDITORIAL_ASSESSMENT_SCHEMA, parseEditorialAssessment, candidateEditorialDecision, editorialHash } from './editorial-contract';
@@ -609,6 +610,8 @@ export interface GenerateTweetBatchV2Input {
   originalModelCall?: typeof trackedGenerate;
   /** Exact writer context. The original judge must not rebuild a different author. */
   originalEditorialContext?: OriginalEditorialContext;
+  /** Current committed take comparisons, frozen once before buying this assessment. */
+  originalRepetitionContext?: OriginalRepetitionContext;
   /** Internal durable-original contract; never selected by a public request. */
   originalEditorialPolicy?: typeof ORIGINAL_EDITORIAL_POLICY_VERSION;
   count: number;
@@ -3785,6 +3788,28 @@ export function normalizeDirectComparisonPublicMoveV2(
   return firstSentence;
 }
 
+/** Let measured returns reach the one semantic editor, never bless verbatim copy. */
+export function originalReturnComparisonTexts(content: string, texts: string[], context?: OriginalRepetitionContext,
+  committed: Pick<Tweet, 'content' | 'status'>[] = []): string[] {
+  if (!context) return texts;
+  const normalized = (text: string) => text.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+  const winners = context.comparators.filter(row => row.reuseEligible && row.status === 'posted');
+  // A previous return need not go viral again. Its explicit, receipt-backed
+  // family links can lead back to a measured winner, while its own latest
+  // publication still resets the spacing. Token overlap never creates a link.
+  const eligibleFamilyIds = new Set(winners.flatMap(row => row.family?.tweetIds || []));
+  const eligible = new Set(context.comparators.filter(row => row.status === 'posted' && (row.reuseEligible
+    || eligibleFamilyIds.has(row.tweetId) && Boolean(row.xTweetId) && Number.isFinite(Date.parse(row.postedAt || ''))
+      && Date.parse(row.postedAt!) <= Date.parse(context.observedAt)
+      && row.family?.latestPostStatus === 'posted' && !row.family.queuedTweetIds.length
+      && row.family.interveningOriginals >= context.policy.minimumInterveningOriginals
+      && Date.parse(context.observedAt) - Date.parse(row.family.latestPostedAt || '')
+        >= context.policy.minimumDaysBetweenReturns * 24 * 60 * 60 * 1000)).map(row => row.content));
+  return texts.filter(text => normalized(text) === normalized(content) || !eligible.has(text)
+    || committed.some(row => row.content === text && ['queued', 'deleted_from_x'].includes(row.status))
+    || context.comparators.some(row => row.content === text && row.status !== 'posted'));
+}
+
 export function normalizeIdeaCandidatesV2({
   raw,
   agentId,
@@ -3882,7 +3907,9 @@ export function normalizeIdeaCandidatesV2({
       createdAt: now,
       updatedAt: now,
     };
-    candidate.noveltyScore = ideaNovelty(candidate, recentPosts);
+    const repetitionHistory = simpleContract
+      ? (sourceBrief as GenerationBriefV2 & { editorialContext?: OriginalEditorialContext }).editorialContext?.repetitionHistory : undefined;
+    candidate.noveltyScore = ideaNovelty(candidate, originalReturnComparisonTexts(publicMove, recentPosts, repetitionHistory));
     candidate.identityScore = ideaIdentityScore(candidate, brief, voiceProfile);
     if (brief.evidenceMode === 'verified_source' && candidate.evidenceIds.length === 0) {
       candidate.rejectionCodes.push('missing_verified_evidence');
@@ -3982,7 +4009,7 @@ export function normalizeIdeaCandidatesV2({
     }
     if (isOperatorPremiseReskinV2(
       ideaText(candidate),
-      brief.personalTopicSignalPremises,
+      originalReturnComparisonTexts(publicMove, brief.personalTopicSignalPremises || [], repetitionHistory),
       [brief.topic, brief.title, ...(brief.personalTopicSignals || [])],
     )) {
       candidate.rejectionCodes.push('voice_anchor_semantic_reskin');
@@ -5834,12 +5861,16 @@ export function preflightDraft({
     ? getSourceAttributionIssueV2(content, documents, Boolean(input.jobSession
       || input.agentId === '13' && (input.durableGeneration || input.originalModelCall)))
     : null;
-  const recentDuplicate = isNearDuplicate(content, [
+  const repetitionHistory = input.originalModelCall
+    ? (brief as GenerationBriefV2 & { editorialContext?: OriginalEditorialContext }).editorialContext?.repetitionHistory : undefined;
+  const recentDuplicate = isNearDuplicate(content, originalReturnComparisonTexts(content, [
     ...input.recentPosts,
     ...getCommittedTweetCopyMemoryV2(input.allTweets),
-  ], 0.55);
-  const anchorReskin = isNearDuplicate(content, anchors.map((anchor) => anchor.content), 0.68);
-  const premiseReskinRisk = Math.max(0, ...operatorPremiseExclusions(input, [idea.topic]).map((premise) => (
+  ], repetitionHistory, input.allTweets), 0.55);
+  const anchorReskin = isNearDuplicate(content, originalReturnComparisonTexts(content,
+    anchors.map((anchor) => anchor.content), repetitionHistory, input.allTweets), 0.68);
+  const premiseReskinRisk = Math.max(0, ...originalReturnComparisonTexts(content,
+    operatorPremiseExclusions(input, [idea.topic]), repetitionHistory, input.allTweets).map((premise) => (
     Math.max(
       semanticIdeaSimilarity(
         { content, thesis: ideaPublicMove(idea), topic: idea.topic },
@@ -5940,7 +5971,7 @@ export function preflightDraft({
   if (anchorReskin.isDuplicate) codes.push('voice_anchor_reskin');
   if (isOperatorPremiseReskinV2(
     `${ideaPublicMove(idea)} ${idea.claim} ${content}`,
-    brief.personalTopicSignalPremises || [],
+    originalReturnComparisonTexts(content, brief.personalTopicSignalPremises || [], repetitionHistory, input.allTweets),
     [brief.topic, brief.title, ...(brief.personalTopicSignals || [])],
   )) {
     codes.push('voice_anchor_semantic_reskin');
@@ -6283,13 +6314,19 @@ export function draftSourceCopyInputs(evaluation: Pick<DraftEvaluation, 'sourceD
 export function originalAssessmentContext(
   context: OriginalEditorialContext,
   evaluation: Pick<DraftEvaluation, 'idea' | 'brief' | 'sourceDocuments'>,
+  repetitionContext?: OriginalRepetitionContext,
 ) {
+  const modelContext = originalModelContext(context);
+  // The fresh final comparison set replaces the writer's older set. Keep the
+  // full contexts frozen server-side; send each prior take to the editor once.
+  if (repetitionContext) delete modelContext.repetitionHistory;
   return {
-    originalEditorialContext: originalModelContext(context),
+    originalEditorialContext: modelContext,
     selectedThought: { id: evaluation.idea.id, publicMove: ideaPublicMove(evaluation.idea),
       contentMode: evaluation.idea.contentMode, evidenceIds: evaluation.idea.evidenceIds,
       evidenceMode: evaluation.brief.evidenceMode },
     sourceComparators: draftSourceCopyInputs(evaluation),
+    ...(repetitionContext ? { repetitionContext: compactOriginalRepetitionContext(repetitionContext) } : {}),
   };
 }
 
@@ -7010,25 +7047,37 @@ export async function qualifyContinuousOriginalDrafts({ evaluations, input, call
   if (!eligible.length) return [];
   const model = getModelChainForTask('copy_judgment', input.modelStack)[0]?.model;
   if (!model) throw new Error('copy_judgment_failed');
-  const assessmentContext = originalAssessmentContext(input.originalEditorialContext, eligible[0]);
+  const repetitionContext = input.originalRepetitionContext;
+  const assessmentContext = originalAssessmentContext(input.originalEditorialContext, eligible[0], repetitionContext);
   const request = editorialAssessmentRequest({ stage: 'final', context: input.originalEditorialContext,
     variants: eligible.map(entry => ({ id: entry.draft.id, content: entry.draft.content })), model, assessmentContext });
-  const system = `${request.system}\nPublication cutoff: ${ORIGINAL_EDITORIAL_QUALITY_THRESHOLD}. A score at or above the cutoff means a worthwhile, naturally on-voice thought ready to publish. Below the cutoff means it needs a substantive change. Assess each variant independently. Return each supplied id exactly once. ${ORIGINAL_EDITORIAL_CRITIC_VERSION}.`;
+  const repetitionGuidance = repetitionContext ? `\nFor every candidate, return repetition: {verdict: fresh|repeat|uncertain, matchedTweetIds: [], explanation: string}. Compare its underlying judgment and consequence against repetitionContext.comparators, including paraphrases with different words. Shared topics alone are not the same take. List every supplied prior ID expressing the same core take. A new company wrapper, example, housing expense or synonym does not make the same conclusion fresh. Fresh requires no same-core matches. A repeat needs at least one matched reuseEligible proven winner. List all same-core matches: the server checks every match and its latest family publication for spacing, deleted status and queue reservations. Other returns need not themselves become viral again. The server verifies the winner’s mature measured performance and return capacity. Missing performance is not proof of virality. Otherwise mark substantive_duplicate regardless of a high editorial score. Uncertain comparison cannot authorize publication. Comparators supply no facts, experience or permission to copy wording. A returning take must still satisfy the current evidence and owner restrictions.` : '';
+  const system = `${request.system}\nPublication cutoff: ${ORIGINAL_EDITORIAL_QUALITY_THRESHOLD}. A score at or above the cutoff means a worthwhile, naturally on-voice thought ready to publish. Below the cutoff means it needs a substantive change. Assess each variant independently. Return each supplied id exactly once. ${ORIGINAL_EDITORIAL_CRITIC_VERSION}.${repetitionGuidance}`;
   const requestKey = editorialHash([system, request.prompt, model]);
   const result = await input.originalModelCall('copy_judgment', { task: 'copy_judgment', modelStack: input.modelStack,
     system, prompt: request.prompt, openAiReasoningEffort: 'medium', maxTokens: 2200, timeoutMs: 90_000,
     jsonSchema: { type: 'object', additionalProperties: false, required: ['assessments'], properties: {
       assessments: { type: 'array', minItems: eligible.length, maxItems: eligible.length,
-        items: { type: 'object', additionalProperties: false, required: ['id', 'assessment'],
-          properties: { id: { type: 'string', enum: eligible.map(entry => entry.draft.id) }, assessment: EDITORIAL_ASSESSMENT_SCHEMA } } },
+        items: { type: 'object', additionalProperties: false, required: ['id', 'assessment', ...(repetitionContext ? ['repetition'] : [])],
+          properties: { id: { type: 'string', enum: eligible.map(entry => entry.draft.id) }, assessment: EDITORIAL_ASSESSMENT_SCHEMA,
+            ...(repetitionContext ? { repetition: { type: 'object', additionalProperties: false,
+              required: ['verdict', 'matchedTweetIds', 'explanation'], properties: {
+                verdict: { type: 'string', enum: ['fresh', 'repeat', 'uncertain'] },
+                matchedTweetIds: { type: 'array', items: { type: 'string', ...(repetitionContext.comparators.length
+                  ? { enum: repetitionContext.comparators.map(row => row.tweetId) } : {}) } },
+                explanation: { type: 'string' },
+              } } } : {}) } } },
     } },
   }, calls);
   const raw = parseJsonRoot(result.text)?.assessments;
   const complete = Array.isArray(raw) && raw.length === eligible.length
     && eligible.every(entry => raw.filter(row => row?.id === entry.draft.id).length === 1);
-  const assessments = eligible.map(entry => ({ entry, assessment: complete
-    ? parseEditorialAssessment(raw.find(row => row.id === entry.draft.id)?.assessment) : null }));
-  if (assessments.some(row => !row.assessment)) {
+  const assessments = eligible.map(entry => {
+    const row = complete ? raw.find(row => row.id === entry.draft.id) : null;
+    return { entry, assessment: parseEditorialAssessment(row?.assessment),
+      repetition: repetitionContext ? parseOriginalRepetitionAssessment(row?.repetition) : null };
+  });
+  if (assessments.some(row => !row.assessment || repetitionContext && !row.repetition)) {
     for (const entry of eligible) {
       entry.draft.status = 'pending_assessment'; entry.draft.failureCategory = 'malformed_assessment';
       entry.draft.rejectionCodes = ['malformed_copy_judgment'];
@@ -7036,16 +7085,22 @@ export async function qualifyContinuousOriginalDrafts({ evaluations, input, call
     throw new Error('malformed_output');
   }
   const qualified: DraftEvaluation[] = [];
-  for (const { entry, assessment } of assessments) {
+  for (const { entry, assessment, repetition } of assessments) {
+    const repetitionDecision = repetitionContext
+      ? assessOriginalRepetition({ context: repetitionContext, assessment: repetition, content: entry.draft.content }) : null;
     const decision: OriginalEditorialDecision = { assessment: assessment!, threshold: ORIGINAL_EDITORIAL_QUALITY_THRESHOLD,
       contextHash: editorialHash(assessmentContext), assessmentHash: editorialHash(assessment), requestKey,
       provider: result.provider, model: result.model,
-      policyVersion: ORIGINAL_EDITORIAL_POLICY_VERSION, criticVersion: ORIGINAL_EDITORIAL_CRITIC_VERSION };
+      policyVersion: ORIGINAL_EDITORIAL_POLICY_VERSION, criticVersion: ORIGINAL_EDITORIAL_CRITIC_VERSION,
+      ...(repetitionDecision?.proof ? { repetition: repetitionDecision.proof } : {}) };
     Object.assign(entry.draft, { editorialDecision: decision, judgeScore: assessment!.editorialScore,
       judgeProvider: result.provider, judgeModel: result.model, judgePolicyVersion: ORIGINAL_EDITORIAL_CRITIC_VERSION,
       judgeNotes: assessment!.explanation, judgeRawNotes: assessment!.explanation, judgeBreakdown: null,
       updatedAt: new Date().toISOString() });
-    const verdict = candidateEditorialDecision(assessment, decision.threshold, originalEditorialPreflightBlockers(entry.draft.rejectionCodes));
+    const verdict = candidateEditorialDecision(assessment, decision.threshold, [
+      ...originalEditorialPreflightBlockers(entry.draft.rejectionCodes),
+      ...(repetitionDecision?.issue ? ['substantive_duplicate' as const] : []),
+    ]);
     if (!verdict.accepted) {
       entry.draft.status = 'rejected'; entry.draft.failureCategory = 'editorial';
       entry.draft.rejectionCodes = verdict.blockers.length ? verdict.blockers.map(code => `editorial_${code}`) : ['editorial_below_threshold'];
