@@ -1,6 +1,7 @@
 import { describe,it,expect,vi } from 'vitest';
 import { claimGenerationJob,updateGenerationJob,GenerationJobSession,getGenerationJob,getGenerationJobRecord,acknowledgeGenerationQueue,retireGenerationCanary,getRetiredGenerationCanary } from '@/lib/generation-job';
 import { normalizeCandidateDisposition,editorialRejectionCodes } from '@/lib/candidate-disposition';
+import * as storageStore from '@/lib/kv-storage';
 
 describe('durable generation jobs',()=>{
  it('claims one worker and fences expired owners',async()=>{
@@ -23,6 +24,75 @@ describe('durable generation jobs',()=>{
   const resumed=new GenerationJobSession('job-resume',recovered);
   expect(await resumed.checkpoint('call:writing',paid)).toEqual({draft:'saved'});
   expect(paid).toHaveBeenCalledTimes(1);
+ });
+ it('resumes a near-limit job without its unused history snapshot and commits the already-paid assessment',async()=>{
+  const agentId=`job-size-recovery-${crypto.randomUUID()}`;
+  const start=Date.now();
+  const limit=10*1024*1024;
+  const input={allTweets:Array.from({length:1000},(_,index)=>({id:`historical-${index}`,content:'h'.repeat(7500)})),
+   voiceProfile:{accountHandle:'geoffwoo',summary:'frozen voice'},recentPosts:['a frozen comparison'],
+   spendContext:{runLimitUsd:3},durableGeneration:true};
+  const session=new GenerationJobSession(agentId,(await claimGenerationJob(agentId,input,'p',start))!);
+  const ledger={attempts:{paid:{runId:session.job.id,state:'settled',observedUsd:.77498},
+   unresolved:{runId:'earlier-job',state:'reserved',reservedUsd:.12}}};
+  await storageStore.mutateAiOperationalState(agentId,'spend',()=>({value:ledger,result:undefined}));
+  const purchase=vi.fn(async()=>({requestKey:'call:copy_judgment:exact',result:{text:'the paid judgment'},
+   call:{requestKey:'call:copy_judgment:exact',succeeded:true}}));
+  await session.checkpoint('call:copy_judgment:exact',purchase);
+  await session.write(job=>({...job,checkpoints:{...job.checkpoints,
+   context:[{sourceText:'s'.repeat(2_800_000)}],subjects_ready:[{id:'frozen-subject'}],
+   selectedIdeas:['idea-a'],callHistory:[{requestKey:'call:copy_judgment:exact',estimatedCostUsd:.77498}],
+  }}));
+  const frozenCheckpoints=structuredClone(session.job.checkpoints);
+  // Reproduce the decoded large-value write boundary without a network call
+  // or any paid generation. Escaped HTTP-body size is a separate quantity.
+  const valueBytes=(value:unknown)=>Buffer.byteLength(JSON.stringify(value));
+  const assessment={drafts:[{draft:{id:'draft-a',status:'selected',judgeNotes:'a'.repeat(200_000)}}],
+   selected:[{draftCandidateId:'draft-a'}]};
+  expect(valueBytes(session.job)).toBeLessThan(limit);
+  expect(valueBytes({...session.job,checkpoints:{...session.job.checkpoints,'assessed:idea-a':assessment}})).toBeGreaterThan(limit);
+  const mutate=storageStore.mutateAiOperationalState;
+  const sizeBoundary=vi.spyOn(storageStore,'mutateAiOperationalState').mockImplementation(((id,namespace,update)=>
+   mutate<any,any>(id,namespace,current=>{
+    const mutation=update(current);
+    if(!mutation.skip && valueBytes(mutation.value)>limit) throw new Error('max_request_size_exceeded');
+    return mutation;
+   })) as typeof mutate);
+  try {
+   const derive=async(active:GenerationJobSession)=>{
+    await active.checkpoint('call:copy_judgment:exact',purchase);
+    return assessment;
+   };
+   await expect(session.checkpoint('assessed:idea-a',()=>derive(session))).rejects.toThrow('max_request_size_exceeded');
+   expect((await getGenerationJob(agentId))!.checkpoints['assessed:idea-a']).toBeUndefined();
+   const project=vi.fn(saved=>({...saved as typeof input,allTweets:[]}));
+   const recovered=(await claimGenerationJob(agentId,{allTweets:[],voiceProfile:{summary:'new input must not replace frozen voice'}},
+    'p',start+301_000,undefined,project))!;
+   expect(project).toHaveBeenCalledTimes(1);
+   expect(recovered).toMatchObject({id:session.job.id,expiresAt:session.job.expiresAt,policy:'p'});
+   expect(recovered.owner).not.toBe(session.job.owner);
+   expect(recovered.input).toEqual({...input,allTweets:[]});
+   expect(recovered.checkpoints).toEqual(frozenCheckpoints);
+   await expect(updateGenerationJob(agentId,session.job,job=>job,start+301_001)).rejects.toThrow('generation_lease_lost');
+   const resumed=new GenerationJobSession(agentId,recovered);
+   expect(await resumed.checkpoint('assessed:idea-a',()=>derive(resumed))).toEqual(assessment);
+   expect(valueBytes(resumed.job)).toBeLessThan(limit);
+   expect(purchase).toHaveBeenCalledTimes(1);
+   expect(resumed.job.checkpoints['call:copy_judgment:exact']).toEqual(frozenCheckpoints['call:copy_judgment:exact']);
+   expect(resumed.job.checkpoints.callHistory).toEqual(frozenCheckpoints.callHistory);
+   expect((await getGenerationJobRecord(agentId,recovered.id))?.checkpoints['assessed:idea-a']).toEqual(assessment);
+   expect(await storageStore.getAiOperationalState(agentId,'spend')).toEqual(ledger);
+  } finally {sizeBoundary.mockRestore();}
+ });
+ it('does not project an input while another worker owns the active lease',async()=>{
+  const agentId=`job-projection-fence-${crypto.randomUUID()}`;
+  const input={allTweets:[{id:'retained'}],voiceProfile:{summary:'frozen'}};
+  const active=(await claimGenerationJob(agentId,input,'p'))!;
+  const project=vi.fn(saved=>({...saved as typeof input,allTweets:[]}));
+  expect(await claimGenerationJob(agentId,{},'p',active.createdAt+1,undefined,project)).toBeNull();
+  expect(project).not.toHaveBeenCalled();
+  expect((await getGenerationJob(agentId))?.input).toEqual(input);
+  expect((await getGenerationJob(agentId))?.owner).toBe(active.owner);
  });
  it('retains assessed output until queue acknowledgement',async()=>{
   const job=(await claimGenerationJob('job-queue',{},'p'))!;

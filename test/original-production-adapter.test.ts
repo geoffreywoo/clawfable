@@ -238,6 +238,8 @@ describe('production original adapter', () => {
 
   it('integrates with the durable wrapper receipt and rejects copy changed after assessment', async () => {
     const input = await setup();
+    input.allTweets = [{ id: 'obsolete-wrapper-snapshot', content: 'unused historical snapshot',
+      type: 'original', status: 'posted' } as any];
     const result = await generateTweetBatchV2({ ...input, agentId: '13', jobSession: undefined });
     expect(result).toHaveLength(1);
     expect(result[0].assessmentReceipt).toMatchObject({
@@ -252,6 +254,54 @@ describe('production original adapter', () => {
       .toContain('changed after assessment');
     expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual(['idea_generation', 'tweet_writing', 'copy_judgment']);
     expect((await getGenerationRuns('13', 1))[0].qualityPolicyVersion).toBe(ORIGINAL_EDITORIAL_POLICY_VERSION);
+    expect((await getGenerationJob('13'))!.input).toMatchObject({ allTweets: [], voiceProfile: input.voiceProfile });
+  });
+
+  it('keeps the paid request identical when unused snapshot history is removed on resume', async () => {
+    const input = await setup('13');
+    input.allTweets = [{ id: 'unused-snapshot', content: 'old snapshot text must not become model context',
+      status: 'posted', type: 'original', xTweetId: '2110000000000000001' } as any];
+    const live = await createTweet({ agentId: input.agentId, content: 'A current account-history entry.',
+      type: 'original', status: 'posted', xTweetId: '2110000000000000002',
+      postedAt: new Date(Date.now() - 1000).toISOString() } as any);
+    const liveHistory = vi.spyOn(storageStore, 'getTweets').mockResolvedValue([live]);
+    const { jobSession: originalSession, ...frozenInput } = input;
+    await originalSession!.write(job => ({ ...job, input: frozenInput }));
+    const successful = harness.generate.getMockImplementation()!;
+    let pending = true;
+    harness.generate.mockImplementation(async options => {
+      if (options.task === 'copy_judgment' && pending) { pending = false; throw new Error('provider_pending'); }
+      return successful(options);
+    });
+    try {
+      await expect(generateOriginalProduction(input)).rejects.toThrow('provider_pending');
+      expect(harness.preflightCalls.every(call => call.allTweets.map((tweet: any) => tweet.id).join() === live.id)).toBe(true);
+      const frozenSubjects = structuredClone(originalSession!.job.checkpoints.subjects_ready);
+      const paidBefore = Object.fromEntries(Object.entries(originalSession!.job.checkpoints)
+        .filter(([key]) => key.startsWith('call:idea_generation:') || key.startsWith('call:tweet_writing:')));
+      const firstJudge = harness.generate.mock.calls.find(([options]) => options.task === 'copy_judgment')![0];
+      const next = (await claimGenerationJob(input.agentId, {}, originalSession!.job.policy,
+        originalSession!.job.leaseUntil + 1, undefined,
+        saved => ({ ...saved as GenerateTweetBatchV2Input, allTweets: [] })))!;
+      expect(next.id).toBe(originalSession!.job.id);
+      expect((next.input as GenerateTweetBatchV2Input).allTweets).toEqual([]);
+      const resumed = new GenerationJobSession(input.agentId, next);
+      const result = await generateOriginalProduction({ ...next.input as GenerateTweetBatchV2Input, jobSession: resumed });
+      expect(result).toHaveLength(1);
+      expect(harness.generate.mock.calls.map(([options]) => options.task)).toEqual([
+        'idea_generation', 'tweet_writing', 'copy_judgment', 'copy_judgment',
+      ]);
+      const secondJudge = harness.generate.mock.calls.filter(([options]) => options.task === 'copy_judgment')[1][0];
+      expect(secondJudge.prompt).toBe(firstJudge.prompt);
+      expect(secondJudge.system).toBe(firstJudge.system);
+      expect(secondJudge.jsonSchema).toEqual(firstJudge.jsonSchema);
+      expect(secondJudge.spendContext?.requestKey).toBe(firstJudge.spendContext?.requestKey);
+      expect(resumed.job.checkpoints.subjects_ready).toEqual(frozenSubjects);
+      for (const [key, value] of Object.entries(paidBefore)) expect(resumed.job.checkpoints[key]).toEqual(value);
+      const completed = new GenerationJobSession(input.agentId, (await getGenerationJob(input.agentId))!);
+      expect(await generateOriginalProduction({ ...next.input as GenerateTweetBatchV2Input, jobSession: completed })).toEqual(result);
+      expect(harness.generate).toHaveBeenCalledTimes(4);
+    } finally { liveHistory.mockRestore(); }
   });
 
   it('migrates a legacy durable snapshot into the same original adapter while preserving history', async () => {

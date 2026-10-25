@@ -20,6 +20,8 @@ The compact context includes up to two complete accepted owner edits with their 
 
 Paid stages and their context survive interruptions and routine learning refreshes. Later direction and revocation affect future unfrozen jobs. A release does not add fresh coaching to already purchased copy. New context and request hashes bind new decisions to exact feedback, evidence and text; historical receipts and spending are retained.
 
+Durable originals do not freeze full tweet records in `input.allTweets`: the runner reloads canonical account history before any editorial stage. Claiming an existing job removes only that unused copy after lease checks. Frozen voice, source and repetition contexts, raw paid responses, request keys, job identity, expiry and spending remain unchanged. This keeps assessment saves below Redis's command-size limit without pruning paid work or changing the stored job format.
+
 ## Fresh takes and measured returns
 
 The continuous @geoffwoo original path retrieves relevant prior originals and queue commitments instead of showing only the first twelve old premises. These comparisons are not voice examples or factual evidence. The existing single Astra editorial call classifies each variant as fresh, a returning take, or uncertain and names its matching prior posts. A same-core paraphrase without a valid return exception uses the existing `substantive_duplicate` blocker; sharing a topic alone is not a duplicate. The score cutoff remains 0.75 and no additional critic call is purchased.

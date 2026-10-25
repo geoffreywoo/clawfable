@@ -38,7 +38,8 @@ async function archiveGenerationJob(agentId:string, job:GenerationJob):Promise<v
 export function jobFingerprint(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
-export async function claimGenerationJob(agentId: string, input: unknown, policy: string, now = Date.now(), compatiblePolicy?: (job:GenerationJob)=>boolean): Promise<GenerationJob | null> {
+export async function claimGenerationJob(agentId: string, input: unknown, policy: string, now = Date.now(), compatiblePolicy?: (job:GenerationJob)=>boolean,
+  projectInput?: (input: unknown) => unknown): Promise<GenerationJob | null> {
   const owner = randomUUID();
   const previous = await getGenerationJob(agentId);
   // Archive before replacing the active pointer. A crash or newer worker
@@ -67,6 +68,10 @@ export async function claimGenerationJob(agentId: string, input: unknown, policy
       value.checkpoints=Object.fromEntries(Object.entries(current.checkpoints).filter(([key])=>!['ideaNormalizationVersion','ideas_ready','subjects_ready','briefs'].includes(key) && !key.startsWith('assessed:') && !key.startsWith('drafts_ready') && !key.startsWith('repair:')));
       if (paidRecovery) value.checkpoints[ORIGINAL_PAID_RECOVERY_KEY] = paidRecovery;
     }
+    // Project only after the lease and reuse checks. A caller may omit data
+    // that its runner always reloads, without changing frozen paid stages or
+    // allowing a competing worker to rewrite another owner's input.
+    if (projectInput) value.input = projectInput(value.input);
     value.revision = (reusable ? current.revision || 0 : 0) + 1;
     return {value, result: value};
   });
