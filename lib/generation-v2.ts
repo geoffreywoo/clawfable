@@ -8047,7 +8047,11 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
   // frozen context or paid stages of an in-flight job. Owner/model changes remain binding.
   const policyInputs = ['simple-original-4',ORIGINAL_EDITORIAL_POLICY_VERSION,ORIGINAL_EDITORIAL_CRITIC_VERSION,SOURCE_COPY_ASSESSMENT_VERSION,ORIGINAL_EDITORIAL_CONTEXT_VERSION,ORIGINAL_PROMPT_VERSION,ANTIFUND_PORTFOLIO_CONVICTION_DETECTOR_VERSION,SOURCE_ATTRIBUTION_DETECTOR_VERSION,GENERATION_JOB_VERSION,EFFICIENT_GENERATION_POLICY,getGenerationPolicyVersions(input.voiceProfile,input.surface || 'original'),input.modelStack,authorIdentity];
   const policy = jobFingerprint(policyInputs);
-  const snapshot = JSON.parse(JSON.stringify({...input,onTrace:undefined,onArtifacts:undefined,jobSession:undefined,originalModelCall:undefined,originalEditorialContext:undefined}));
+  // The original adapter reloads canonical tweets before any editorial stage
+  // and replaces both input.allTweets and assessmentInput.allTweets. Freezing
+  // full tweet records here only duplicates an unused history snapshot on
+  // every Redis CAS write, eventually exceeding its 10 MiB request limit.
+  const snapshot = JSON.parse(JSON.stringify({...input,allTweets:[],onTrace:undefined,onArtifacts:undefined,jobSession:undefined,originalModelCall:undefined,originalEditorialContext:undefined}));
   const job = await claimGenerationJob(input.agentId,snapshot,policy,Date.now(),current=>{
     const saved=current.input as GenerateTweetBatchV2Input;
     // A change to the legacy efficient runner is not a reason to regenerate
@@ -8055,7 +8059,7 @@ export async function generateTweetBatchV2(input: GenerateTweetBatchV2Input): Pr
     // derived assessments and exact call fingerprints guard paid stage reuse.
     return current.version===GENERATION_JOB_VERSION
       && jobFingerprint([originalAuthorIdentity(saved.voiceProfile),saved.modelStack])===jobFingerprint([authorIdentity,input.modelStack]);
-  });
+  },saved=>({...saved as GenerateTweetBatchV2Input,allTweets:[]}));
   if (!job) return [];
   const session = new GenerationJobSession(input.agentId,job);
   if (job.status === 'assessed' && job.result?.length) { await session.finish(job.result,'completed'); return job.result as RankedProtocolTweet[]; }
