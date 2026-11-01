@@ -38,6 +38,10 @@ const POLICY: OriginalRepetitionPolicy = Object.freeze({
   maximumPostCharacters: 1200,
   maximumContextCharacters: 20_000,
 });
+// Retrieval defaults do not change the stored proof or return-eligibility policy.
+const RECENT_PUBLISHED_COMPARATOR_LIMIT = 9;
+const STRONG_LEXICAL_COMPARATOR_LIMIT = 4;
+const RETRIEVAL_RANK_OFFSET = 60;
 
 export interface OriginalViralEvidence {
   source: 'official_x_performance_history';
@@ -371,8 +375,15 @@ export function buildOriginalRepetitionContext(input: {
       ...(viralEvidence ? { viralEvidence } : {}) };
   });
   const eligible = comparators.filter(row => row.content.length <= POLICY.maximumPostCharacters);
+  const eligibleById = new Map(eligible.map(row => [row.tweetId, row]));
+  const recentPublished = publishedRows.filter(tweet => tweet.status === 'posted' && eligibleById.has(tweet.id))
+    .slice(0, RECENT_PUBLISHED_COMPARATOR_LIMIT).map(tweet => eligibleById.get(tweet.id)!);
   const byId = new Map(rows.map(row => [row.id, row]));
-  const recent = [...eligible].sort((a, b) => date(byId.get(b.tweetId)?.postedAt || byId.get(b.tweetId)?.createdAt) - date(byId.get(a.tweetId)?.postedAt || byId.get(a.tweetId)?.createdAt) || a.tweetId.localeCompare(b.tweetId));
+  const recencyTime = (row: OriginalRepetitionComparator) => {
+    const tweet = byId.get(row.tweetId)!, postedAt = date(tweet.postedAt), createdAt = date(tweet.createdAt);
+    return Number.isFinite(postedAt) ? postedAt : Number.isFinite(createdAt) ? createdAt : 0;
+  };
+  const recent = [...eligible].sort((a, b) => recencyTime(b) - recencyTime(a) || a.tweetId.localeCompare(b.tweetId));
   const recencyRank = new Map(recent.map((row, index) => [row.tweetId, index]));
   // BM25 ranks rare shared terms above repeated account-wide filler. This is
   // retrieval only: neither terms nor scores can declare two takes duplicates.
@@ -395,10 +406,18 @@ export function buildOriginalRepetitionContext(input: {
     return [row.tweetId, score] as const;
   }));
   const relevant = [...eligible].sort((a, b) => scores.get(b.tweetId)! - scores.get(a.tweetId)! || recencyRank.get(a.tweetId)! - recencyRank.get(b.tweetId)!);
+  const lexicalRank = new Map(relevant.map((row, index) => [row.tweetId, index]));
+  const retrievalScore = (row: OriginalRepetitionComparator) => 1 / (RETRIEVAL_RANK_OFFSET + lexicalRank.get(row.tweetId)!)
+    + 1 / (RETRIEVAL_RANK_OFFSET + recencyRank.get(row.tweetId)!);
+  const positive = relevant.filter(row => scores.get(row.tweetId)! > 0);
+  const balanced = [...positive].sort((a, b) => retrievalScore(b) - retrievalScore(a) || lexicalRank.get(a.tweetId)! - lexicalRank.get(b.tweetId)!);
   const winners = relevant.filter(row => row.reuseEligible).slice(0, 4);
-  // Keep two recent commitments visible and spend the remaining comparison
-  // slots on relevant history. Proven hits fill unused relevance capacity.
-  const candidates = [...recent.slice(0, 2), ...relevant.filter(row => scores.get(row.tweetId)! > 0).slice(0, 22), ...winners, ...relevant];
+  // Protect recent published takes before queue/deletion recency or lexical
+  // hits consume the bounded context. Retain the strongest lexical hits, then
+  // balance positive matches with recency so paraphrased recent history still
+  // competes for the remaining slots. These ranks only retrieve comparisons;
+  // they never decide repetition or eligibility. Full-copy/size limits apply.
+  const candidates = [...recentPublished, ...recent.slice(0, 2), ...positive.slice(0, STRONG_LEXICAL_COMPARATOR_LIMIT), ...balanced, ...winners, ...relevant];
   const context: OriginalRepetitionContext = {
     version: ORIGINAL_REPETITION_POLICY_VERSION, observedAt: new Date(now).toISOString(), queryHash: hash(input.query), policy: { ...POLICY },
     history: { viralLikesThreshold, originalCount: publishedRows.length, queuedCount: rows.filter(row => row.status === 'queued').length,

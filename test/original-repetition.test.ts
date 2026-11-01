@@ -103,6 +103,109 @@ describe('bounded original take history', () => {
   });
 });
 
+describe('recent published comparison coverage', () => {
+  function saturatedHistory() {
+    const recent = Array.from({ length: 9 }, (_, index) => tweet(`recent-${index}`, 1 + index / 10, {
+      content: `Recent independent observation ${index}: give a buyer room to decide.`,
+    }));
+    const query = 'Customer migration assistance removes switching work from a software purchase.';
+    const decoys = Array.from({ length: 40 }, (_, index) => tweet(`lexical-${index}`, 30 + index, {
+      content: `${query} Historical comparison ${index}.`,
+    }));
+    const queued = tweet('queued', 0, { status: 'queued', postedAt: null, xTweetId: null });
+    const deleted = Array.from({ length: 12 }, (_, index) => tweet(`deleted-${index}`, 0.1 + index / 100, {
+      status: 'deleted_from_x', content: `${query} Removed observation ${index}.`,
+    }));
+    return { recent, query, tweets: [queued, ...deleted, ...recent, ...decoys] };
+  }
+
+  it('keeps the recent published window despite newer queue/deletions and saturated lexical matches', () => {
+    const { recent, query, tweets } = saturatedHistory();
+    const context = buildOriginalRepetitionContext({ tweets, performance: [], query, now: NOW });
+    const expectedIds = recent.map(post => post.id);
+    expect(context.comparators.slice(0, 9).map(post => post.tweetId)).toEqual(expectedIds);
+    // These low-overlap fifth, eighth and ninth posts must reach the actual
+    // model comparison, not just the server's recentOriginals metadata.
+    const model = compactOriginalRepetitionContext(context);
+    for (const index of [4, 7, 8]) {
+      expect(model.comparators.find(post => post.tweetId === recent[index].id)?.content).toBe(recent[index].content);
+    }
+    expect(context.comparators.find(post => post.tweetId === 'queued')).toMatchObject({
+      reuseEligible: false, eligibilityReasons: expect.arrayContaining(['queued_take_reserved']),
+    });
+    expect(context.comparators.find(post => post.tweetId === 'deleted-0')).toMatchObject({
+      reuseEligible: false, eligibilityReasons: expect.arrayContaining(['deleted_post_not_reusable']),
+    });
+    expect(context.comparators.some(post => post.tweetId.startsWith('lexical-'))).toBe(true);
+    expect(context.comparators).toHaveLength(24);
+  });
+
+  it('protects only valid published originals, with deterministic ordering for timestamp ties', () => {
+    const { recent, query, tweets } = saturatedHistory();
+    const tied = recent.map(post => ({ ...post, postedAt: recent[0].postedAt }));
+    const invalid = [
+      tweet('future', -1),
+      tweet('invalid-time', 0, { postedAt: 'not-a-date' }),
+      tweet('no-publication-id', 0, { xTweetId: null }),
+    ];
+    const rows = [...tweets.filter(post => !post.id.startsWith('recent-')), ...tied, ...invalid];
+    const build = (input: Tweet[]) => buildOriginalRepetitionContext({ tweets: input, performance: [], query, now: NOW });
+    const context = build(rows);
+    const ids = context.comparators.map(post => post.tweetId);
+    expect(ids.slice(0, 9)).toEqual(tied.map(post => post.id).sort());
+    expect(build([...rows].reverse()).comparators.map(post => post.tweetId)).toEqual(ids);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('still retrieves older relevant copy and eligible winners outside the protected recent window', () => {
+    const { tweets, metrics, winner } = fixture();
+    const queue = tweet('new-queue', 0, { status: 'queued', postedAt: null, xTweetId: null });
+    const deleted = tweet('new-deleted', 0.1, { status: 'deleted_from_x' });
+    const older = tweet('older-relevant', 90, { content: 'Customers need archival export portability before choosing a database.' });
+    const context = buildOriginalRepetitionContext({ tweets: [queue, deleted, older, ...tweets], performance: metrics,
+      query: 'archival export portability database', now: NOW });
+    expect(context.comparators.find(post => post.tweetId === older.id)?.content).toBe(older.content);
+    expect(context.comparators.find(post => post.tweetId === winner.id)).toMatchObject({ reuseEligible: true });
+  });
+
+  it('keeps the strongest old lexical matches despite many weaker recent matches', () => {
+    const { recent } = saturatedHistory();
+    const older = Array.from({ length: 4 }, (_, index) => tweet(`old-specific-${index}`, 180 + index, {
+      content: `Cryogenic chamber calibration needs interferometry before release: case ${index}.`,
+    }));
+    const weaker = Array.from({ length: 40 }, (_, index) => tweet(`weak-${index}`, 3 + index / 10, {
+      content: `Release observation ${index} concerns another independent decision.`,
+    }));
+    const context = buildOriginalRepetitionContext({ tweets: [...recent, ...weaker, ...older], performance: [],
+      query: 'cryogenic chamber calibration interferometry release', now: NOW });
+    for (const post of older) expect(context.comparators.find(selected => selected.tweetId === post.id)?.content).toBe(post.content);
+    expect(context.comparators.some(post => post.tweetId.startsWith('weak-'))).toBe(true);
+  });
+
+  it('prioritizes complete recent copies while retaining the existing count and serialized-size limits', () => {
+    const recent = Array.from({ length: 9 }, (_, index) => tweet(`recent-long-${index}`, 1 + index / 10, {
+      content: `${index}: ${'complete recent observation '.repeat(50)}`.slice(0, 1196) + '_END',
+    }));
+    const oversize = tweet('too-long', 0, { content: 'x'.repeat(1201) });
+    const older = Array.from({ length: 30 }, (_, index) => tweet(`older-long-${index}`, 30 + index, {
+      content: `${index}: ${'relevant older observation '.repeat(50)}`.slice(0, 1196) + '_END',
+    }));
+    const tweets = [oversize, ...recent, ...older];
+    const context = buildOriginalRepetitionContext({ tweets, performance: [], query: 'relevant older observation', now: NOW });
+    expect(context.comparators.slice(0, 9).map(post => post.tweetId)).toEqual(recent.map(post => post.id));
+    expect(context.comparators.some(post => post.tweetId === oversize.id)).toBe(false);
+    expect(context.comparators.length).toBeLessThanOrEqual(24);
+    expect(JSON.stringify(context).length).toBeLessThanOrEqual(20_000);
+    for (const selected of context.comparators) {
+      expect(selected.content).toBe(tweets.find(post => post.id === selected.tweetId)!.content);
+      expect(selected.content.length).toBeLessThanOrEqual(1200);
+      expect(selected.content.endsWith('_END')).toBe(true);
+    }
+    expect(context.history.omittedOversizePosts).toBe(1);
+    expect(context.history.omittedComparatorCount).toBe(tweets.length - 1 - context.comparators.length);
+  });
+});
+
 describe('full retained public-history retrieval', () => {
   // Public fixture contains only already posted, nondeleted original copy.
   // Pending queue text and receipts are deliberately absent from this corpus.
