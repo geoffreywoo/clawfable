@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { IdeaCandidate } from './types';
 import type { originalAssessmentContext } from './generation-v2';
+import { authoredVoiceInstruction } from './authored-voice-policy';
 
 // Evaluation only until a frozen owner-labelled holdout validates the complete policy.
 export const CANDIDATE_EDITORIAL_VERSION = 'account-editorial-1';
@@ -42,14 +43,16 @@ export function editorialAssessmentRequest(input: {
   const context = input.assessmentContext
     ? { ...input.context, contentMode: input.assessmentContext.originalEditorialContext.contentMode } : input.context;
   const template = editorialPrompt(input.stage, context, input.assessmentContext ? 'original' : 'generic');
+  const voiceInstruction = input.assessmentContext ? authoredVoiceInstruction(input.assessmentContext.originalEditorialContext) : '';
+  const system = `${template.system}${voiceInstruction ? ` ${voiceInstruction}` : ''}`;
   // Imported fixtures may contain labels and answer keys. Only copy is a variant.
   const variants = input.variants.map(({ id, content }) => ({ id, content }));
   const payload = input.assessmentContext ? { ...input.assessmentContext, candidates: variants }
     : { context: template.context, candidates: variants };
   const requestKey = input.assessmentContext
-    ? editorialHash([ORIGINAL_EDITORIAL_ASSESSMENT_VERSION, template.system, payload, input.model])
+    ? editorialHash([ORIGINAL_EDITORIAL_ASSESSMENT_VERSION, system, payload, input.model])
     : editorialHash([template, variants, input.model]);
-  return { system: template.system, prompt: JSON.stringify(payload), variants, requestKey };
+  return { system, prompt: JSON.stringify(payload), variants, requestKey };
 }
 export interface EditorialAssessment {
   editorialScore: number;

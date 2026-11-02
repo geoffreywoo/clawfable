@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getAiOperationalState, getLearningSignals, getVoiceDirectiveRules } from '@/lib/kv-storage';
+import { EDITORIAL_STEERING_GUIDANCE_LIMIT, selectEditorialSteeringRows } from '@/lib/editorial-steering-policy';
 import {
   claimEditorialSteeringForJob, completeEditorialSteeringJob, getEditorialSteering,
   MAX_EDITORIAL_STEERING_RECORDS, parseEditorialSteeringInput, revokeEditorialSteering,
@@ -76,13 +77,45 @@ describe('explicit owner editorial steering', () => {
     expect(await getVoiceDirectiveRules(agent)).toEqual([]);
   });
 
+  it('keeps four existing standing directions when the owner adds actual-tweet voice guidance', async () => {
+    const agent = 'steering-five-standing';
+    const instructions = ['Prioritize topic and take.', 'Keep the AI visionary voice.', 'Do not curse.',
+      'Keep takes fresh; allow proven spaced returns.', 'Use my actual tweets to guide voice and style.'];
+    const saved = [];
+    for (const [index, instruction] of instructions.entries()) {
+      saved.push(await saveEditorialSteering(agent, 'owner', input(`standing-${index}`, {
+        scope: 'standing', kind: index === 4 ? 'copy' : 'take', instruction,
+      }), now + index));
+    }
+    const selected = await claimEditorialSteeringForJob(agent, 'fresh-job', now + 10);
+    expect(selected).toHaveLength(5);
+    expect(selected.map(row => row.id).sort()).toEqual(saved.map(row => row.id).sort());
+    expect(selected.map(row => row.instruction).sort()).toEqual([...instructions].sort());
+    expect((await getEditorialSteering(agent, now + 10)).every(row => row.status === 'active')).toBe(true);
+  });
+
+  it('reports current count and character omissions without consuming or changing directions', async () => {
+    const agent = 'steering-selection-coverage';
+    for (let i = 0; i < 6; i++) await saveEditorialSteering(agent, 'owner', input(`standing-${i}`, {
+      scope: 'standing', instruction: `Direction ${i}`,
+    }), now + i);
+    const before = await ledger(agent);
+    const rows = await getEditorialSteering(agent, now + 10);
+    const selection = selectEditorialSteeringRows(rows, 'not-claimed');
+    expect(selection.selected).toHaveLength(5);
+    expect(selection.omitted).toEqual([{ id: rows[0].id, reason: 'count_limit' }]);
+    expect(selectEditorialSteeringRows(rows.slice(0, 4).map(row => ({ ...row, instruction: 'x'.repeat(900) })), 'not-claimed')
+      .omitted).toEqual([{ id: rows[0].id, reason: 'character_limit' }]);
+    expect(await ledger(agent)).toEqual(before);
+  });
+
   it('preserves the entire bounded audit instead of silently pruning old records', async () => {
     const agent = 'steering-capacity';
     for (let i = 0; i < MAX_EDITORIAL_STEERING_RECORDS; i++) await saveEditorialSteering(agent, 'owner', input(`request-${i}`), now);
     const before = await ledger(agent);
     await expect(saveEditorialSteering(agent, 'owner', input('overflow'), now)).rejects.toMatchObject({ status: 409 });
     expect(await ledger(agent)).toEqual(before);
-    expect(await claimEditorialSteeringForJob(agent, 'continues', now + 1)).toHaveLength(4);
+    expect(await claimEditorialSteeringForJob(agent, 'continues', now + 1)).toHaveLength(EDITORIAL_STEERING_GUIDANCE_LIMIT);
   });
 
   it.each([

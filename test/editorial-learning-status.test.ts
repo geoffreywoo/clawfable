@@ -103,6 +103,44 @@ describe('editorial learning evidence projection', () => {
       createdAt: null, gaps: ['job_created_at_missing_or_invalid'], contextPrepared: false,
     });
   });
+
+  it('shows current resolver overflow separately from an unchanged older frozen job', () => {
+    const oldJob = job(undefined, { editorial_steering: [{ id: 'old' }],
+      subjects_ready: [subject('frozen', ['old'])], editorialSteeringUse: { contextIds: ['old'], omittedIds: [] } });
+    const original = structuredClone(oldJob);
+    const rows = Array.from({ length: 6 }, (_, index) => ({ ...direction(`s-${index}`),
+      createdAt: new Date(now - 100 + index).toISOString() }));
+    const report = project({ jobs: [oldJob], steering: rows });
+    expect(report.currentResolverPreview).toMatchObject({ scope: 'next_unfrozen_job',
+      selectedIds: ['s-5', 's-4', 's-3', 's-2', 's-1'], omitted: [{ id: 's-0', reason: 'count_limit' }],
+      maximumDirections: 5, maximumCharacters: 3200, isHistoricalJobApplication: false,
+      historicalResolverOmissionsAvailable: false });
+    expect(report.activeContext.contextSteeringIds).toEqual(['old']);
+    expect(report.activeContext.use?.omittedIds).toEqual([]);
+    expect(oldJob).toEqual(original);
+  });
+
+  it('reports a character-budget omission while allowing a later smaller direction', () => {
+    const rows = [900, 900, 900, 900, 100].map((size, index) => ({ ...direction(`s-${index}`),
+      instruction: 'x'.repeat(size), scope: 'one_off', status: 'pending',
+      createdAt: new Date(now - 100 + index).toISOString() }));
+    const report = project({ steering: rows });
+    expect(report.currentResolverPreview.selectedIds).toEqual(['s-0', 's-1', 's-2', 's-4']);
+    expect(report.currentResolverPreview.omitted).toEqual([{ id: 's-3', reason: 'character_limit' }]);
+    expect(report.currentResolverPreview.selectedCharacters).toBe(2800);
+  });
+
+  it('reports exact frozen voice IDs and hashes without returning example bodies', () => {
+    const report = project({ jobs: [job(undefined, { subjects_ready: [{ id: 'voice-subject', editorialContext: {
+      contextVersion: 'original-editorial-context-3', authoredVoicePolicy: 'authored-voice-primary-1', voiceExamples: ['private original author sample'],
+      exampleRefs: [{ id: '2110000000000000001', provenance: 'timeline_unmatched', authorshipAttestationId: 'owner-attestation', selectionReason: 'subject_register' }],
+    } }] })] });
+    expect(report.jobs[0].subjects[0].voiceReferences).toEqual([expect.objectContaining({ id: '2110000000000000001',
+      provenance: 'timeline_unmatched', authorshipAttestationId: 'owner-attestation', selectionReason: 'subject_register', characters: 30,
+      contentHash: expect.stringMatching(/^[a-f0-9]{64}$/) })]);
+    expect(JSON.stringify(report)).not.toContain('private original author sample');
+    expect(report.jobs[0].subjects[0].authoredVoicePolicy).toBe('authored-voice-primary-1');
+  });
 });
 
 describe('shared account-owned read service', () => {
