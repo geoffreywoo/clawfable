@@ -9,6 +9,8 @@ import type { EditorialSteeringGuidance } from './editorial-steering';
 import type { ApprovedEditExample } from './learning-loop';
 import type { OriginalRepetitionContext } from './original-repetition';
 import { originalModelContext } from './original-prompts';
+import { AUTHORED_VOICE_POLICY_VERSION } from './authored-voice-policy';
+import { EDITORIAL_STEERING_GUIDANCE_LIMIT } from './editorial-steering-policy';
 
 export const ORIGINAL_EDITORIAL_CONTEXT_VERSION = 'original-editorial-context-3';
 export const ORIGINAL_VOICE_EXAMPLE_LIMIT = 3;
@@ -32,6 +34,8 @@ export interface OriginalVoiceExample {
   /** Frozen evaluation examples cannot also become prompt examples. */
   reservedForEvaluation?: boolean;
   relevance?: number;
+  topic?: string;
+  selectionReason?: 'subject_register' | 'cross_topic_diction' | 'authored_range';
 }
 
 /** A single immutable-by-convention payload shared by idea, writer, judge and repair. */
@@ -44,7 +48,9 @@ export interface OriginalEditorialContext extends EditorialContext {
   modeGuidance: string;
   forecastExpectations: string[];
   exampleUse: string;
-  exampleRefs: Array<Pick<OriginalVoiceExample, 'id' | 'provenance' | 'authorshipAttestationId'>>;
+  exampleRefs: Array<Pick<OriginalVoiceExample, 'id' | 'provenance' | 'authorshipAttestationId' | 'selectionReason'>>;
+  /** Added only at context construction, never when replaying frozen contexts. */
+  authoredVoicePolicy?: typeof AUTHORED_VOICE_POLICY_VERSION;
   /** Optional owner preferences and whole accepted edits, frozen with this job. */
   editorialSteering?: EditorialSteeringGuidance[];
   acceptedEdits?: ApprovedEditExample[];
@@ -149,7 +155,7 @@ function accountRestrictions(profile: VoiceProfile, portfolio?: PortfolioCompany
   return rules.map(([id, text]) => ({ id: `account:${id}`, text, kind: 'restriction', source: 'account_policy' }));
 }
 
-function selectExamples(examples: OriginalVoiceExample[]): OriginalVoiceExample[] {
+export function eligibleOriginalVoiceExamples(examples: OriginalVoiceExample[]): OriginalVoiceExample[] {
   const seenIds = new Set<string>(), seenText = new Set<string>();
   return examples.filter(example => {
     const human = example.provenance === 'operator_composed'
@@ -166,7 +172,7 @@ function selectExamples(examples: OriginalVoiceExample[]): OriginalVoiceExample[
       const normalized = example.content.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
       if (seenIds.has(example.id) || seenText.has(normalized)) return false;
       seenIds.add(example.id); seenText.add(normalized); return true;
-    }).slice(0, ORIGINAL_VOICE_EXAMPLE_LIMIT);
+    });
 }
 
 function modeGuidance(contentMode: EditorialContext['contentMode']) {
@@ -224,9 +230,10 @@ export function buildOriginalEditorialContext(input: {
     ...[boundedText(profile.tone, 'tone', 160), compactStyle.baseStyle].filter(Boolean).map((text, index): OriginalOwnerGuidance => ({ id: `soul:style:${index}`, text, kind: 'preference', source: 'owner_directive' })),
     ...guidance.filter(rule => rule.kind === 'preference'),
   ];
-  const examples = selectExamples(input.voiceExamples);
+  const examples = eligibleOriginalVoiceExamples(input.voiceExamples).slice(0, ORIGINAL_VOICE_EXAMPLE_LIMIT);
   const context: OriginalEditorialContext = {
     contextVersion: ORIGINAL_EDITORIAL_CONTEXT_VERSION,
+    authoredVoicePolicy: AUTHORED_VOICE_POLICY_VERSION,
     author: { accountHandle: profile.accountHandle ? boundedText(profile.accountHandle, 'accountHandle', 160) : null,
       summary: boundedText(profile.summary, 'summary', 900), topics: unique(profile.topics).map(topic => boundedText(topic, 'topic', 120)) },
     subject: { subject: boundedText(input.subject.subject, 'subject', 1600), sourceIds: input.subject.sourceIds.map(id => boundedText(id, 'sourceId', 160)), observedAt: input.subject.observedAt,
@@ -243,7 +250,8 @@ export function buildOriginalEditorialContext(input: {
       : unique(input.previousPremises || []).slice(0, 12).map(premise => boundedText(premise, 'previousPremise', 1200)),
     voiceExamples: examples.map(example => example.content),
     exampleRefs: examples.map(example => ({ id: example.id, provenance: example.provenance,
-      ...(example.authorshipAttestationId ? { authorshipAttestationId: example.authorshipAttestationId } : {}) })),
+      ...(example.authorshipAttestationId ? { authorshipAttestationId: example.authorshipAttestationId } : {}),
+      ...(example.selectionReason ? { selectionReason: example.selectionReason } : {}) })),
     exampleUse: 'Examples demonstrate diction, rhythm, compression and register only. They supply no facts, personal experience or new premises. Do not copy their wording, scene, metaphor or underlying claim. Sharing a topic or informal rhythm alone is not a duplicate.',
     excludedApplicationSections: compactStyle.excluded,
   };
@@ -254,7 +262,7 @@ export function buildOriginalEditorialContext(input: {
     throw new Error(`original_editorial_context_limit:total:${ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS}`);
   // Omit oversized whole examples rather than truncate an owner's correction
   // or turn a full optional memory into a new production blocker.
-  for (const guidance of (input.editorialSteering || []).slice(0, 4)) {
+  for (const guidance of (input.editorialSteering || []).slice(0, EDITORIAL_STEERING_GUIDANCE_LIMIT)) {
     if (guidance.provenance !== 'explicit_authenticated_owner' || !guidance.instruction.trim()) continue;
     const next = [...context.editorialSteering || [], structuredClone(guidance)];
     if (modelCharacters({ ...context, editorialSteering: next }) <= ORIGINAL_EDITORIAL_CONTEXT_MAX_CHARS)

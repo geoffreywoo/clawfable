@@ -3,6 +3,8 @@ import { getGenerationRuns, getPerformanceHistory, getTweets } from './kv-storag
 import { getEditorialSteering, type EditorialSteeringReadback } from './editorial-steering';
 import { buildEditorialTopicOutcomeLearning } from './editorial-topic-learning';
 import type { GenerationRunTrace, Tweet, TweetPerformance } from './types';
+import { createHash } from 'node:crypto';
+import { EDITORIAL_STEERING_GUIDANCE_LIMIT, EDITORIAL_STEERING_MAX_CHARS, selectEditorialSteeringRows } from './editorial-steering-policy';
 
 export const EDITORIAL_LEARNING_STATUS_VERSION = 'editorial-learning-status-1';
 export const EDITORIAL_LEARNING_RETAINED_JOB_LIMIT = 6;
@@ -64,6 +66,19 @@ function jobReport(job: GenerationJob, tweets: Tweet[]) {
     if (!subject || !context) return [];
     return [{ subjectId: typeof subject.id === 'string' ? subject.id : `retained-subject-${index}`,
       contextVersion: typeof context.contextVersion === 'string' ? context.contextVersion : null,
+      ...(Array.isArray(context.exampleRefs) && Array.isArray(context.voiceExamples) ? {
+        voiceReferences: context.exampleRefs.map((value: unknown, exampleIndex: number) => {
+          const reference = object(value), text = context.voiceExamples[exampleIndex];
+          return { id: typeof reference?.id === 'string' ? reference.id : null,
+            provenance: typeof reference?.provenance === 'string' ? reference.provenance : null,
+            authorshipAttestationId: typeof reference?.authorshipAttestationId === 'string' ? reference.authorshipAttestationId : null,
+            selectionReason: ['subject_register', 'cross_topic_diction', 'authored_range'].includes(reference?.selectionReason)
+              ? reference.selectionReason : null,
+            characters: typeof text === 'string' ? text.length : null,
+            contentHash: typeof text === 'string' ? createHash('sha256').update(JSON.stringify(text)).digest('hex') : null };
+        }),
+        authoredVoicePolicy: context.authoredVoicePolicy === 'authored-voice-primary-1' ? context.authoredVoicePolicy : null,
+      } : {}),
       steeringIds: rowIds(context.editorialSteering),
       acceptedEditSignalIds: Array.isArray(context.acceptedEdits) ? strings(context.acceptedEdits.map((row: unknown) => object(row)?.signalId)) : [],
       topicOutcomeLearning: topicPrior(subject.topicOutcomeLearning) }];
@@ -115,7 +130,9 @@ export function buildEditorialLearningStatus(input: EditorialLearningStatusInput
   const now = input.now ?? Date.now();
   const tweets = input.tweets.filter(tweet => String(tweet.agentId) === input.agentId);
   const jobs = [...new Map(input.jobs.map(job => [job.id, job])).values()].map(job => jobReport(job, tweets));
-  const steering = input.steering.filter(record => String(record.agentId) === input.agentId).map(record => ({
+  const ownedSteering = input.steering.filter(record => String(record.agentId) === input.agentId);
+  const resolverPreview = selectEditorialSteeringRows(ownedSteering, '__next_unfrozen_job_preview__');
+  const steering = ownedSteering.map(record => ({
     id: record.id, kind: record.kind, instruction: record.instruction, scope: record.scope,
     currentStatus: record.status, createdAt: record.createdAt, expiresAt: record.expiresAt || null,
     referencedIdeaId: record.ideaId || null, referencedDraftId: record.draftId || null,
@@ -138,6 +155,11 @@ export function buildEditorialLearningStatus(input: EditorialLearningStatusInput
     activeJobId: input.activeJobId, activeContext, retention: { maximumRetainedJobs: EDITORIAL_LEARNING_RETAINED_JOB_LIMIT,
       returnedJobs: jobs.length, scope: 'active_and_bounded_retained_jobs' as const, lifetimeComplete: false as const },
     steering, jobs, gaps: strings(input.gaps || []),
+    currentResolverPreview: { scope: 'next_unfrozen_job' as const,
+      selectedIds: resolverPreview.selected.map(row => row.id), omitted: resolverPreview.omitted,
+      selectedCharacters: resolverPreview.characters, maximumDirections: EDITORIAL_STEERING_GUIDANCE_LIMIT,
+      maximumCharacters: EDITORIAL_STEERING_MAX_CHARS,
+      isHistoricalJobApplication: false as const, historicalResolverOmissionsAvailable: false as const },
     topicOutcomeLearning: buildEditorialTopicOutcomeLearning({ tweets, performance: input.performance, now }),
     interpretation: { contextInclusionIsNotGuaranteedAdherence: true, consumedIsNotPublication: true,
       publicationVerification: 'app_records_only_no_official_X_readback' as const } };

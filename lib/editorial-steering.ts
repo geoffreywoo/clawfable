@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto';
 import { getAiOperationalState, mutateAiOperationalState } from './kv-storage';
+import { selectEditorialSteeringRows } from './editorial-steering-policy';
 
 export const EDITORIAL_STEERING_VERSION = 'owner-editorial-steering-1';
 const NAMESPACE = 'editorial-steering';
-const MAX_GUIDANCE = 4;
-const MAX_GUIDANCE_CHARS = 3200;
 export const MAX_EDITORIAL_STEERING_RECORDS = 256;
 
 export interface EditorialSteeringInput {
@@ -165,19 +164,12 @@ export async function revokeEditorialSteering(agentId: string, ownerUserId: stri
 /** References identify what the owner reacted to; one-off guidance targets the next job, not an old draft rewrite. */
 export function resolveEditorialSteering(ledger: EditorialSteeringLedger, jobId: string, now = Date.now()): EditorialSteeringGuidance[] {
   const rows = ledger.records.map(record => readback(record, ledger, now));
-  const eligible = rows.filter(row => row.status === 'active' || row.status === 'pending' || row.status === 'claimed' && row.jobId === jobId);
   // A pending one-off gets a chance ahead of standing preferences; newest standing coaching wins a bounded slot.
-  eligible.sort((a, b) => Number(b.scope === 'one_off') - Number(a.scope === 'one_off')
-    || (a.scope === 'one_off' ? Date.parse(a.createdAt) - Date.parse(b.createdAt) : Date.parse(b.createdAt) - Date.parse(a.createdAt)));
   const selected: EditorialSteeringGuidance[] = [];
-  let chars = 0;
-  for (const row of eligible) {
-    const size = row.instruction.length + (row.topic?.length || 0);
-    if (selected.length >= MAX_GUIDANCE || chars + size > MAX_GUIDANCE_CHARS) continue;
+  for (const row of selectEditorialSteeringRows(rows, jobId).selected) {
     const { id, kind, instruction, scope, topic, ideaId, draftId, expiresAt, provenance, ownerUserId } = row;
     selected.push({ id, kind, instruction, scope, ...(topic ? { topic } : {}), ...(ideaId ? { ideaId } : {}),
       ...(draftId ? { draftId } : {}), ...(expiresAt ? { expiresAt } : {}), provenance, ownerUserId });
-    chars += size;
   }
   return selected;
 }

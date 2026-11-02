@@ -1,7 +1,7 @@
 import { ORIGINAL_EDITORIAL_POLICY_VERSION, ORIGINAL_EDITORIAL_CRITIC_VERSION } from './original-editorial-policy';
 import {
   buildGenerationBriefsV2, prioritizeCurrentInterestBriefsV2, normalizeIdeaCandidatesV2,
-  normalizeDraftContentV2, preflightDraft, qualifyOriginalDrafts, collectOperatorAnchors,
+  normalizeDraftContentV2, preflightDraft, qualifyOriginalDrafts,
   sourceDocumentsForBrief, briefForIdea, getGenerationPolicyVersions, countRejections, finalizeTrace, isStoryEditoriallyQualifiedV2,
   type GenerateTweetBatchV2Input, type GenerationBriefV2, type DraftEvaluation,
 } from './generation-v2';
@@ -12,7 +12,8 @@ import { buildOriginalEditorialContext, contextForOriginalMode, type OriginalEdi
 import { buildOriginalIdeationPrompt, buildOriginalWritingPrompt } from './original-prompts';
 import { buildSubjectPacket } from './subject-packet';
 import { isCurrentSourceEvidence } from './source-validity';
-import { getOwnerAuthorshipAttestation, normalizedAuthorshipText } from './owner-authorship';
+import { getOwnerAuthorshipAttestation } from './owner-authorship';
+import { selectOriginalProductionVoiceExamples } from './original-voice-selection';
 import {
   getSourceDocuments, getStoryClusters, getSemanticBlocks, getIdeaCandidates, getDynamicIdeaSeeds,
   getDraftCandidates, getTweets, getPerformanceHistory, resetReadCache, saveGenerationRun, upsertIdeaCandidates, upsertDraftCandidates,
@@ -132,16 +133,8 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
           getOwnerAuthorshipAttestation(input.agentId),
           continuous && briefs.some(brief => !hasFrozenContext(brief)) ? getPerformanceHistory(input.agentId, 5000) : Promise.resolve([]),
         ]);
-        const anchors = collectOperatorAnchors(input);
         const references = input.learnings?.operatorVoiceReference;
         const referenceRows = [...references?.pinnedExamples || [], ...references?.startupRegisterExamples || [], ...references?.bestPerformers || []];
-        const generatedText = new Set([...input.allTweets.map(t => t.content), ...knownDrafts.map(d => d.content)].map(normalizedAuthorshipText));
-        const examples = anchors.flatMap(anchor => {
-          const row = referenceRows.find(r => r.content.trim() === anchor.content.trim());
-          if (!row || generatedText.has(normalizedAuthorshipText(row.content))) return [];
-          return [{ id: anchor.id, content: anchor.content, provenance: row.authorshipProvenance || 'unknown' as const,
-            dispositions: row.voiceCorpusDispositions || [], authorshipAttestationId: attestation?.id }];
-        });
         return briefs.map(brief => {
           const subjectPacket = preservePackets ? structuredClone(brief.subjectPacket) : buildSubjectPacket(brief, documents, session.job.createdAt);
           if (!subjectPacket) throw new Error('stale_evidence');
@@ -151,7 +144,9 @@ export async function generateOriginalProduction(input: GenerateTweetBatchV2Inpu
           const frozenContext = preservePackets && priorContext
             && ['original-editorial-context-2', 'original-editorial-context-3'].includes(priorContext.contextVersion) ? priorContext : null;
           const editorialContext = frozenContext ? structuredClone(frozenContext) : buildOriginalEditorialContext({ voiceProfile: input.voiceProfile, subject: subjectPacket,
-            contentMode: brief.evidenceMode === 'operator_opinion' ? 'opinion' : 'observation', voiceExamples: examples,
+            contentMode: brief.evidenceMode === 'operator_opinion' ? 'opinion' : 'observation',
+            voiceExamples: selectOriginalProductionVoiceExamples({ agentId: input.agentId, references: referenceRows,
+              tweets: input.allTweets, drafts: knownDrafts, attestation, subjectTexts: [brief.topic, brief.title, brief.summary] }),
             previousPremises: input.recentPosts, portfolioCompanyContext: brief.portfolioCompanyContext,
             repetitionHistory: continuous ? buildOriginalRepetitionContext({ tweets: input.allTweets, performance,
               query: [brief.topic, brief.title, brief.summary].filter(Boolean).join(' '), now: Date.now(),

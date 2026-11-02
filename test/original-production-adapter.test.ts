@@ -16,6 +16,8 @@ import { saveEditorialSteering, getEditorialSteering } from '@/lib/editorial-ste
 import * as steeringStore from '@/lib/editorial-steering';
 import * as storageStore from '@/lib/kv-storage';
 import { compactOriginalRepetitionContext } from '@/lib/original-repetition';
+import * as editorialContextStore from '@/lib/original-editorial-context';
+import { AUTHORED_VOICE_POLICY_VERSION } from '@/lib/authored-voice-policy';
 
 const harness = vi.hoisted(() => ({
   generate: vi.fn(), finalOverall: .99, malformed: false, copyVerdict: 'clear', firstCopyUncertain: false,
@@ -497,6 +499,70 @@ describe('durable repetition comparison context', () => {
     const [first, second] = harness.generate.mock.calls.map(([options]) => options);
     expect(second.prompt).toBe(first.prompt);
     expect(second.spendContext?.requestKey).toBe(first.spendContext?.requestKey);
+  });
+});
+
+describe('authored voice in the production adapter', () => {
+  it('freezes distinct subject-selected examples and sends exact selected text to writer and judge', async () => {
+    const references = [
+      { xTweetId: 'startup-a', topic: 'startups', content: 'founder updates are useful when they include the actual bad news' },
+      { xTweetId: 'startup-b', topic: 'investing', content: 'i bought more memory stocks but did not swing big enough' },
+      { xTweetId: 'startup-c', topic: 'startups', content: 'would an investor take this meeting without a deck?' },
+      { xTweetId: 'ai-a', topic: 'AI', content: 'did anyone get more utility out of the new model?' },
+      { xTweetId: 'ai-b', topic: 'AI', content: 'ai will rule the world through human shells' },
+      { xTweetId: 'ai-c', topic: 'AI', content: 'i want the inference job to run while i sleep' },
+    ].map(row => ({ ...row, source: 'manual', authorshipProvenance: 'operator_composed', voiceCorpusDispositions: ['diction_anchor'] }));
+    const selected: string[][] = [];
+    for (const topic of ['AI', 'startups']) {
+      const input = await setup();
+      input.voiceProfile.topics = ['AI', 'startups'];
+      input.learnings!.operatorVoiceReference = { ...input.learnings!.operatorVoiceReference!, pinnedExamples: [], startupRegisterExamples: references as any, bestPerformers: references as any };
+      await saveEditorialSteering(input.agentId, 'owner', { requestId: `voice-${topic}`, kind: 'topic', scope: 'one_off', topic, instruction: `Try ${topic}.` });
+      const firstCall = harness.generate.mock.calls.length;
+      expect(await generateOriginalProduction(input)).toHaveLength(1);
+      const subject = (input.jobSession!.job.checkpoints.subjects_ready as any[])[0];
+      const context = subject.editorialContext;
+      expect(context.authoredVoicePolicy).toBe(AUTHORED_VOICE_POLICY_VERSION);
+      expect(context.exampleRefs).toHaveLength(3);
+      expect(context.exampleRefs.every((row: any) => row.selectionReason)).toBe(true);
+      const calls = harness.generate.mock.calls.slice(firstCall).map(([options]) => options);
+      expect(calls.map(options => options.task)).toEqual(['idea_generation', 'tweet_writing', 'copy_judgment']);
+      const writer = JSON.parse(calls[1].prompt), judge = JSON.parse(calls[2].prompt);
+      expect(writer.context.voiceExamples).toEqual(context.voiceExamples);
+      expect(judge.originalEditorialContext.voiceExamples).toEqual(context.voiceExamples);
+      expect(judge.originalEditorialContext.authoredVoicePolicy).toBe(AUTHORED_VOICE_POLICY_VERSION);
+      for (const options of calls) expect(options.system).toContain('actual authored voiceExamples are the primary evidence');
+      selected.push(context.exampleRefs.map((row: any) => row.id));
+    }
+    expect(selected[0].slice(0, 2).every(id => id.startsWith('ai-'))).toBe(true);
+    expect(selected[1].slice(0, 2).every(id => id.startsWith('startup-'))).toBe(true);
+    expect(selected[0]).not.toEqual(selected[1]);
+  });
+
+  it('replays a paid unmarked context without adding new voice policy or changing request bytes', async () => {
+    const input = await setup('13');
+    const original = editorialContextStore.buildOriginalEditorialContext;
+    const builder = vi.spyOn(editorialContextStore, 'buildOriginalEditorialContext').mockImplementation(options => {
+      const context = original(options); delete context.authoredVoicePolicy; return context;
+    });
+    const successful = harness.generate.getMockImplementation()!;
+    let pending = true;
+    harness.generate.mockImplementation(async options => {
+      if (options.task === 'copy_judgment' && pending) { pending = false; throw new Error('provider_pending'); }
+      return successful(options);
+    });
+    try { await expect(generateOriginalProduction(input)).rejects.toThrow('provider_pending'); }
+    finally { builder.mockRestore(); }
+    const frozen = structuredClone(input.jobSession!.job.checkpoints.subjects_ready);
+    expect(JSON.stringify(frozen)).not.toContain('authoredVoicePolicy');
+    expect(await generateOriginalProduction(input)).toHaveLength(1);
+    expect(input.jobSession!.job.checkpoints.subjects_ready).toEqual(frozen);
+    const calls = harness.generate.mock.calls.map(([options]) => options);
+    expect(calls.map(options => options.task)).toEqual(['idea_generation', 'tweet_writing', 'copy_judgment', 'copy_judgment']);
+    expect(calls.every(options => !options.system.includes('actual authored voiceExamples are the primary evidence'))).toBe(true);
+    expect(calls[3].system).toBe(calls[2].system);
+    expect(calls[3].prompt).toBe(calls[2].prompt);
+    expect(calls[3].spendContext?.requestKey).toBe(calls[2].spendContext?.requestKey);
   });
 });
 

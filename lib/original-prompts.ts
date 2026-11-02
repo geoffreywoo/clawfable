@@ -1,5 +1,6 @@
 import type { OriginalEditorialContext } from './original-editorial-context';
 import { compactOriginalRepetitionContext } from './original-repetition';
+import { AUTHORED_VOICE_POLICY_VERSION, authoredVoiceInstruction } from './authored-voice-policy';
 
 export const ORIGINAL_PROMPT_VERSION = 'original-prompts-3';
 export const ORIGINAL_VARIANTS_PER_SUBJECT = 3;
@@ -71,6 +72,7 @@ export function originalModelContext(context: OriginalEditorialContext) {
     stylePreferences: context.stylePreferences.map(rule => rule.text),
     supportedFacts: context.supportedFacts, unresolvedClaims: context.unresolvedClaims,
     previousPremises: context.previousPremises, voiceExamples: context.voiceExamples,
+    ...(context.authoredVoicePolicy === AUTHORED_VOICE_POLICY_VERSION ? { authoredVoicePolicy: context.authoredVoicePolicy } : {}),
     ...(context.repetitionHistory ? { repetitionHistory: compactOriginalRepetitionContext(context.repetitionHistory) } : {}),
     ...(context.editorialSteering?.length ? { editorialSteering: context.editorialSteering.map(({ id, kind, instruction, scope, topic }) => ({ id, kind, instruction, scope, ...(topic ? { topic } : {}) })) } : {}),
     ...(context.acceptedEdits?.length ? { acceptedEdits: context.acceptedEdits.map(({ signalId, before, after, lesson }) => ({ signalId, before, after, lesson })) } : {}),
@@ -101,8 +103,9 @@ export function buildOriginalIdeationPrompt(subjects: Array<{ briefId: string; c
   const schema = structuredClone(ORIGINAL_IDEATION_SCHEMA) as any;
   schema.properties.ideas.minItems = schema.properties.ideas.maxItems = subjects.length * ORIGINAL_VARIANTS_PER_SUBJECT;
   schema.properties.ideas.items.properties.briefId.enum = subjects.map(subject => subject.briefId);
+  const voiceInstruction = subjects.map(subject => authoredVoiceInstruction(subject.context)).find(Boolean) || '';
   return {
-    system: `${SHARED_INSTRUCTIONS}${subjects.some(subject => subject.context.repetitionHistory) ? ` ${REPETITION_INSTRUCTIONS}` : ''}
+    system: `${SHARED_INSTRUCTIONS}${subjects.some(subject => subject.context.repetitionHistory) ? ` ${REPETITION_INSTRUCTIONS}` : ''}${voiceInstruction ? ` ${voiceInstruction}` : ''}
 Merge sharedContext into each subject context; append subject ownerRestrictions to shared rules. Propose three distinct thoughts per briefId. Choose only permittedModes; contentMode is a default. publicMove is one specific judgment, question or consequence; differ in thought, not wording. Rank author fit, substance, interest and originality together; rankScore allocates writing, never publication approval. Keep supportingReasoning private, short or null. Return only required JSON. ${ORIGINAL_PROMPT_VERSION}.`,
     prompt: JSON.stringify(factoredSubjects(subjects)),
     jsonSchema: schema,
@@ -123,8 +126,9 @@ export function buildOriginalWritingPrompt(input: {
   const schema = structuredClone(ORIGINAL_WRITING_SCHEMA) as any;
   schema.properties.drafts.items.properties.ideaId.enum = [idea.id];
   schema.properties.drafts.items.properties.content.maxLength = maxCharacters;
+  const voiceInstruction = authoredVoiceInstruction(context);
   return {
-    system: `${SHARED_INSTRUCTIONS}${context.repetitionHistory ? ` ${REPETITION_INSTRUCTIONS}` : ''}
+    system: `${SHARED_INSTRUCTIONS}${context.repetitionHistory ? ` ${REPETITION_INSTRUCTIONS}` : ''}${voiceInstruction ? ` ${voiceInstruction}` : ''}
 Write three alternatives to the selected thought, all with its ideaId, judgment, contentMode and factual boundary. Vary wording and shape, never facts. Preserve attribution in every variant. supportingReasoning explains the thought; it is not evidence. Stop when complete, without a forced lesson or closing slogan. At most ${maxCharacters} characters each. format and posture are private metadata. Return only required JSON. ${ORIGINAL_PROMPT_VERSION}.`,
     prompt: JSON.stringify({ idea, context: originalModelContext(context) }),
     jsonSchema: schema,
